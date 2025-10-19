@@ -126,4 +126,6 @@ def solve_poisson_system(
     elif info < 0:
         raise RuntimeError(f"CG failed with error code {info}")
     
+    #phi_flat = multilevel_solver.solve(rhs, tol=1e-5, maxiter=100, cycle='V') #slightly faster
+
     return phi_flat.reshape(height, width)
