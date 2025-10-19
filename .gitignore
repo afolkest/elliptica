@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 LineIntegralConvolutions
+CLAUDE.md
 
 # C extensions
 *.so
