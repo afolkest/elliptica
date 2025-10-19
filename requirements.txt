@@ -3,3 +3,4 @@ matplotlib
 rLIC
 numba
 scipy
+pyamg

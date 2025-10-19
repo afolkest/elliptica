@@ -7,6 +7,9 @@ from pyamg import smoothed_aggregation_solver
 DIRICHLET = 0
 NEUMANN = 1
 
+PRECISION = np.float64 
+SOLVER_TOL = 1e-5  
+
 @numba.jit(nopython=True, cache=True)
 def _build_poisson_system(
     height, 
@@ -33,10 +36,10 @@ def _build_poisson_system(
     col_index = np.empty(total_nonzero, dtype=np.int32)
 
     #sparse matrix operator, equal to laplacian except at or adjacent to conductors
-    almost_laplacian = np.empty(total_nonzero, dtype=np.float64)
+    almost_laplacian = np.empty(total_nonzero, dtype=PRECISION)
 
     #rhs, equalling negative charge density except at or adjacent to conductor 
-    rhs = np.empty(N, dtype=np.float64)
+    rhs = np.empty(N, dtype=PRECISION)
 
     n_nonzero = 0 
 
@@ -83,7 +86,7 @@ def _build_poisson_system(
 def solve_poisson_system(
     dirichlet_mask,
     dirichlet_values,
-    tol = 1e-5,
+    tol = SOLVER_TOL,
     maxiter = 2000,
     boundary_type=DIRICHLET,
     charge_density=None
@@ -91,7 +94,11 @@ def solve_poisson_system(
 
     height, width = dirichlet_mask.shape
     if charge_density is None:
-        charge_density = np.zeros((height, width))
+        charge_density = np.zeros((height, width), dtype=PRECISION)
+    else:
+        charge_density = charge_density.astype(PRECISION)
+
+    dirichlet_values = dirichlet_values.astype(PRECISION)
 
     row_index, col_index, almost_laplacian, rhs = _build_poisson_system(
         height, 
@@ -103,7 +110,7 @@ def solve_poisson_system(
     )
 
     N = height * width
-    A = coo_matrix((almost_laplacian, (row_index, col_index)), shape=(N, N), dtype=np.float64).tocsr()
+    A = coo_matrix((almost_laplacian, (row_index, col_index)), shape=(N, N), dtype=PRECISION).tocsr()
     multilevel_solver = smoothed_aggregation_solver(
         A,
         strength="symmetric",
@@ -112,7 +119,7 @@ def solve_poisson_system(
     )
     preconditioner  = multilevel_solver.aspreconditioner() #preconditioner
 
-    phi_flat, info = cg(A, rhs, M=preconditioner, tol=tol, maxiter=maxiter)
+    phi_flat, info = cg(A, rhs.astype(PRECISION), M=preconditioner, rtol=tol, maxiter=maxiter)
 
     if info > 0:
         print(f"Warning: poisson solve not converged")
