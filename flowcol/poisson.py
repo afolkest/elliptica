@@ -1,5 +1,11 @@
 import numba
 import numpy as np
+from scipy.sparse import coo_matrix
+from scipy.sparse.linalg import cg
+from pyamg import smoothed_aggregation_solver
+
+DIRICHLET = 0
+NEUMANN = 1
 
 @numba.jit(nopython=True, cache=True)
 def _build_poisson_system(
@@ -8,6 +14,7 @@ def _build_poisson_system(
     dirichlet_mask,
     dirichlet_voltage,
     charge_density, 
+    boundary_type=DIRICHLET
     ):
     """ 
 
@@ -46,11 +53,7 @@ def _build_poisson_system(
 
                 rhs[k] = dirichlet_voltage[i, j]
             else:
-                row_index[n_nonzero] = k
-                col_index[n_nonzero] = k
-                almost_laplacian[n_nonzero] = -4.0 #diagonal entry
-                n_nonzero += 1 
-
+                diagonal = -4.0 
                 rhs[k] = -charge_density[i, j]
 
                 #off-diagonal entries
@@ -66,5 +69,54 @@ def _build_poisson_system(
                             col_index[n_nonzero] = kk
                             almost_laplacian[n_nonzero] = 1.0 
                             n_nonzero += 1
+                    elif boundary_type == NEUMANN:
+                        diagonal += 1
+
+                row_index[n_nonzero] = k
+                col_index[n_nonzero] = k
+                almost_laplacian[n_nonzero] = diagonal 
+                n_nonzero += 1 
+
 
     return row_index[:n_nonzero], col_index[:n_nonzero], almost_laplacian[:n_nonzero], rhs
+
+def solve_poisson_system(
+    dirichlet_mask,
+    dirichlet_values,
+    tol = 1e-5,
+    maxiter = 2000,
+    boundary_type=DIRICHLET,
+    charge_density=None
+):
+
+    height, width = dirichlet_mask.shape
+    if charge_density is None:
+        charge_density = np.zeros((height, width))
+
+    row_index, col_index, almost_laplacian, rhs = _build_poisson_system(
+        height, 
+        width,
+        dirichlet_mask,
+        dirichlet_values,
+        charge_density,
+        boundary_type 
+    )
+
+    N = height * width
+    A = coo_matrix((almost_laplacian, (row_index, col_index)), shape=(N, N), dtype=np.float64).tocsr()
+    multilevel_solver = smoothed_aggregation_solver(
+        A,
+        strength="symmetric",
+        max_coarse=10,
+        max_levels=10
+    )
+    preconditioner  = multilevel_solver.aspreconditioner() #preconditioner
+
+    phi_flat, info = cg(A, rhs, M=preconditioner, tol=tol, maxiter=maxiter)
+
+    if info > 0:
+        print(f"Warning: poisson solve not converged")
+    elif info < 0:
+        raise RuntimeError(f"CG failed with error code {info}")
+    
+    return phi_flat.reshape(height, width)
