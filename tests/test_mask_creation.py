@@ -12,7 +12,7 @@ masks_dir.mkdir(parents=True, exist_ok=True)
 
 mask = load_alpha(source_path)
 
-thickness = 7
+thickness = 3
 shell, interior = create_masks(mask, thickness)
 
 assert (shell + interior == mask).all(), "Shell + interior should equal original mask"
