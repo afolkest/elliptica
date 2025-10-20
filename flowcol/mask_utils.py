@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
 
-def load_alpha(path: str, threshold: float = 0.5):
+def load_alpha(path: str, threshold: float = 0.8):
     """Load PNG alpha channel as binary mask."""
     img = Image.open(path).convert('RGBA')
     alpha = np.array(img)[..., 3] / 255.0
@@ -13,7 +13,7 @@ def create_masks(mask, thickness):
     """Partition mask into shell and interior"""
     dist = distance_transform_edt(mask)
     interior = (dist > thickness).astype(np.float32)
-    shell = (mask & (dist <= thickness)).astype(np.float32)
+    shell = (mask * (dist <= thickness)).astype(np.float32)
     return shell, interior
 
 def save_mask(mask: np.ndarray, path: str):
