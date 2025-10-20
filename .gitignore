@@ -6,6 +6,7 @@ __pycache__/
 LineIntegralConvolutions
 CLAUDE.md
 assets
+renders
 
 # C extensions
 *.so
