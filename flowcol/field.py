@@ -13,8 +13,8 @@ def compute_field(project: Project, multiplier: int = 1) -> tuple[np.ndarray, np
     dirichlet_values = np.zeros((field_h, field_w), dtype=float)
 
     for conductor in project.conductors:
-        x = round(conductor.position[0] * multiplier)
-        y = round(conductor.position[1] * multiplier)
+        x = conductor.position[0] * multiplier
+        y = conductor.position[1] * multiplier
 
         if multiplier > 1:
             scaled_mask = zoom(conductor.mask, multiplier, order=1)
@@ -23,10 +23,11 @@ def compute_field(project: Project, multiplier: int = 1) -> tuple[np.ndarray, np
 
         mask_h, mask_w = scaled_mask.shape
 
-        x0, y0 = max(0, x), max(0, y)
-        x1, y1 = min(x + mask_w, field_w), min(y + mask_h, field_h)
+        ix, iy = int(round(x)), int(round(y))
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(ix + mask_w, field_w), min(iy + mask_h, field_h)
 
-        mx0, my0 = max(0, -x), max(0, -y)
+        mx0, my0 = max(0, -ix), max(0, -iy)
         mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
 
         mask_slice = scaled_mask[my0:my1, mx0:mx1]

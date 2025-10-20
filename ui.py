@@ -13,6 +13,8 @@ BG_COLOR = (20, 20, 20)
 CONDUCTOR_COLORS = [(100, 150, 255, 180), (255, 100, 150, 180), (150, 255, 100, 180), (255, 200, 100, 180)]
 SELECTED_COLOR = (255, 255, 100, 200)
 
+MAX_RENDER_DIM = 32768
+
 
 def mask_to_surface(mask: np.ndarray, color: tuple) -> pygame.Surface:
     """Convert mask array to pygame surface with color."""
@@ -97,32 +99,37 @@ def main():
 
         action = panel(screen, project, state, mouse_pos, mouse_down)
 
-        if state.render_mode == "edit":
+        if action == -2:
             expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
-            if screen.get_size() != expected_window:
-                screen = pygame.display.set_mode(expected_window)
-
-        if action and action > 0:
-            ex, ey = compute_field(project, action)
-            lic_array = compute_lic(ex, ey, project)
-            save_render(lic_array, project, action)
-
-            state.current_render_data = lic_array
-            state.current_render_multiplier = action
-            state.render_mode = "render"
-
-            render_h, render_w = lic_array.shape
+            screen = pygame.display.set_mode(expected_window)
+        elif action and action > 0:
             canvas_w, canvas_h = project.canvas_resolution
+            render_w, render_h = canvas_w * action, canvas_h * action
 
-            full_surface = array_to_surface(lic_array)
-            if render_w <= canvas_w and render_h <= canvas_h:
-                state.rendered_surface = full_surface
+            if render_w > MAX_RENDER_DIM or render_h > MAX_RENDER_DIM:
+                pass
             else:
-                scale = min(canvas_w / render_w, canvas_h / render_h)
-                display_w, display_h = int(render_w * scale), int(render_h * scale)
-                state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
+                ex, ey = compute_field(project, action)
+                lic_array = compute_lic(ex, ey, project)
+                save_render(lic_array, project, action)
+
+                state.current_render_data = lic_array
+                state.current_render_multiplier = action
+                state.render_mode = "render"
+
+                render_h, render_w = lic_array.shape
+
+                full_surface = array_to_surface(lic_array)
+                if render_w <= canvas_w and render_h <= canvas_h:
+                    state.rendered_surface = full_surface
+                else:
+                    scale = min(canvas_w / render_w, canvas_h / render_h)
+                    display_w, display_h = int(render_w * scale), int(render_h * scale)
+                    state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
         elif action == -1:
             state.render_mode = "edit"
+            expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
+            screen = pygame.display.set_mode(expected_window)
 
         pygame.display.flip()
         clock.tick(60)

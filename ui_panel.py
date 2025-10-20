@@ -5,6 +5,8 @@ from pathlib import Path
 from flowcol.types import Conductor
 from flowcol.mask_utils import load_conductor_masks
 
+MAX_CANVAS_DIM = 8192
+
 
 def button(screen, x, y, w, h, text, mouse_pos, clicked):
     """Draw button, return True if just clicked."""
@@ -48,7 +50,7 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
 
 
 def panel(screen, project, state, mouse_pos, mouse_down):
-    """Draw control panel. Returns multiplier if render requested, -1 if back to edit, else None."""
+    """Draw control panel. Returns multiplier if render requested, -1 if back to edit, -2 if canvas resized, else None."""
     panel_x = project.canvas_resolution[0] + 10
     y = 10
     action = None
@@ -64,16 +66,24 @@ def panel(screen, project, state, mouse_pos, mouse_down):
                 mask, interior = load_conductor_masks(path)
                 mask_h, mask_w = mask.shape
 
+                if mask_w > MAX_CANVAS_DIM or mask_h > MAX_CANVAS_DIM:
+                    return action
+
+                canvas_changed = False
                 if len(project.conductors) == 0:
                     canvas_w, canvas_h = project.canvas_resolution
                     new_w = max(canvas_w, mask_w)
                     new_h = max(canvas_h, mask_h)
-                    project.canvas_resolution = (new_w, new_h)
+                    if (new_w, new_h) != project.canvas_resolution:
+                        project.canvas_resolution = (new_w, new_h)
+                        canvas_changed = True
 
                 canvas_w, canvas_h = project.canvas_resolution
                 pos = ((canvas_w - mask_w) / 2.0, (canvas_h - mask_h) / 2.0)
                 project.conductors.append(Conductor(mask=mask, voltage=0.0, position=pos, interior_mask=interior))
                 state.field_dirty = True
+                if canvas_changed:
+                    action = -2
 
         y += 45
 
