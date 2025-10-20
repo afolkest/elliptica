@@ -1,5 +1,6 @@
 
 import numpy as np
+from pathlib import Path
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
 
@@ -8,6 +9,14 @@ def load_alpha(path: str, threshold: float = 0.8):
     img = Image.open(path).convert('RGBA')
     alpha = np.array(img)[..., 3] / 255.0
     return (alpha > threshold).astype(np.float32)
+
+def load_conductor_masks(shell_path: str):
+    """Load shell mask and try to load matching interior mask."""
+    shell = load_alpha(shell_path)
+    interior_path = Path(shell_path).parent / Path(shell_path).stem.replace("_shell", "_interior")
+    interior_path = interior_path.with_suffix(".png")
+    interior = load_alpha(str(interior_path)) if interior_path.exists() else None
+    return shell, interior
 
 def create_masks(mask, thickness):
     """Partition mask into shell and interior"""
