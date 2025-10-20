@@ -28,7 +28,7 @@ def point_in_conductor(pos: tuple[int, int], conductor: Conductor) -> bool:
     """Check if point is inside conductor mask."""
     x, y = pos
     h, w = conductor.mask.shape
-    cx, cy = conductor.position
+    cx, cy = round(conductor.position[0]), round(conductor.position[1])
     if x < cx or x >= cx + w or y < cy or y >= cy + h:
         return False
     return conductor.mask[int(y - cy), int(x - cx)] > 0.5
@@ -70,8 +70,8 @@ def main():
                 state.mouse_dragging = False
             elif event.type == pygame.MOUSEMOTION:
                 if state.mouse_dragging and state.selected_idx >= 0:
-                    dx = mouse_pos[0] - state.last_mouse_pos[0]
-                    dy = mouse_pos[1] - state.last_mouse_pos[1]
+                    dx = float(mouse_pos[0] - state.last_mouse_pos[0])
+                    dy = float(mouse_pos[1] - state.last_mouse_pos[1])
                     conductor = project.conductors[state.selected_idx]
                     conductor.position = (conductor.position[0] + dx, conductor.position[1] + dy)
                     state.last_mouse_pos = mouse_pos
@@ -89,7 +89,8 @@ def main():
         if state.render_mode == "edit":
             for i, conductor in enumerate(project.conductors):
                 color = SELECTED_COLOR if i == state.selected_idx else CONDUCTOR_COLORS[i % len(CONDUCTOR_COLORS)]
-                screen.blit(mask_to_surface(conductor.mask, color), conductor.position)
+                pos = (round(conductor.position[0]), round(conductor.position[1]))
+                screen.blit(mask_to_surface(conductor.mask, color), pos)
         else:
             if state.rendered_surface:
                 screen.blit(state.rendered_surface, (0, 0))
