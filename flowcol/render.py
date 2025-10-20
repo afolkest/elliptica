@@ -7,7 +7,7 @@ from flowcol.types import Project, RenderInfo
 from flowcol.lic import convolve, get_cosine_kernel
 
 
-def compute_lic(ex, ey, project: Project) -> np.ndarray:
+def compute_lic(ex, ey, project: Project, num_passes: int = 1) -> np.ndarray:
     """Compute LIC visualization. Returns normalized grayscale array [0, 1]."""
     field_h, field_w = ex.shape
 
@@ -19,7 +19,7 @@ def compute_lic(ex, ey, project: Project) -> np.ndarray:
     vy = (ey / mag_max).astype(np.float32)
 
     kernel = get_cosine_kernel(project.streamlength).astype(np.float32)
-    lic_result = convolve(texture, vx, vy, kernel, iterations=1)
+    lic_result = convolve(texture, vx, vy, kernel, iterations=num_passes)
 
     return np.clip(lic_result, 0, 1)
 

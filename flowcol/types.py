@@ -38,6 +38,10 @@ class UIState:
     current_render_multiplier: int = 1
     rendered_surface: Optional[object] = None
 
+    render_menu_open: bool = False
+    selected_multiplier: int = 1
+    num_lic_passes: int = 1
+    passes_input_focused: bool = False
 
     selected_idx: int = -1
     mouse_dragging: bool = False

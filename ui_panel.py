@@ -21,6 +21,19 @@ def button(screen, x, y, w, h, text, mouse_pos, clicked):
     return hover and clicked
 
 
+def text_input(screen, x, y, w, h, value, mouse_pos, clicked):
+    """Draw simple text input box. Returns new value or None if unchanged."""
+    rect = pygame.Rect(x, y, w, h)
+    hover = rect.collidepoint(mouse_pos)
+    color = (70, 70, 70) if hover else (40, 40, 40)
+    pygame.draw.rect(screen, color, rect)
+    pygame.draw.rect(screen, (100, 100, 100), rect, 1)
+    font = pygame.font.Font(None, 24)
+    text_surf = font.render(str(value), True, (200, 200, 200))
+    screen.blit(text_surf, (x + 10, y + (h - text_surf.get_height()) // 2))
+    return None
+
+
 def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, mouse_down):
     """Draw slider, return (new_value, is_dragging)."""
     font = pygame.font.Font(None, 20)
@@ -49,8 +62,112 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
     return (value, False)
 
 
+def render_menu(screen, state, mouse_pos, mouse_down, event_key):
+    """Draw render config overlay. Returns multiplier if confirmed, -999 if cancelled, None otherwise."""
+    screen_w, screen_h = screen.get_size()
+
+    # Backdrop
+    backdrop = pygame.Surface((screen_w, screen_h))
+    backdrop.set_alpha(180)
+    backdrop.fill((0, 0, 0))
+    screen.blit(backdrop, (0, 0))
+
+    # Menu panel
+    menu_w, menu_h = 340, 330
+    menu_x = (screen_w - menu_w) // 2
+    menu_y = (screen_h - menu_h) // 2
+    pygame.draw.rect(screen, (40, 40, 40), (menu_x, menu_y, menu_w, menu_h))
+    pygame.draw.rect(screen, (100, 100, 100), (menu_x, menu_y, menu_w, menu_h), 2)
+
+    y = menu_y + 20
+    font = pygame.font.Font(None, 28)
+    title = font.render("Render Settings", True, (220, 220, 220))
+    screen.blit(title, (menu_x + (menu_w - title.get_width()) // 2, y))
+    y += 50
+
+    # Multiplier buttons
+    font = pygame.font.Font(None, 22)
+    label = font.render("Resolution Multiplier:", True, (200, 200, 200))
+    screen.blit(label, (menu_x + 20, y))
+    y += 30
+
+    # Draw multiplier buttons with proper spacing
+    button_w = 60
+    total_buttons = 4
+    spacing = (menu_w - 40 - total_buttons * button_w) // (total_buttons - 1)
+    for i, mult in enumerate([1, 2, 4, 8]):
+        btn_x = menu_x + 20 + i * (button_w + spacing)
+        rect = pygame.Rect(btn_x, y, button_w, 35)
+        hover = rect.collidepoint(mouse_pos)
+        is_selected = (state.selected_multiplier == mult)
+
+        if is_selected:
+            color = (100, 120, 255)
+        elif hover:
+            color = (80, 80, 80)
+        else:
+            color = (50, 50, 50)
+
+        pygame.draw.rect(screen, color, rect)
+        pygame.draw.rect(screen, (100, 100, 100), rect, 1)
+
+        font_btn = pygame.font.Font(None, 24)
+        text_surf = font_btn.render(f"{mult}×", True, (200, 200, 200))
+        screen.blit(text_surf, (btn_x + (button_w - text_surf.get_width()) // 2, y + (35 - text_surf.get_height()) // 2))
+
+        if hover and mouse_down:
+            state.selected_multiplier = mult
+
+    y += 50
+
+    # LIC passes input
+    label = font.render("LIC Passes:", True, (200, 200, 200))
+    screen.blit(label, (menu_x + 20, y))
+    y += 30
+
+    input_rect = pygame.Rect(menu_x + 20, y, 80, 35)
+    input_hover = input_rect.collidepoint(mouse_pos)
+
+    if input_hover and mouse_down:
+        state.passes_input_focused = True
+
+    color = (70, 70, 70) if state.passes_input_focused else (40, 40, 40)
+    pygame.draw.rect(screen, color, input_rect)
+    pygame.draw.rect(screen, (100, 100, 100), input_rect, 2 if state.passes_input_focused else 1)
+
+    font_input = pygame.font.Font(None, 24)
+    display_text = str(state.num_lic_passes) if state.num_lic_passes > 0 else ""
+    text_surf = font_input.render(display_text, True, (200, 200, 200))
+    screen.blit(text_surf, (menu_x + 30, y + (35 - text_surf.get_height()) // 2))
+
+    # Handle keyboard input for number
+    if state.passes_input_focused and event_key:
+        if event_key == pygame.K_BACKSPACE:
+            state.num_lic_passes = state.num_lic_passes // 10
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            digit = event_key - pygame.K_0
+            if state.num_lic_passes == 0:
+                state.num_lic_passes = digit
+            else:
+                new_val = state.num_lic_passes * 10 + digit
+                if new_val <= 99:
+                    state.num_lic_passes = new_val
+
+    y += 55
+
+    # Render and Cancel buttons
+    action = None
+    if button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down):
+        action = state.selected_multiplier
+
+    if button(screen, menu_x + 160, y, 130, 35, "Cancel", mouse_pos, mouse_down):
+        action = -999
+
+    return action
+
+
 def panel(screen, project, state, mouse_pos, mouse_down):
-    """Draw control panel. Returns: 1/2/4/8 for render, -1 for back to edit, -2 for resize, -3 for reset, None otherwise."""
+    """Draw control panel. Returns: 1/2/4/8 for render, -1 for back to edit, -2 for resize, -3 for reset, -999 for cancel menu, None otherwise."""
     panel_x = project.canvas_resolution[0] + 10
     y = 10
     action = None
@@ -87,17 +204,10 @@ def panel(screen, project, state, mouse_pos, mouse_down):
 
         y += 45
 
-        font = pygame.font.Font(None, 22)
-        title = font.render("Render:", True, (220, 220, 220))
-        screen.blit(title, (panel_x, y))
-        y += 30
+        if button(screen, panel_x, y, 180, 35, "Render...", mouse_pos, mouse_down):
+            state.render_menu_open = True
 
-        for mult in [1, 2, 4, 8]:
-            if button(screen, panel_x, y, 85, 30, f"{mult}×", mouse_pos, mouse_down):
-                action = mult
-            y += 35
-
-        y += 15
+        y += 50
     else:
         if button(screen, panel_x, y, 180, 35, "Back to Edit", mouse_pos, mouse_down):
             action = -1

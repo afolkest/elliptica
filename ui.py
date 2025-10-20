@@ -7,7 +7,7 @@ from PIL import Image
 from flowcol.types import Conductor, Project, UIState
 from flowcol.field import compute_field
 from flowcol.render import compute_lic, array_to_surface, save_render
-from ui_panel import panel
+from ui_panel import panel, render_menu
 
 BG_COLOR = (20, 20, 20)
 CONDUCTOR_COLORS = [(100, 150, 255, 180), (255, 100, 150, 180), (150, 255, 100, 180), (255, 200, 100, 180)]
@@ -54,6 +54,7 @@ def main():
     while running:
         mouse_pos = pygame.mouse.get_pos()
         mouse_down = False
+        key_pressed = None
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -79,8 +80,15 @@ def main():
                     state.last_mouse_pos = mouse_pos
                     state.field_dirty = True
             elif event.type == pygame.KEYDOWN:
+                key_pressed = event.key
                 if event.key == pygame.K_ESCAPE:
-                    running = False
+                    if state.render_menu_open:
+                        state.render_menu_open = False
+                        state.passes_input_focused = False
+                        if state.num_lic_passes == 0:
+                            state.num_lic_passes = 1
+                    else:
+                        running = False
                 elif event.key == pygame.K_DELETE and state.selected_idx >= 0:
                     del project.conductors[state.selected_idx]
                     state.selected_idx = -1
@@ -99,6 +107,20 @@ def main():
 
         action = panel(screen, project, state, mouse_pos, mouse_down)
 
+        if state.render_menu_open:
+            menu_action = render_menu(screen, state, mouse_pos, mouse_down, key_pressed)
+            if menu_action == -999:
+                state.render_menu_open = False
+                state.passes_input_focused = False
+                if state.num_lic_passes == 0:
+                    state.num_lic_passes = 1
+            elif menu_action and menu_action > 0:
+                action = menu_action
+                state.render_menu_open = False
+                state.passes_input_focused = False
+                if state.num_lic_passes == 0:
+                    state.num_lic_passes = 1
+
         if action == -2:
             expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
             screen = pygame.display.set_mode(expected_window)
@@ -110,7 +132,8 @@ def main():
                 pass
             else:
                 ex, ey = compute_field(project, action)
-                lic_array = compute_lic(ex, ey, project)
+                num_passes = max(1, state.num_lic_passes)
+                lic_array = compute_lic(ex, ey, project, num_passes)
                 save_render(lic_array, project, action)
 
                 state.original_render_data = lic_array.copy()
