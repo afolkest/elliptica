@@ -49,10 +49,7 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
 
 def panel(screen, project, state, mouse_pos, mouse_down):
     """Draw control panel. Returns multiplier if render requested, -1 if back to edit, else None."""
-    if state.render_mode == "edit":
-        panel_x = project.canvas_resolution[0] + 10
-    else:
-        panel_x = 10
+    panel_x = project.canvas_resolution[0] + 10
     y = 10
     action = None
 
@@ -96,24 +93,25 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             action = -1
         y += 50
 
-    font = pygame.font.Font(None, 22)
-    title = font.render("Conductor Voltages:", True, (220, 220, 220))
-    screen.blit(title, (panel_x, y))
-    y += 30
+    if state.render_mode == "edit":
+        font = pygame.font.Font(None, 22)
+        title = font.render("Conductor Voltages:", True, (220, 220, 220))
+        screen.blit(title, (panel_x, y))
+        y += 30
 
-    for i, conductor in enumerate(project.conductors):
-        new_v, dragging = slider(
-            screen, panel_x, y, 180, f"C{i+1}",
-            conductor.voltage, -1.0, 1.0,
-            mouse_pos, state.slider_dragging == i, mouse_down
-        )
-        if new_v != conductor.voltage:
-            conductor.voltage = new_v
-            state.field_dirty = True
-        if dragging:
-            state.slider_dragging = i
-        elif state.slider_dragging == i and not dragging:
-            state.slider_dragging = -1
-        y += 40
+        for i, conductor in enumerate(project.conductors):
+            new_v, dragging = slider(
+                screen, panel_x, y, 180, f"C{i+1}",
+                conductor.voltage, -1.0, 1.0,
+                mouse_pos, state.slider_dragging == i, mouse_down
+            )
+            if new_v != conductor.voltage:
+                conductor.voltage = new_v
+                state.field_dirty = True
+            if dragging:
+                state.slider_dragging = i
+            elif state.slider_dragging == i and not dragging:
+                state.slider_dragging = -1
+            y += 40
 
     return action
