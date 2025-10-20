@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 from flowcol.types import Conductor, Project, UIState
 from flowcol.field import compute_field
-from flowcol.render import render_arrows, render_lic
+from flowcol.render import compute_lic, array_to_surface, save_render
 from ui_panel import panel
 
 BG_COLOR = (20, 20, 20)
@@ -38,10 +38,12 @@ def main():
     pygame.init()
 
     canvas_res = (800, 600)
-    window_res = (1020, 600)
+    panel_width = 220
 
     project = Project(canvas_resolution=canvas_res)
     state = UIState(project=project)
+
+    window_res = (canvas_res[0] + panel_width, canvas_res[1])
     screen = pygame.display.set_mode(window_res)
     pygame.display.set_caption("FlowCol")
     clock = pygame.time.Clock()
@@ -89,15 +91,42 @@ def main():
                 color = SELECTED_COLOR if i == state.selected_idx else CONDUCTOR_COLORS[i % len(CONDUCTOR_COLORS)]
                 screen.blit(mask_to_surface(conductor.mask, color), conductor.position)
         else:
-            if state.field_dirty:
-                ex, ey = compute_field(project)
-                state.field_cache = (ex, ey)
-                state.rendered_surface = render_lic(ex, ey, project)
-                state.field_dirty = False
             if state.rendered_surface:
                 screen.blit(state.rendered_surface, (0, 0))
 
-        panel(screen, project, state, mouse_pos, mouse_down)
+        action = panel(screen, project, state, mouse_pos, mouse_down)
+
+        if state.render_mode == "edit":
+            expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
+            if screen.get_size() != expected_window:
+                screen = pygame.display.set_mode(expected_window)
+
+        if action and action > 0:
+            ex, ey = compute_field(project, action)
+            lic_array = compute_lic(ex, ey, project)
+            save_render(lic_array, project, action)
+
+            state.current_render_data = lic_array
+            state.current_render_multiplier = action
+            state.render_mode = "render"
+
+            render_h, render_w = lic_array.shape
+            display_info = pygame.display.Info()
+            max_w, max_h = display_info.current_w - 100, display_info.current_h - 100
+
+            if render_w <= max_w and render_h <= max_h:
+                screen = pygame.display.set_mode((render_w, render_h))
+                state.rendered_surface = array_to_surface(lic_array)
+            else:
+                scale = min(max_w / render_w, max_h / render_h)
+                display_w, display_h = int(render_w * scale), int(render_h * scale)
+                screen = pygame.display.set_mode((display_w, display_h))
+                full_surface = array_to_surface(lic_array)
+                state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
+        elif action == -1:
+            state.render_mode = "edit"
+            expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
+            screen = pygame.display.set_mode(expected_window)
 
         pygame.display.flip()
         clock.tick(60)

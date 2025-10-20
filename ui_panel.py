@@ -48,32 +48,53 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
 
 
 def panel(screen, project, state, mouse_pos, mouse_down):
-    """Draw control panel."""
-    panel_x = project.canvas_resolution[0] + 10
+    """Draw control panel. Returns multiplier if render requested, -1 if back to edit, else None."""
+    if state.render_mode == "edit":
+        panel_x = project.canvas_resolution[0] + 10
+    else:
+        panel_x = 10
     y = 10
+    action = None
 
-    if button(screen, panel_x, y, 180, 35, "Load Conductor", mouse_pos, mouse_down):
-        result = subprocess.run([
-            'osascript', '-e',
-            'POSIX path of (choose file of type {"png"} with prompt "Select conductor mask")'
-        ], capture_output=True, text=True)
-        path = result.stdout.strip()
-        if path:
-            mask, interior = load_conductor_masks(path)
-            mask_h, mask_w = mask.shape
-            canvas_w, canvas_h = project.canvas_resolution
-            pos = ((canvas_w - mask_w) // 2, (canvas_h - mask_h) // 2)
-            project.conductors.append(Conductor(mask=mask, voltage=0.0, position=pos, interior_mask=interior))
-            state.field_dirty = True
+    if state.render_mode == "edit":
+        if button(screen, panel_x, y, 180, 35, "Load Conductor", mouse_pos, mouse_down):
+            result = subprocess.run([
+                'osascript', '-e',
+                'POSIX path of (choose file of type {"png"} with prompt "Select conductor mask")'
+            ], capture_output=True, text=True)
+            path = result.stdout.strip()
+            if path:
+                mask, interior = load_conductor_masks(path)
+                mask_h, mask_w = mask.shape
 
-    y += 45
+                if len(project.conductors) == 0:
+                    canvas_w, canvas_h = project.canvas_resolution
+                    new_w = max(canvas_w, mask_w)
+                    new_h = max(canvas_h, mask_h)
+                    project.canvas_resolution = (new_w, new_h)
 
-    if button(screen, panel_x, y, 180, 35, f"Mode: {state.render_mode}", mouse_pos, mouse_down):
-        state.render_mode = "lic" if state.render_mode == "edit" else "edit"
-        if state.render_mode == "lic":
-            state.field_dirty = True
+                canvas_w, canvas_h = project.canvas_resolution
+                pos = ((canvas_w - mask_w) // 2, (canvas_h - mask_h) // 2)
+                project.conductors.append(Conductor(mask=mask, voltage=0.0, position=pos, interior_mask=interior))
+                state.field_dirty = True
 
-    y += 50
+        y += 45
+
+        font = pygame.font.Font(None, 22)
+        title = font.render("Render:", True, (220, 220, 220))
+        screen.blit(title, (panel_x, y))
+        y += 30
+
+        for mult in [1, 2, 4, 8]:
+            if button(screen, panel_x, y, 85, 30, f"{mult}×", mouse_pos, mouse_down):
+                action = mult
+            y += 35
+
+        y += 15
+    else:
+        if button(screen, panel_x, y, 180, 35, "Back to Edit", mouse_pos, mouse_down):
+            action = -1
+        y += 50
 
     font = pygame.font.Font(None, 22)
     title = font.render("Conductor Voltages:", True, (220, 220, 220))
@@ -94,3 +115,5 @@ def panel(screen, project, state, mouse_pos, mouse_down):
         elif state.slider_dragging == i and not dragging:
             state.slider_dragging = -1
         y += 40
+
+    return action

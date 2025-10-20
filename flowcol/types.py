@@ -10,14 +10,22 @@ class Conductor:
     mask: np.ndarray
     voltage: float
     position: tuple[float, float] = (0.0, 0.0)
-    interior_mask: Optional[np.ndarray] = None  
+    interior_mask: Optional[np.ndarray] = None
+
+
+@dataclass
+class RenderInfo:
+    multiplier: int
+    filepath: str
+    timestamp: str
 
 
 @dataclass
 class Project:
     conductors: list[Conductor] = field(default_factory=list)
-    canvas_resolution: tuple[int, int] = (1024, 1024)  
-    streamlength: int = 30          
+    canvas_resolution: tuple[int, int] = (1024, 1024)
+    streamlength: int = 30
+    renders: list[RenderInfo] = field(default_factory=list)          
 
 
 @dataclass
@@ -25,6 +33,8 @@ class UIState:
     project: Project
 
     render_mode: str = "edit"
+    current_render_data: Optional[np.ndarray] = None
+    current_render_multiplier: int = 1
     rendered_surface: Optional[object] = None
 
     selected_idx: int = -1
@@ -32,7 +42,6 @@ class UIState:
     slider_dragging: int = -1
     last_mouse_pos: tuple[int, int] = (0, 0)
 
-    field_cache: Optional[tuple[np.ndarray, np.ndarray]] = None
     field_dirty: bool = True
 
 
