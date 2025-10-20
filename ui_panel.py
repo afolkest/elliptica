@@ -50,7 +50,7 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
 
 
 def panel(screen, project, state, mouse_pos, mouse_down):
-    """Draw control panel. Returns multiplier if render requested, -1 if back to edit, -2 if canvas resized, else None."""
+    """Draw control panel. Returns: 1/2/4/8 for render, -1 for back to edit, -2 for resize, -3 for reset, None otherwise."""
     panel_x = project.canvas_resolution[0] + 10
     y = 10
     action = None
@@ -101,6 +101,10 @@ def panel(screen, project, state, mouse_pos, mouse_down):
     else:
         if button(screen, panel_x, y, 180, 35, "Back to Edit", mouse_pos, mouse_down):
             action = -1
+        y += 45
+
+        if button(screen, panel_x, y, 180, 35, "Reset to Original", mouse_pos, mouse_down):
+            action = -3
         y += 50
 
     if state.render_mode == "edit":

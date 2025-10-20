@@ -47,3 +47,27 @@ def save_render(arr: np.ndarray, project: Project, multiplier: int) -> RenderInf
     project.renders.append(render_info)
 
     return render_info
+
+
+def apply_contrast(arr: np.ndarray, factor: float) -> np.ndarray:
+    """Apply contrast adjustment. factor: 0.5-2.0, 1.0 = no change."""
+    mean = arr.mean()
+    return np.clip((arr - mean) * factor + mean, 0, 1)
+
+
+def apply_brightness(arr: np.ndarray, offset: float) -> np.ndarray:
+    """Apply brightness offset. offset: -0.5 to 0.5."""
+    return np.clip(arr + offset, 0, 1)
+
+
+def invert(arr: np.ndarray) -> np.ndarray:
+    """Invert grayscale values."""
+    return 1.0 - arr
+
+
+def apply_colormap(arr: np.ndarray, colormap_name: str) -> np.ndarray:
+    """Apply colormap to grayscale. Returns RGB array [0, 1]."""
+    import matplotlib.pyplot as plt
+    cmap = plt.get_cmap(colormap_name)
+    rgb = cmap(arr)[:, :, :3]
+    return rgb

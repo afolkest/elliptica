@@ -113,6 +113,7 @@ def main():
                 lic_array = compute_lic(ex, ey, project)
                 save_render(lic_array, project, action)
 
+                state.original_render_data = lic_array.copy()
                 state.current_render_data = lic_array
                 state.current_render_multiplier = action
                 state.render_mode = "render"
@@ -130,6 +131,10 @@ def main():
             state.render_mode = "edit"
             expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
             screen = pygame.display.set_mode(expected_window)
+        elif action == -3:
+            if state.original_render_data is not None:
+                state.current_render_data = state.original_render_data.copy()
+                state.rendered_surface = array_to_surface(state.current_render_data)
 
         pygame.display.flip()
         clock.tick(60)

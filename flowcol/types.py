@@ -33,9 +33,11 @@ class UIState:
     project: Project
 
     render_mode: str = "edit"
+    original_render_data: Optional[np.ndarray] = None
     current_render_data: Optional[np.ndarray] = None
     current_render_multiplier: int = 1
     rendered_surface: Optional[object] = None
+
 
     selected_idx: int = -1
     mouse_dragging: bool = False
