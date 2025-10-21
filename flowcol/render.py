@@ -9,6 +9,32 @@ from flowcol.types import RenderInfo, Project
 from flowcol.lic import convolve, get_cosine_kernel
 
 
+def generate_noise(shape: tuple[int, int], seed: int | None, oversample: float = 1.5) -> np.ndarray:
+    height, width = shape
+    if oversample <= 1.0:
+        rng = np.random.default_rng(seed)
+        base = rng.random((height, width)).astype(np.float32)
+        return base
+
+    rng = np.random.default_rng(seed)
+    high_h = max(1, int(round(height * oversample)))
+    high_w = max(1, int(round(width * oversample)))
+    high = rng.random((high_h, high_w)).astype(np.float32)
+
+    blurred = gaussian_filter(high, sigma=oversample)
+    filtered = high - blurred
+    scale_y = height / high_h
+    scale_x = width / high_w
+    base = zoom(filtered, (scale_y, scale_x), order=1)
+    base_min = float(base.min())
+    base_max = float(base.max())
+    if base_max > base_min:
+        base = (base - base_min) / (base_max - base_min)
+    else:
+        base = np.zeros_like(base)
+    return base.astype(np.float32)
+
+
 def compute_lic(
     ex: np.ndarray,
     ey: np.ndarray,
@@ -18,6 +44,7 @@ def compute_lic(
     texture: np.ndarray | None = None,
     seed: int | None = 0,
     boundaries: str = "closed",
+    noise_oversample: float = 1.5,
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1]."""
     field_h, field_w = ex.shape
@@ -25,8 +52,7 @@ def compute_lic(
     streamlength = max(int(streamlength), 1)
 
     if texture is None:
-        rng = np.random.default_rng(seed)
-        texture = rng.random((field_h, field_w)).astype(np.float32)
+        texture = generate_noise((field_h, field_w), seed, oversample=noise_oversample)
     else:
         texture = texture.astype(np.float32, copy=False)
 
