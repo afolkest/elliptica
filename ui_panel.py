@@ -189,17 +189,18 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
     y += 50
 
     fields = [
-        ("Gaussian sigma", menu.sigma_text, True, 0, 140),
-        ("Clip limit", menu.clip_text, True, 1, 140),
-        ("Kernel rows", menu.kernel_rows_text, False, 2, 140),
-        ("Kernel cols", menu.kernel_cols_text, False, 3, 140),
-        ("Histogram bins", menu.num_bins_text, False, 4, 160),
+        ("Gaussian sigma", "sigma_text", True, 0, 140),
+        ("Clip limit", "clip_text", True, 1, 140),
+        ("Kernel rows", "kernel_rows_text", False, 2, 140),
+        ("Kernel cols", "kernel_cols_text", False, 3, 140),
+        ("Histogram bins", "num_bins_text", False, 4, 160),
     ]
 
     font_label = pygame.font.Font(None, 22)
     font_input = pygame.font.Font(None, 24)
 
-    for label_text, value_text, is_float, field_idx, box_width in fields:
+    for label_text, attr_name, is_float, field_idx, box_width in fields:
+        value_text = getattr(menu, attr_name)
         label = font_label.render(f"{label_text}:", True, (200, 200, 200))
         screen.blit(label, (menu_x + 20, y))
         y += 26
@@ -208,6 +209,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
         hover = input_rect.collidepoint(mouse_pos)
         if hover and mouse_down:
             menu.focused_field = field_idx
+            menu.pending_clear = field_idx
 
         focused = (menu.focused_field == field_idx)
         color = (70, 70, 70) if focused else (40, 40, 40)
@@ -220,15 +222,13 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
         y += 46
 
     if menu.focused_field != -1 and event_key:
-        attr = [
-            ("sigma_text", True),
-            ("clip_text", True),
-            ("kernel_rows_text", False),
-            ("kernel_cols_text", False),
-            ("num_bins_text", False),
-        ][menu.focused_field]
-        name, is_float = attr
+        attr = fields[menu.focused_field]
+        name = attr[1]
+        is_float = attr[2]
         value = getattr(menu, name)
+        if menu.pending_clear == menu.focused_field:
+            value = ""
+            menu.pending_clear = -1
         if event_key == pygame.K_BACKSPACE:
             value = value[:-1]
         elif is_float and (event_key == pygame.K_PERIOD or event_key == pygame.K_KP_PERIOD):
@@ -323,6 +323,7 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             menu = state.highpass_menu
             menu.is_open = True
             menu.focused_field = 0
+            menu.pending_clear = 0
             menu.sigma_text = f"{menu.sigma:.2f}"
             menu.clip_text = f"{menu.clip_limit:.4f}"
             menu.kernel_rows_text = str(menu.kernel_rows)

@@ -72,7 +72,7 @@ def perform_render(project: Project, state: UIState, multiplier: int):
     lic_array = compute_lic(
         ex,
         ey,
-        streamlength=project.streamlength,
+        project.streamlength * multiplier,
         num_passes=num_passes,
         seed=0,
     )
@@ -126,6 +126,7 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
                 if hp_menu.is_open:
                     hp_menu.is_open = False
                     hp_menu.focused_field = -1
+                    hp_menu.pending_clear = -1
                     hp_menu.sigma_text = f"{hp_menu.sigma:.2f}"
                     hp_menu.clip_text = f"{hp_menu.clip_limit:.4f}"
                     hp_menu.kernel_rows_text = str(hp_menu.kernel_rows)
@@ -182,6 +183,7 @@ def main():
             if hp_action == -999:
                 highpass_state.is_open = False
                 highpass_state.focused_field = -1
+                highpass_state.pending_clear = -1
                 highpass_state.sigma_text = f"{highpass_state.sigma:.2f}"
                 highpass_state.clip_text = f"{highpass_state.clip_limit:.4f}"
                 highpass_state.kernel_rows_text = str(highpass_state.kernel_rows)
@@ -209,6 +211,7 @@ def main():
 
                 highpass_state.is_open = False
                 highpass_state.focused_field = -1
+                highpass_state.pending_clear = -1
 
                 if state.original_render_data is not None:
                     filtered = apply_highpass_clahe(

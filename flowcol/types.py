@@ -50,6 +50,7 @@ class HighPassMenuState:
     kernel_cols_text: str = "8"
     num_bins_text: str = "150"
     focused_field: int = -1
+    pending_clear: int = -1
 
 
 @dataclass

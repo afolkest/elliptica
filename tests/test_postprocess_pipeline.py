@@ -38,7 +38,7 @@ def test_full_pipeline_matches_reference():
     ours_lic = compute_lic(
         ex,
         ey,
-        streamlength=project.streamlength,
+        project.streamlength,
         num_passes=1,
         texture=seed_texture,
         seed=None,

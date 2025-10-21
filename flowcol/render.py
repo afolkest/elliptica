@@ -12,14 +12,17 @@ from flowcol.lic import convolve, get_cosine_kernel
 def compute_lic(
     ex: np.ndarray,
     ey: np.ndarray,
-    *,
     streamlength: int,
     num_passes: int = 1,
+    *,
     texture: np.ndarray | None = None,
-    seed: int | None = 0
+    seed: int | None = 0,
+    boundaries: str = "closed",
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1]."""
     field_h, field_w = ex.shape
+
+    streamlength = max(int(streamlength), 1)
 
     if texture is None:
         rng = np.random.default_rng(seed)
@@ -33,7 +36,7 @@ def compute_lic(
     vy = (ey / mag_max).astype(np.float32)
 
     kernel = get_cosine_kernel(streamlength).astype(np.float32)
-    lic_result = convolve(texture, vx, vy, kernel, iterations=num_passes, boundaries="closed")
+    lic_result = convolve(texture, vx, vy, kernel, iterations=num_passes, boundaries=boundaries)
 
     max_abs = np.max(np.abs(lic_result))
     if max_abs > 1e-12:
