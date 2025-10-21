@@ -29,6 +29,14 @@ class Project:
 
 
 @dataclass
+class RenderMenuState:
+    is_open: bool = False
+    selected_multiplier: int = 1
+    num_passes: int = 1
+    input_focused: bool = False
+
+
+@dataclass
 class UIState:
     project: Project
 
@@ -38,10 +46,7 @@ class UIState:
     current_render_multiplier: int = 1
     rendered_surface: Optional[object] = None
 
-    render_menu_open: bool = False
-    selected_multiplier: int = 1
-    num_lic_passes: int = 1
-    passes_input_focused: bool = False
+    render_menu: RenderMenuState = field(default_factory=RenderMenuState)
 
     selected_idx: int = -1
     mouse_dragging: bool = False
@@ -49,6 +54,4 @@ class UIState:
     last_mouse_pos: tuple[int, int] = (0, 0)
 
     field_dirty: bool = True
-
-
 

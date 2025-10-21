@@ -36,6 +36,96 @@ def point_in_conductor(pos: tuple[int, int], conductor: Conductor) -> bool:
     return conductor.mask[int(y - cy), int(x - cx)] > 0.5
 
 
+def draw_edit_mode(screen: pygame.Surface, project: Project, state: UIState):
+    for i, conductor in enumerate(project.conductors):
+        color = SELECTED_COLOR if i == state.selected_idx else CONDUCTOR_COLORS[i % len(CONDUCTOR_COLORS)]
+        pos = (round(conductor.position[0]), round(conductor.position[1]))
+        screen.blit(mask_to_surface(conductor.mask, color), pos)
+
+
+def draw_render_mode(screen: pygame.Surface, state: UIState):
+    if state.rendered_surface:
+        screen.blit(state.rendered_surface, (0, 0))
+
+
+def perform_render(project: Project, state: UIState, multiplier: int):
+    canvas_w, canvas_h = project.canvas_resolution
+    render_w, render_h = canvas_w * multiplier, canvas_h * multiplier
+
+    if render_w > MAX_RENDER_DIM or render_h > MAX_RENDER_DIM:
+        return False
+
+    ex, ey = compute_field(project, multiplier)
+    num_passes = max(1, state.render_menu.num_passes)
+    lic_array = compute_lic(ex, ey, project, num_passes)
+    save_render(lic_array, project, multiplier)
+
+    state.original_render_data = lic_array.copy()
+    state.current_render_data = lic_array
+    state.current_render_multiplier = multiplier
+    state.render_mode = "render"
+
+    render_h, render_w = lic_array.shape
+    full_surface = array_to_surface(lic_array)
+
+    if render_w <= canvas_w and render_h <= canvas_h:
+        state.rendered_surface = full_surface
+    else:
+        scale = min(canvas_w / render_w, canvas_h / render_h)
+        display_w, display_h = int(render_w * scale), int(render_h * scale)
+        state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
+
+    return True
+
+
+def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int]):
+    running = True
+    mouse_pos = pygame.mouse.get_pos()
+    mouse_down = False
+    key_pressed = None
+    menu_state = state.render_menu
+
+    for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mouse_down = True
+            if mouse_pos[0] < canvas_res[0] and state.render_mode == "edit":
+                state.selected_idx = -1
+                for i in reversed(range(len(project.conductors))):
+                    if point_in_conductor(mouse_pos, project.conductors[i]):
+                        state.selected_idx = i
+                        state.mouse_dragging = True
+                        state.last_mouse_pos = mouse_pos
+                        break
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            state.mouse_dragging = False
+        elif event.type == pygame.MOUSEMOTION:
+            if state.mouse_dragging and state.selected_idx >= 0:
+                dx = float(mouse_pos[0] - state.last_mouse_pos[0])
+                dy = float(mouse_pos[1] - state.last_mouse_pos[1])
+                conductor = project.conductors[state.selected_idx]
+                conductor.position = (conductor.position[0] + dx, conductor.position[1] + dy)
+                state.last_mouse_pos = mouse_pos
+                state.field_dirty = True
+        elif event.type == pygame.KEYDOWN:
+            key_pressed = event.key
+            if event.key == pygame.K_ESCAPE:
+                if menu_state.is_open:
+                    menu_state.is_open = False
+                    menu_state.input_focused = False
+                    if menu_state.num_passes == 0:
+                        menu_state.num_passes = 1
+                else:
+                    running = False
+            elif event.key == pygame.K_DELETE and state.selected_idx >= 0:
+                del project.conductors[state.selected_idx]
+                state.selected_idx = -1
+                state.field_dirty = True
+
+    return running, mouse_pos, mouse_down, key_pressed
+
+
 def main():
     pygame.init()
 
@@ -52,104 +142,41 @@ def main():
 
     running = True
     while running:
-        mouse_pos = pygame.mouse.get_pos()
-        mouse_down = False
-        key_pressed = None
-
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                mouse_down = True
-                if mouse_pos[0] < canvas_res[0] and state.render_mode == "edit":
-                    state.selected_idx = -1
-                    for i in reversed(range(len(project.conductors))):
-                        if point_in_conductor(mouse_pos, project.conductors[i]):
-                            state.selected_idx = i
-                            state.mouse_dragging = True
-                            state.last_mouse_pos = mouse_pos
-                            break
-            elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
-                state.mouse_dragging = False
-            elif event.type == pygame.MOUSEMOTION:
-                if state.mouse_dragging and state.selected_idx >= 0:
-                    dx = float(mouse_pos[0] - state.last_mouse_pos[0])
-                    dy = float(mouse_pos[1] - state.last_mouse_pos[1])
-                    conductor = project.conductors[state.selected_idx]
-                    conductor.position = (conductor.position[0] + dx, conductor.position[1] + dy)
-                    state.last_mouse_pos = mouse_pos
-                    state.field_dirty = True
-            elif event.type == pygame.KEYDOWN:
-                key_pressed = event.key
-                if event.key == pygame.K_ESCAPE:
-                    if state.render_menu_open:
-                        state.render_menu_open = False
-                        state.passes_input_focused = False
-                        if state.num_lic_passes == 0:
-                            state.num_lic_passes = 1
-                    else:
-                        running = False
-                elif event.key == pygame.K_DELETE and state.selected_idx >= 0:
-                    del project.conductors[state.selected_idx]
-                    state.selected_idx = -1
-                    state.field_dirty = True
+        canvas_res = project.canvas_resolution
+        running, mouse_pos, mouse_down, key_pressed = handle_events(state, project, canvas_res)
+        if not running:
+            break
 
         screen.fill(BG_COLOR)
 
         if state.render_mode == "edit":
-            for i, conductor in enumerate(project.conductors):
-                color = SELECTED_COLOR if i == state.selected_idx else CONDUCTOR_COLORS[i % len(CONDUCTOR_COLORS)]
-                pos = (round(conductor.position[0]), round(conductor.position[1]))
-                screen.blit(mask_to_surface(conductor.mask, color), pos)
+            draw_edit_mode(screen, project, state)
         else:
-            if state.rendered_surface:
-                screen.blit(state.rendered_surface, (0, 0))
+            draw_render_mode(screen, state)
 
         action = panel(screen, project, state, mouse_pos, mouse_down)
 
-        if state.render_menu_open:
+        menu_state = state.render_menu
+
+        if menu_state.is_open:
             menu_action = render_menu(screen, state, mouse_pos, mouse_down, key_pressed)
             if menu_action == -999:
-                state.render_menu_open = False
-                state.passes_input_focused = False
-                if state.num_lic_passes == 0:
-                    state.num_lic_passes = 1
+                menu_state.is_open = False
+                menu_state.input_focused = False
+                if menu_state.num_passes == 0:
+                    menu_state.num_passes = 1
             elif menu_action and menu_action > 0:
                 action = menu_action
-                state.render_menu_open = False
-                state.passes_input_focused = False
-                if state.num_lic_passes == 0:
-                    state.num_lic_passes = 1
+                menu_state.is_open = False
+                menu_state.input_focused = False
+                if menu_state.num_passes == 0:
+                    menu_state.num_passes = 1
 
         if action == -2:
             expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])
             screen = pygame.display.set_mode(expected_window)
         elif action and action > 0:
-            canvas_w, canvas_h = project.canvas_resolution
-            render_w, render_h = canvas_w * action, canvas_h * action
-
-            if render_w > MAX_RENDER_DIM or render_h > MAX_RENDER_DIM:
-                pass
-            else:
-                ex, ey = compute_field(project, action)
-                num_passes = max(1, state.num_lic_passes)
-                lic_array = compute_lic(ex, ey, project, num_passes)
-                save_render(lic_array, project, action)
-
-                state.original_render_data = lic_array.copy()
-                state.current_render_data = lic_array
-                state.current_render_multiplier = action
-                state.render_mode = "render"
-
-                render_h, render_w = lic_array.shape
-
-                full_surface = array_to_surface(lic_array)
-                if render_w <= canvas_w and render_h <= canvas_h:
-                    state.rendered_surface = full_surface
-                else:
-                    scale = min(canvas_w / render_w, canvas_h / render_h)
-                    display_w, display_h = int(render_w * scale), int(render_h * scale)
-                    state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
+            perform_render(project, state, action)
         elif action == -1:
             state.render_mode = "edit"
             expected_window = (project.canvas_resolution[0] + panel_width, project.canvas_resolution[1])

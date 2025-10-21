@@ -65,6 +65,7 @@ def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, 
 def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     """Draw render config overlay. Returns multiplier if confirmed, -999 if cancelled, None otherwise."""
     screen_w, screen_h = screen.get_size()
+    menu = state.render_menu
 
     # Backdrop
     backdrop = pygame.Surface((screen_w, screen_h))
@@ -99,7 +100,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         btn_x = menu_x + 20 + i * (button_w + spacing)
         rect = pygame.Rect(btn_x, y, button_w, 35)
         hover = rect.collidepoint(mouse_pos)
-        is_selected = (state.selected_multiplier == mult)
+        is_selected = (menu.selected_multiplier == mult)
 
         if is_selected:
             color = (100, 120, 255)
@@ -116,7 +117,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         screen.blit(text_surf, (btn_x + (button_w - text_surf.get_width()) // 2, y + (35 - text_surf.get_height()) // 2))
 
         if hover and mouse_down:
-            state.selected_multiplier = mult
+            menu.selected_multiplier = mult
 
     y += 50
 
@@ -129,36 +130,36 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     input_hover = input_rect.collidepoint(mouse_pos)
 
     if input_hover and mouse_down:
-        state.passes_input_focused = True
+        menu.input_focused = True
 
-    color = (70, 70, 70) if state.passes_input_focused else (40, 40, 40)
+    color = (70, 70, 70) if menu.input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, input_rect)
-    pygame.draw.rect(screen, (100, 100, 100), input_rect, 2 if state.passes_input_focused else 1)
+    pygame.draw.rect(screen, (100, 100, 100), input_rect, 2 if menu.input_focused else 1)
 
     font_input = pygame.font.Font(None, 24)
-    display_text = str(state.num_lic_passes) if state.num_lic_passes > 0 else ""
+    display_text = str(menu.num_passes) if menu.num_passes > 0 else ""
     text_surf = font_input.render(display_text, True, (200, 200, 200))
     screen.blit(text_surf, (menu_x + 30, y + (35 - text_surf.get_height()) // 2))
 
     # Handle keyboard input for number
-    if state.passes_input_focused and event_key:
+    if menu.input_focused and event_key:
         if event_key == pygame.K_BACKSPACE:
-            state.num_lic_passes = state.num_lic_passes // 10
+            menu.num_passes = menu.num_passes // 10
         elif pygame.K_0 <= event_key <= pygame.K_9:
             digit = event_key - pygame.K_0
-            if state.num_lic_passes == 0:
-                state.num_lic_passes = digit
+            if menu.num_passes == 0:
+                menu.num_passes = digit
             else:
-                new_val = state.num_lic_passes * 10 + digit
+                new_val = menu.num_passes * 10 + digit
                 if new_val <= 99:
-                    state.num_lic_passes = new_val
+                    menu.num_passes = new_val
 
     y += 55
 
     # Render and Cancel buttons
     action = None
     if button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down):
-        action = state.selected_multiplier
+        action = menu.selected_multiplier
 
     if button(screen, menu_x + 160, y, 130, 35, "Cancel", mouse_pos, mouse_down):
         action = -999
@@ -205,7 +206,7 @@ def panel(screen, project, state, mouse_pos, mouse_down):
         y += 45
 
         if button(screen, panel_x, y, 180, 35, "Render...", mouse_pos, mouse_down):
-            state.render_menu_open = True
+            state.render_menu.is_open = True
 
         y += 50
     else:
