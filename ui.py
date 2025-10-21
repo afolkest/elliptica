@@ -64,8 +64,7 @@ def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
     if state.highres_render_data is None or state.current_render_multiplier <= 0:
         return None
 
-    render_w = max(1, int(round(project.canvas_resolution[0] * state.current_render_multiplier)))
-    render_h = max(1, int(round(project.canvas_resolution[1] * state.current_render_multiplier)))
+    render_h, render_w = state.current_render_shape
     if render_w <= 0 or render_h <= 0:
         return None
 
@@ -85,15 +84,22 @@ def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
 def perform_render(project: Project, state: UIState, multiplier: float):
     canvas_w, canvas_h = project.canvas_resolution
 
+    render_w = max(1, int(round(canvas_w * multiplier)))
+    render_h = max(1, int(round(canvas_h * multiplier)))
+
     supersample = state.supersample_factor
     scale = multiplier * supersample
-    compute_w = max(1, int(round(canvas_w * scale)))
-    compute_h = max(1, int(round(canvas_h * scale)))
+    margin_physical = state.margin_factor * float(min(canvas_w, canvas_h))
+    margin_tuple = (margin_physical, margin_physical)
+    domain_w = canvas_w + 2.0 * margin_physical
+    domain_h = canvas_h + 2.0 * margin_physical
+    compute_w = max(1, int(round(domain_w * scale)))
+    compute_h = max(1, int(round(domain_h * scale)))
 
     if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return False
 
-    ex, ey = compute_field(project, multiplier, supersample)
+    ex, ey = compute_field(project, multiplier, supersample, margin_tuple)
     num_passes = max(1, state.render_menu.num_passes)
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(project.streamlength_factor * min_compute)), 1)
@@ -105,12 +111,28 @@ def perform_render(project: Project, state: UIState, multiplier: float):
         num_passes=num_passes,
         seed=seed,
     )
-    state.highres_render_data = lic_array.copy()
-    state.original_render_data = lic_array.copy()
+
+    canvas_scaled_w = max(1, int(round(canvas_w * scale)))
+    canvas_scaled_h = max(1, int(round(canvas_h * scale)))
+    offset_x = int(round(margin_physical * scale))
+    offset_y = int(round(margin_physical * scale))
+    offset_x = min(offset_x, max(0, lic_array.shape[1] - canvas_scaled_w))
+    offset_y = min(offset_y, max(0, lic_array.shape[0] - canvas_scaled_h))
+    crop_x0 = max(0, offset_x)
+    crop_y0 = max(0, offset_y)
+    crop_x1 = min(crop_x0 + canvas_scaled_w, lic_array.shape[1])
+    crop_y1 = min(crop_y0 + canvas_scaled_h, lic_array.shape[0])
+    lic_cropped = lic_array[crop_y0:crop_y1, crop_x0:crop_x1]
+
+    state.highres_render_data = lic_cropped.copy()
+    state.original_render_data = lic_cropped.copy()
     state.current_render_multiplier = multiplier
     state.current_supersample = supersample
     state.current_noise_seed = seed
-    state.current_compute_resolution = (compute_w, compute_h)
+    state.current_compute_resolution = (compute_h, compute_w)
+    state.current_canvas_scaled = lic_cropped.shape
+    state.current_margin = margin_physical
+    state.current_render_shape = (render_h, render_w)
     state.render_mode = "render"
 
     display_array = recompute_display(project, state)
@@ -172,6 +194,10 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
                     menu_state.streamlength_pending_clear = False
                     menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
                     menu_state.pending_streamlength_factor = project.streamlength_factor
+                    menu_state.margin_input_focused = False
+                    menu_state.margin_pending_clear = False
+                    menu_state.margin_text = f"{state.margin_factor:.3f}"
+                    menu_state.pending_margin_factor = state.margin_factor
                     menu_state.seed_input_focused = False
                     menu_state.seed_pending_clear = False
                     state.noise_seed_text = str(state.noise_seed)
@@ -197,6 +223,8 @@ def main():
     state = UIState(project=project)
     state.render_menu.pending_streamlength_factor = project.streamlength_factor
     state.render_menu.streamlength_text = f"{project.streamlength_factor:.4f}"
+    state.render_menu.margin_text = f"{state.margin_factor:.3f}"
+    state.render_menu.pending_margin_factor = state.margin_factor
     state.highpass_menu.sigma_factor_text = f"{state.highpass_menu.sigma_factor:.4f}"
     state.noise_seed_text = str(state.noise_seed)
     state.downsample.sigma_text = f"{state.downsample.sigma_factor:.2f}"
@@ -275,7 +303,7 @@ def main():
                     )
                     state.highres_render_data = filtered
                     recompute_display(project, state)
-        elif state.render_mode == "render" and not state.downsample.dragging and state.downsample.dirty:
+        elif state.render_mode == "render" and state.downsample.dirty:
             state.downsample.dirty = False
             recompute_display(project, state)
         menu_state = state.render_menu
@@ -289,6 +317,10 @@ def main():
                 menu_state.streamlength_pending_clear = False
                 menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
                 menu_state.pending_streamlength_factor = project.streamlength_factor
+                menu_state.margin_input_focused = False
+                menu_state.margin_pending_clear = False
+                menu_state.margin_text = f"{state.margin_factor:.3f}"
+                menu_state.pending_margin_factor = state.margin_factor
                 menu_state.seed_input_focused = False
                 menu_state.seed_pending_clear = False
                 state.noise_seed_text = str(state.noise_seed)
@@ -300,10 +332,14 @@ def main():
                 menu_state.input_focused = False
                 menu_state.streamlength_input_focused = False
                 menu_state.streamlength_pending_clear = False
+                menu_state.margin_input_focused = False
+                menu_state.margin_pending_clear = False
                 menu_state.seed_input_focused = False
                 menu_state.seed_pending_clear = False
                 project.streamlength_factor = menu_state.pending_streamlength_factor
                 menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
+                state.margin_factor = menu_state.pending_margin_factor
+                menu_state.margin_text = f"{state.margin_factor:.3f}"
                 state.noise_seed_text = str(state.noise_seed)
                 if menu_state.num_passes == 0:
                     menu_state.num_passes = 1

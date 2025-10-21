@@ -40,6 +40,10 @@ class RenderMenuState:
     pending_streamlength_factor: float = 30.0 / 1024.0
     seed_input_focused: bool = False
     seed_pending_clear: bool = False
+    margin_text: str = "0.10"
+    margin_input_focused: bool = False
+    margin_pending_clear: bool = False
+    pending_margin_factor: float = 0.10
 
 
 @dataclass
@@ -99,3 +103,7 @@ class UIState:
     current_supersample: float = 1.0
     current_noise_seed: int = 0
     current_compute_resolution: tuple[int, int] = (0, 0)
+    margin_factor: float = 0.10
+    current_canvas_scaled: tuple[int, int] = (0, 0)
+    current_margin: float = 0.0
+    current_render_shape: tuple[int, int] = (0, 0)

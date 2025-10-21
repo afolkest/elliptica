@@ -177,6 +177,8 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.input_focused = True
         menu.streamlength_input_focused = False
         menu.streamlength_pending_clear = False
+        menu.margin_input_focused = False
+        menu.seed_input_focused = False
 
     color = (70, 70, 70) if menu.input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, input_rect)
@@ -213,6 +215,8 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.streamlength_input_focused = True
         menu.streamlength_pending_clear = True
         menu.input_focused = False
+        menu.margin_input_focused = False
+        menu.seed_input_focused = False
 
     color = (70, 70, 70) if menu.streamlength_input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, stream_rect)
@@ -259,6 +263,63 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     y += 45
 
+    margin_label = font.render("Padding margin:", True, (200, 200, 200))
+    screen.blit(margin_label, (menu_x + 20, y))
+    y += 30
+
+    margin_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    margin_hover = margin_rect.collidepoint(mouse_pos)
+
+    if margin_hover and mouse_down:
+        menu.margin_input_focused = True
+        menu.margin_pending_clear = True
+        menu.input_focused = False
+        menu.streamlength_input_focused = False
+        menu.seed_input_focused = False
+
+    color = (70, 70, 70) if menu.margin_input_focused else (40, 40, 40)
+    pygame.draw.rect(screen, color, margin_rect)
+    pygame.draw.rect(
+        screen,
+        (100, 100, 100),
+        margin_rect,
+        2 if menu.margin_input_focused else 1,
+    )
+
+    margin_text = menu.margin_text
+    margin_display = margin_text if margin_text else ""
+    margin_surf = font_input.render(margin_display, True, (200, 200, 200))
+    screen.blit(
+        margin_surf,
+        (margin_rect.x + 8, margin_rect.y + (35 - margin_surf.get_height()) // 2),
+    )
+
+    valid_margin = True
+
+    if menu.margin_input_focused and event_key:
+        value = menu.margin_text
+        if menu.margin_pending_clear:
+            value = ""
+            menu.margin_pending_clear = False
+        if event_key == pygame.K_BACKSPACE:
+            value = value[:-1]
+        elif event_key in (pygame.K_PERIOD, pygame.K_KP_PERIOD):
+            if '.' not in value:
+                value = value + ('.' if value else '0.')
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            value += chr(event_key)
+        menu.margin_text = value
+
+    try:
+        parsed_margin = float(menu.margin_text)
+        valid_margin = parsed_margin >= 0.0
+        if valid_margin:
+            menu.pending_margin_factor = parsed_margin
+    except ValueError:
+        valid_margin = False
+
+    y += 45
+
     seed_label = font.render("Noise Seed:", True, (200, 200, 200))
     screen.blit(seed_label, (menu_x + 20, y))
     y += 30
@@ -271,6 +332,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.seed_pending_clear = True
         menu.input_focused = False
         menu.streamlength_input_focused = False
+        menu.margin_input_focused = False
 
     color = (70, 70, 70) if menu.seed_input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, seed_rect)
@@ -317,6 +379,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down)
         and valid_stream
         and valid_seed
+        and valid_margin
     ):
         action = menu.selected_multiplier
 
@@ -475,6 +538,10 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             menu.seed_input_focused = False
             menu.seed_pending_clear = False
             state.noise_seed_text = str(state.noise_seed)
+            menu.margin_input_focused = False
+            menu.margin_pending_clear = False
+            menu.margin_text = f"{state.margin_factor:.3f}"
+            menu.pending_margin_factor = state.margin_factor
 
         y += 50
     else:
