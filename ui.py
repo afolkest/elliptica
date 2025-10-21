@@ -228,6 +228,8 @@ def main():
     state.highpass_menu.sigma_factor_text = f"{state.highpass_menu.sigma_factor:.4f}"
     state.noise_seed_text = str(state.noise_seed)
     state.downsample.sigma_text = f"{state.downsample.sigma_factor:.2f}"
+    state.canvas_width_text = str(project.canvas_resolution[0])
+    state.canvas_height_text = str(project.canvas_resolution[1])
 
     window_res = (canvas_res[0] + panel_width, canvas_res[1])
     screen = pygame.display.set_mode(window_res)
@@ -248,7 +250,7 @@ def main():
         else:
             draw_render_mode(screen, state)
 
-        action = panel(screen, project, state, mouse_pos, mouse_down)
+        action = panel(screen, project, state, mouse_pos, mouse_down, key_pressed)
 
         highpass_state = state.highpass_menu
         if highpass_state.is_open:

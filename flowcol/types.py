@@ -107,3 +107,7 @@ class UIState:
     current_canvas_scaled: tuple[int, int] = (0, 0)
     current_margin: float = 0.0
     current_render_shape: tuple[int, int] = (0, 0)
+    canvas_width_text: str = ""
+    canvas_height_text: str = ""
+    canvas_focus: int = -1
+    canvas_pending_clear: bool = False

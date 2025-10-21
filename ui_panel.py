@@ -489,7 +489,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
     return action
 
 
-def panel(screen, project, state, mouse_pos, mouse_down):
+def panel(screen, project, state, mouse_pos, mouse_down, event_key=None):
     """Draw control panel. Returns: 1/2/4/8 for render, -1 for back to edit, -2 for resize, -3 for reset, -999 for cancel menu, None otherwise."""
     panel_x = project.canvas_resolution[0] + 10
     y = 10
@@ -523,6 +523,8 @@ def panel(screen, project, state, mouse_pos, mouse_down):
                 project.conductors.append(Conductor(mask=mask, voltage=0.0, position=pos, interior_mask=interior))
                 state.field_dirty = True
                 if canvas_changed:
+                    state.canvas_width_text = str(project.canvas_resolution[0])
+                    state.canvas_height_text = str(project.canvas_resolution[1])
                     action = -2
 
         y += 45
@@ -544,6 +546,70 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             menu.pending_margin_factor = state.margin_factor
 
         y += 50
+
+        font = pygame.font.Font(None, 22)
+        size_label = font.render("Canvas Size (px):", True, (220, 220, 220))
+        screen.blit(size_label, (panel_x, y))
+        y += 30
+
+        input_w = pygame.Rect(panel_x, y, 80, 35)
+        input_h = pygame.Rect(panel_x + 100, y, 80, 35)
+
+        for idx, rect in enumerate([input_w, input_h]):
+            hover = rect.collidepoint(mouse_pos)
+            if hover and mouse_down:
+                state.canvas_focus = idx
+                state.canvas_pending_clear = True
+            color = (70, 70, 70) if state.canvas_focus == idx else (40, 40, 40)
+            pygame.draw.rect(screen, color, rect)
+            pygame.draw.rect(screen, (100, 100, 100), rect, 2 if state.canvas_focus == idx else 1)
+
+        font_input = pygame.font.Font(None, 24)
+        w_text = state.canvas_width_text if state.canvas_width_text else ""
+        h_text = state.canvas_height_text if state.canvas_height_text else ""
+        w_surf = font_input.render(w_text, True, (200, 200, 200))
+        h_surf = font_input.render(h_text, True, (200, 200, 200))
+        screen.blit(w_surf, (input_w.x + 8, input_w.y + (35 - w_surf.get_height()) // 2))
+        screen.blit(h_surf, (input_h.x + 8, input_h.y + (35 - h_surf.get_height()) // 2))
+
+        if state.canvas_focus != -1 and event_key:
+            text = state.canvas_width_text if state.canvas_focus == 0 else state.canvas_height_text
+            if state.canvas_pending_clear:
+                text = ""
+                state.canvas_pending_clear = False
+            if event_key == pygame.K_BACKSPACE:
+                text = text[:-1]
+            elif pygame.K_0 <= event_key <= pygame.K_9:
+                text += chr(event_key)
+            state.canvas_width_text = text if state.canvas_focus == 0 else state.canvas_width_text
+            state.canvas_height_text = text if state.canvas_focus == 1 else state.canvas_height_text
+
+        valid_canvas = False
+        try:
+            width_val = int(state.canvas_width_text) if state.canvas_width_text else project.canvas_resolution[0]
+            height_val = int(state.canvas_height_text) if state.canvas_height_text else project.canvas_resolution[1]
+            valid_canvas = width_val > 0 and height_val > 0
+        except ValueError:
+            valid_canvas = False
+
+        if button(screen, panel_x, y + 45, 80, 30, "Apply", mouse_pos, mouse_down) and valid_canvas:
+            old_w, old_h = project.canvas_resolution
+            new_w = int(state.canvas_width_text) if state.canvas_width_text else old_w
+            new_h = int(state.canvas_height_text) if state.canvas_height_text else old_h
+            if new_w > 0 and new_h > 0:
+                dx = (old_w - new_w) / 2.0
+                dy = (old_h - new_h) / 2.0
+                for conductor in project.conductors:
+                    conductor.position = (conductor.position[0] - dx, conductor.position[1] - dy)
+                project.canvas_resolution = (new_w, new_h)
+                state.canvas_width_text = str(new_w)
+                state.canvas_height_text = str(new_h)
+                state.canvas_focus = -1
+                state.canvas_pending_clear = False
+                state.field_dirty = True
+                return -2
+
+        y += 80
     else:
         if button(screen, panel_x, y, 180, 35, "Back to Edit", mouse_pos, mouse_down):
             action = -1
