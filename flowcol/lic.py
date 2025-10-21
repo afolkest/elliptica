@@ -1,7 +1,8 @@
 import numpy as np
 import rlic
 
-def convolve(texture, vx, vy, kernel, iterations=1):
+
+def convolve(texture, vx, vy, kernel, iterations=1, boundaries="closed"):
     """
     Convolve a texture with a vector field using a kernel to produce a LIC image.
 
@@ -15,14 +16,9 @@ def convolve(texture, vx, vy, kernel, iterations=1):
     Returns:
         The convolved texture. 2d or 3d numpy array.
     """
-    if texture.ndim == 3:
-        r = rlic.convolve(texture[:, :, 0], vx, vy, kernel=kernel, iterations=iterations)
-        g = rlic.convolve(texture[:, :, 1], vx, vy, kernel=kernel, iterations=iterations)
-        b = rlic.convolve(texture[:, :, 2], vx, vy, kernel=kernel, iterations=iterations)
-        return np.stack([r, g, b], axis=-1)
-    else:
-        return rlic.convolve(texture, vx, vy, kernel=kernel, iterations=iterations)
+    return rlic.convolve(texture, vx, vy, kernel=kernel, iterations=iterations, boundaries=boundaries)
 
 def get_cosine_kernel(streamlength=30):
     """Gives a cosine kernel for a given streamlength in pixel units."""
-    return np.cos(np.pi * np.arange(1-streamlength, streamlength)/streamlength)
+    positions = np.arange(1 - streamlength, streamlength, dtype=np.float32)
+    return 0.5 * (1.0 + np.cos(np.pi * positions / streamlength))
