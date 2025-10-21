@@ -6,3 +6,4 @@ scipy
 pyamg
 pygame
 pillow
+scikit-image

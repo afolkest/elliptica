@@ -37,6 +37,22 @@ class RenderMenuState:
 
 
 @dataclass
+class HighPassMenuState:
+    is_open: bool = False
+    sigma: float = 3.0
+    clip_limit: float = 0.01
+    kernel_rows: int = 8
+    kernel_cols: int = 8
+    num_bins: int = 150
+    sigma_text: str = "3.0"
+    clip_text: str = "0.01"
+    kernel_rows_text: str = "8"
+    kernel_cols_text: str = "8"
+    num_bins_text: str = "150"
+    focused_field: int = -1
+
+
+@dataclass
 class UIState:
     project: Project
 
@@ -47,6 +63,7 @@ class UIState:
     rendered_surface: Optional[object] = None
 
     render_menu: RenderMenuState = field(default_factory=RenderMenuState)
+    highpass_menu: HighPassMenuState = field(default_factory=HighPassMenuState)
 
     selected_idx: int = -1
     mouse_dragging: bool = False
@@ -54,4 +71,3 @@ class UIState:
     last_mouse_pos: tuple[int, int] = (0, 0)
 
     field_dirty: bool = True
-

@@ -6,8 +6,8 @@ import numpy as np
 from PIL import Image
 from flowcol.types import Conductor, Project, UIState
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, array_to_surface, save_render
-from ui_panel import panel, render_menu
+from flowcol.render import compute_lic, array_to_surface, save_render, apply_highpass_clahe
+from ui_panel import panel, render_menu, highpass_menu
 
 BG_COLOR = (20, 20, 20)
 CONDUCTOR_COLORS = [(100, 150, 255, 180), (255, 100, 150, 180), (150, 255, 100, 180), (255, 200, 100, 180)]
@@ -48,6 +48,18 @@ def draw_render_mode(screen: pygame.Surface, state: UIState):
         screen.blit(state.rendered_surface, (0, 0))
 
 
+def update_render_surface(project: Project, state: UIState, arr: np.ndarray):
+    canvas_w, canvas_h = project.canvas_resolution
+    render_h, render_w = arr.shape
+    surface = array_to_surface(arr)
+    if render_w <= canvas_w and render_h <= canvas_h:
+        state.rendered_surface = surface
+    else:
+        scale = min(canvas_w / render_w, canvas_h / render_h)
+        display_w, display_h = int(render_w * scale), int(render_h * scale)
+        state.rendered_surface = pygame.transform.smoothscale(surface, (display_w, display_h))
+
+
 def perform_render(project: Project, state: UIState, multiplier: int):
     canvas_w, canvas_h = project.canvas_resolution
     render_w, render_h = canvas_w * multiplier, canvas_h * multiplier
@@ -57,7 +69,13 @@ def perform_render(project: Project, state: UIState, multiplier: int):
 
     ex, ey = compute_field(project, multiplier)
     num_passes = max(1, state.render_menu.num_passes)
-    lic_array = compute_lic(ex, ey, project, num_passes)
+    lic_array = compute_lic(
+        ex,
+        ey,
+        streamlength=project.streamlength,
+        num_passes=num_passes,
+        seed=0,
+    )
     save_render(lic_array, project, multiplier)
 
     state.original_render_data = lic_array.copy()
@@ -65,15 +83,7 @@ def perform_render(project: Project, state: UIState, multiplier: int):
     state.current_render_multiplier = multiplier
     state.render_mode = "render"
 
-    render_h, render_w = lic_array.shape
-    full_surface = array_to_surface(lic_array)
-
-    if render_w <= canvas_w and render_h <= canvas_h:
-        state.rendered_surface = full_surface
-    else:
-        scale = min(canvas_w / render_w, canvas_h / render_h)
-        display_w, display_h = int(render_w * scale), int(render_h * scale)
-        state.rendered_surface = pygame.transform.smoothscale(full_surface, (display_w, display_h))
+    update_render_surface(project, state, lic_array)
 
     return True
 
@@ -86,11 +96,12 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
     menu_state = state.render_menu
 
     for event in pygame.event.get():
+        menu_active = menu_state.is_open or state.highpass_menu.is_open
         if event.type == pygame.QUIT:
             running = False
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             mouse_down = True
-            if mouse_pos[0] < canvas_res[0] and state.render_mode == "edit":
+            if not menu_active and mouse_pos[0] < canvas_res[0] and state.render_mode == "edit":
                 state.selected_idx = -1
                 for i in reversed(range(len(project.conductors))):
                     if point_in_conductor(mouse_pos, project.conductors[i]):
@@ -101,7 +112,7 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
         elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
             state.mouse_dragging = False
         elif event.type == pygame.MOUSEMOTION:
-            if state.mouse_dragging and state.selected_idx >= 0:
+            if not menu_active and state.mouse_dragging and state.selected_idx >= 0:
                 dx = float(mouse_pos[0] - state.last_mouse_pos[0])
                 dy = float(mouse_pos[1] - state.last_mouse_pos[1])
                 conductor = project.conductors[state.selected_idx]
@@ -111,7 +122,16 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
         elif event.type == pygame.KEYDOWN:
             key_pressed = event.key
             if event.key == pygame.K_ESCAPE:
-                if menu_state.is_open:
+                hp_menu = state.highpass_menu
+                if hp_menu.is_open:
+                    hp_menu.is_open = False
+                    hp_menu.focused_field = -1
+                    hp_menu.sigma_text = f"{hp_menu.sigma:.2f}"
+                    hp_menu.clip_text = f"{hp_menu.clip_limit:.4f}"
+                    hp_menu.kernel_rows_text = str(hp_menu.kernel_rows)
+                    hp_menu.kernel_cols_text = str(hp_menu.kernel_cols)
+                    hp_menu.num_bins_text = str(hp_menu.num_bins)
+                elif menu_state.is_open:
                     menu_state.is_open = False
                     menu_state.input_focused = False
                     if menu_state.num_passes == 0:
@@ -156,6 +176,51 @@ def main():
 
         action = panel(screen, project, state, mouse_pos, mouse_down)
 
+        highpass_state = state.highpass_menu
+        if highpass_state.is_open:
+            hp_action = highpass_menu(screen, state, mouse_pos, mouse_down, key_pressed)
+            if hp_action == -999:
+                highpass_state.is_open = False
+                highpass_state.focused_field = -1
+                highpass_state.sigma_text = f"{highpass_state.sigma:.2f}"
+                highpass_state.clip_text = f"{highpass_state.clip_limit:.4f}"
+                highpass_state.kernel_rows_text = str(highpass_state.kernel_rows)
+                highpass_state.kernel_cols_text = str(highpass_state.kernel_cols)
+                highpass_state.num_bins_text = str(highpass_state.num_bins)
+            elif isinstance(hp_action, tuple):
+                sigma, clip, rows, cols, bins = hp_action
+                sigma = max(sigma, 0.1)
+                clip = max(clip, 1e-4)
+                rows = max(rows, 1)
+                cols = max(cols, 1)
+                bins = max(bins, 2)
+
+                highpass_state.sigma = sigma
+                highpass_state.clip_limit = clip
+                highpass_state.kernel_rows = rows
+                highpass_state.kernel_cols = cols
+                highpass_state.num_bins = bins
+
+                highpass_state.sigma_text = f"{sigma:.2f}"
+                highpass_state.clip_text = f"{clip:.4f}"
+                highpass_state.kernel_rows_text = str(rows)
+                highpass_state.kernel_cols_text = str(cols)
+                highpass_state.num_bins_text = str(bins)
+
+                highpass_state.is_open = False
+                highpass_state.focused_field = -1
+
+                if state.original_render_data is not None:
+                    filtered = apply_highpass_clahe(
+                        state.original_render_data,
+                        sigma,
+                        clip,
+                        rows,
+                        cols,
+                        bins,
+                    )
+                    state.current_render_data = filtered
+                    update_render_surface(project, state, filtered)
         menu_state = state.render_menu
 
         if menu_state.is_open:
@@ -184,7 +249,7 @@ def main():
         elif action == -3:
             if state.original_render_data is not None:
                 state.current_render_data = state.original_render_data.copy()
-                state.rendered_surface = array_to_surface(state.current_render_data)
+                update_render_surface(project, state, state.current_render_data)
 
         pygame.display.flip()
         clock.tick(60)

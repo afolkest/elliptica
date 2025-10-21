@@ -1,7 +1,6 @@
 import pygame
 import numpy as np
 import subprocess
-from pathlib import Path
 from flowcol.types import Conductor
 from flowcol.mask_utils import load_conductor_masks
 
@@ -167,6 +166,103 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     return action
 
 
+def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
+    """Draw high-pass + CLAHE menu. Returns tuple of params or -999 if cancelled."""
+    screen_w, screen_h = screen.get_size()
+    menu = state.highpass_menu
+
+    backdrop = pygame.Surface((screen_w, screen_h))
+    backdrop.set_alpha(180)
+    backdrop.fill((0, 0, 0))
+    screen.blit(backdrop, (0, 0))
+
+    menu_w, menu_h = 360, 520
+    menu_x = (screen_w - menu_w) // 2
+    menu_y = (screen_h - menu_h) // 2
+    pygame.draw.rect(screen, (40, 40, 40), (menu_x, menu_y, menu_w, menu_h))
+    pygame.draw.rect(screen, (100, 100, 100), (menu_x, menu_y, menu_w, menu_h), 2)
+
+    y = menu_y + 20
+    font = pygame.font.Font(None, 28)
+    title = font.render("LIC Enhancement", True, (220, 220, 220))
+    screen.blit(title, (menu_x + (menu_w - title.get_width()) // 2, y))
+    y += 50
+
+    fields = [
+        ("Gaussian sigma", menu.sigma_text, True, 0, 140),
+        ("Clip limit", menu.clip_text, True, 1, 140),
+        ("Kernel rows", menu.kernel_rows_text, False, 2, 140),
+        ("Kernel cols", menu.kernel_cols_text, False, 3, 140),
+        ("Histogram bins", menu.num_bins_text, False, 4, 160),
+    ]
+
+    font_label = pygame.font.Font(None, 22)
+    font_input = pygame.font.Font(None, 24)
+
+    for label_text, value_text, is_float, field_idx, box_width in fields:
+        label = font_label.render(f"{label_text}:", True, (200, 200, 200))
+        screen.blit(label, (menu_x + 20, y))
+        y += 26
+
+        input_rect = pygame.Rect(menu_x + 20, y, box_width, 36)
+        hover = input_rect.collidepoint(mouse_pos)
+        if hover and mouse_down:
+            menu.focused_field = field_idx
+
+        focused = (menu.focused_field == field_idx)
+        color = (70, 70, 70) if focused else (40, 40, 40)
+        pygame.draw.rect(screen, color, input_rect)
+        pygame.draw.rect(screen, (100, 100, 100), input_rect, 2 if focused else 1)
+
+        text_surf = font_input.render(value_text, True, (200, 200, 200))
+        screen.blit(text_surf, (input_rect.x + 8, input_rect.y + (36 - text_surf.get_height()) // 2))
+
+        y += 46
+
+    if menu.focused_field != -1 and event_key:
+        attr = [
+            ("sigma_text", True),
+            ("clip_text", True),
+            ("kernel_rows_text", False),
+            ("kernel_cols_text", False),
+            ("num_bins_text", False),
+        ][menu.focused_field]
+        name, is_float = attr
+        value = getattr(menu, name)
+        if event_key == pygame.K_BACKSPACE:
+            value = value[:-1]
+        elif is_float and (event_key == pygame.K_PERIOD or event_key == pygame.K_KP_PERIOD):
+            if '.' not in value:
+                value = value + ('.' if value else '0.')
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            value += chr(event_key)
+        setattr(menu, name, value)
+
+    y += 10
+
+    valid_sigma = menu.sigma_text not in ("", ".")
+    valid_clip = menu.clip_text not in ("", ".")
+    valid_rows = menu.kernel_rows_text.isdigit()
+    valid_cols = menu.kernel_cols_text.isdigit()
+    valid_bins = menu.num_bins_text.isdigit()
+    action = None
+
+    if button(screen, menu_x + 20, y, 120, 35, "Apply", mouse_pos, mouse_down):
+        if all([valid_sigma, valid_clip, valid_rows, valid_cols, valid_bins]):
+            params = (
+                float(menu.sigma_text),
+                float(menu.clip_text),
+                int(menu.kernel_rows_text),
+                int(menu.kernel_cols_text),
+                int(menu.num_bins_text),
+            )
+            action = params
+    if button(screen, menu_x + 160, y, 120, 35, "Cancel", mouse_pos, mouse_down):
+        action = -999
+
+    return action
+
+
 def panel(screen, project, state, mouse_pos, mouse_down):
     """Draw control panel. Returns: 1/2/4/8 for render, -1 for back to edit, -2 for resize, -3 for reset, -999 for cancel menu, None otherwise."""
     panel_x = project.canvas_resolution[0] + 10
@@ -216,6 +312,22 @@ def panel(screen, project, state, mouse_pos, mouse_down):
 
         if button(screen, panel_x, y, 180, 35, "Reset to Original", mouse_pos, mouse_down):
             action = -3
+        y += 50
+
+        font = pygame.font.Font(None, 22)
+        title = font.render("Post-processing:", True, (220, 220, 220))
+        screen.blit(title, (panel_x, y))
+        y += 35
+
+        if button(screen, panel_x, y, 180, 35, "Enhance (HP+CLAHE)...", mouse_pos, mouse_down):
+            menu = state.highpass_menu
+            menu.is_open = True
+            menu.focused_field = 0
+            menu.sigma_text = f"{menu.sigma:.2f}"
+            menu.clip_text = f"{menu.clip_limit:.4f}"
+            menu.kernel_rows_text = str(menu.kernel_rows)
+            menu.kernel_cols_text = str(menu.kernel_cols)
+            menu.num_bins_text = str(menu.num_bins)
         y += 50
 
     if state.render_mode == "edit":
