@@ -24,7 +24,7 @@ class RenderInfo:
 class Project:
     conductors: list[Conductor] = field(default_factory=list)
     canvas_resolution: tuple[int, int] = (1024, 1024)
-    streamlength: int = 30
+    streamlength_factor: float = 30.0 / 1024.0
     renders: list[RenderInfo] = field(default_factory=list)          
 
 
@@ -34,17 +34,21 @@ class RenderMenuState:
     selected_multiplier: int = 1
     num_passes: int = 1
     input_focused: bool = False
+    streamlength_text: str = "0.0293"
+    streamlength_input_focused: bool = False
+    streamlength_pending_clear: bool = False
+    pending_streamlength_factor: float = 30.0 / 1024.0
 
 
 @dataclass
 class HighPassMenuState:
     is_open: bool = False
-    sigma: float = 3.0
+    sigma_factor: float = 3.0 / 1024.0
     clip_limit: float = 0.01
     kernel_rows: int = 8
     kernel_cols: int = 8
     num_bins: int = 150
-    sigma_text: str = "3.0"
+    sigma_factor_text: str = "0.0029"
     clip_text: str = "0.01"
     kernel_rows_text: str = "8"
     kernel_cols_text: str = "8"

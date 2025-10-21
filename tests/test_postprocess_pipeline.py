@@ -20,7 +20,7 @@ ASSET = ROOT / "assets" / "masks" / "disciples_shell.png"
 
 def prepare_project(mask: np.ndarray) -> Project:
     h, w = mask.shape
-    project = Project(canvas_resolution=(w, h), streamlength=30)
+    project = Project(canvas_resolution=(w, h))
     conductor = Conductor(mask=mask, voltage=1.0, position=(0.0, 0.0))
     project.conductors.append(conductor)
     return project
@@ -29,24 +29,29 @@ def prepare_project(mask: np.ndarray) -> Project:
 def test_full_pipeline_matches_reference():
     mask = load_alpha(str(ASSET))
     project = prepare_project(mask)
+    base_min = float(min(project.canvas_resolution))
+    project.streamlength_factor = 30.0 / base_min
 
     ex, ey = compute_field(project, multiplier=1)
 
     rng = np.random.default_rng(0)
     seed_texture = rng.random(project.canvas_resolution[::-1]).astype(np.float32)
 
+    pixel_streamlength = max(int(round(project.streamlength_factor * base_min)), 1)
     ours_lic = compute_lic(
         ex,
         ey,
-        project.streamlength,
+        pixel_streamlength,
         num_passes=1,
         texture=seed_texture,
         seed=None,
         boundaries="closed",
     )
+    sigma_factor = 3.0 / base_min
+    sigma_pixels = sigma_factor * base_min
     ours_post = apply_highpass_clahe(
         ours_lic,
-        sigma=3.0,
+        sigma=sigma_pixels,
         clip_limit=0.01,
         kernel_rows=8,
         kernel_cols=8,
@@ -64,12 +69,12 @@ def test_full_pipeline_matches_reference():
     reference = compute_lic_with_postprocessing(
         vfield,
         sfield_in=seed_texture,
-        streamlength=project.streamlength,
+        streamlength=pixel_streamlength,
         seed_sfield=None,
         use_periodic_BCs=False,
         num_lic_passes=1,
         use_filter=True,
-        filter_sigma=3.0,
+        filter_sigma=sigma_pixels,
         use_equalize=True,
         backend="rust",
         run_in_parallel=True,

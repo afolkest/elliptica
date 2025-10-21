@@ -130,6 +130,8 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     if input_hover and mouse_down:
         menu.input_focused = True
+        menu.streamlength_input_focused = False
+        menu.streamlength_pending_clear = False
 
     color = (70, 70, 70) if menu.input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, input_rect)
@@ -153,11 +155,66 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
                 if new_val <= 99:
                     menu.num_passes = new_val
 
+    y += 45
+
+    label = font.render("Streamlength factor:", True, (200, 200, 200))
+    screen.blit(label, (menu_x + 20, y))
+    y += 30
+
+    stream_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    stream_hover = stream_rect.collidepoint(mouse_pos)
+
+    if stream_hover and mouse_down:
+        menu.streamlength_input_focused = True
+        menu.streamlength_pending_clear = True
+        menu.input_focused = False
+
+    color = (70, 70, 70) if menu.streamlength_input_focused else (40, 40, 40)
+    pygame.draw.rect(screen, color, stream_rect)
+    pygame.draw.rect(
+        screen,
+        (100, 100, 100),
+        stream_rect,
+        2 if menu.streamlength_input_focused else 1,
+    )
+
+    stream_text = menu.streamlength_text
+    stream_display = stream_text if stream_text else ""
+    text_surf = font_input.render(stream_display, True, (200, 200, 200))
+    screen.blit(
+        text_surf,
+        (stream_rect.x + 8, stream_rect.y + (35 - text_surf.get_height()) // 2),
+    )
+
+    valid_stream = False
+
+    if menu.streamlength_input_focused and event_key:
+        value = menu.streamlength_text
+        if menu.streamlength_pending_clear:
+            value = ""
+            menu.streamlength_pending_clear = False
+        if event_key == pygame.K_BACKSPACE:
+            value = value[:-1]
+        elif event_key in (pygame.K_PERIOD, pygame.K_KP_PERIOD):
+            if '.' not in value:
+                value = value + ('.' if value else '0.')
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            value += chr(event_key)
+        menu.streamlength_text = value
+
+    try:
+        parsed_stream = float(menu.streamlength_text)
+        valid_stream = parsed_stream > 0.0
+        if valid_stream:
+            menu.pending_streamlength_factor = parsed_stream
+    except ValueError:
+        valid_stream = False
+
     y += 55
 
     # Render and Cancel buttons
     action = None
-    if button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down):
+    if button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down) and valid_stream:
         action = menu.selected_multiplier
 
     if button(screen, menu_x + 160, y, 130, 35, "Cancel", mouse_pos, mouse_down):
@@ -189,7 +246,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
     y += 50
 
     fields = [
-        ("Gaussian sigma", "sigma_text", True, 0, 140),
+        ("Gaussian sigma factor", "sigma_factor_text", True, 0, 140),
         ("Clip limit", "clip_text", True, 1, 140),
         ("Kernel rows", "kernel_rows_text", False, 2, 140),
         ("Kernel cols", "kernel_cols_text", False, 3, 140),
@@ -240,7 +297,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     y += 10
 
-    valid_sigma = menu.sigma_text not in ("", ".")
+    valid_sigma = menu.sigma_factor_text not in ("", ".")
     valid_clip = menu.clip_text not in ("", ".")
     valid_rows = menu.kernel_rows_text.isdigit()
     valid_cols = menu.kernel_cols_text.isdigit()
@@ -250,7 +307,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
     if button(screen, menu_x + 20, y, 120, 35, "Apply", mouse_pos, mouse_down):
         if all([valid_sigma, valid_clip, valid_rows, valid_cols, valid_bins]):
             params = (
-                float(menu.sigma_text),
+                float(menu.sigma_factor_text),
                 float(menu.clip_text),
                 int(menu.kernel_rows_text),
                 int(menu.kernel_cols_text),
@@ -302,7 +359,13 @@ def panel(screen, project, state, mouse_pos, mouse_down):
         y += 45
 
         if button(screen, panel_x, y, 180, 35, "Render...", mouse_pos, mouse_down):
-            state.render_menu.is_open = True
+            menu = state.render_menu
+            menu.is_open = True
+            menu.input_focused = False
+            menu.streamlength_input_focused = False
+            menu.streamlength_pending_clear = False
+            menu.streamlength_text = f"{project.streamlength_factor:.4f}"
+            menu.pending_streamlength_factor = project.streamlength_factor
 
         y += 50
     else:
@@ -324,7 +387,7 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             menu.is_open = True
             menu.focused_field = 0
             menu.pending_clear = 0
-            menu.sigma_text = f"{menu.sigma:.2f}"
+            menu.sigma_factor_text = f"{menu.sigma_factor:.4f}"
             menu.clip_text = f"{menu.clip_limit:.4f}"
             menu.kernel_rows_text = str(menu.kernel_rows)
             menu.kernel_cols_text = str(menu.kernel_cols)

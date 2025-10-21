@@ -69,10 +69,12 @@ def perform_render(project: Project, state: UIState, multiplier: int):
 
     ex, ey = compute_field(project, multiplier)
     num_passes = max(1, state.render_menu.num_passes)
+    base_min = min(project.canvas_resolution)
+    streamlength_pixels = max(int(round(project.streamlength_factor * base_min * multiplier)), 1)
     lic_array = compute_lic(
         ex,
         ey,
-        project.streamlength * multiplier,
+        streamlength_pixels,
         num_passes=num_passes,
         seed=0,
     )
@@ -127,7 +129,7 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
                     hp_menu.is_open = False
                     hp_menu.focused_field = -1
                     hp_menu.pending_clear = -1
-                    hp_menu.sigma_text = f"{hp_menu.sigma:.2f}"
+                    hp_menu.sigma_factor_text = f"{hp_menu.sigma_factor:.4f}"
                     hp_menu.clip_text = f"{hp_menu.clip_limit:.4f}"
                     hp_menu.kernel_rows_text = str(hp_menu.kernel_rows)
                     hp_menu.kernel_cols_text = str(hp_menu.kernel_cols)
@@ -135,6 +137,10 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
                 elif menu_state.is_open:
                     menu_state.is_open = False
                     menu_state.input_focused = False
+                    menu_state.streamlength_input_focused = False
+                    menu_state.streamlength_pending_clear = False
+                    menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
+                    menu_state.pending_streamlength_factor = project.streamlength_factor
                     if menu_state.num_passes == 0:
                         menu_state.num_passes = 1
                 else:
@@ -155,6 +161,9 @@ def main():
 
     project = Project(canvas_resolution=canvas_res)
     state = UIState(project=project)
+    state.render_menu.pending_streamlength_factor = project.streamlength_factor
+    state.render_menu.streamlength_text = f"{project.streamlength_factor:.4f}"
+    state.highpass_menu.sigma_factor_text = f"{state.highpass_menu.sigma_factor:.4f}"
 
     window_res = (canvas_res[0] + panel_width, canvas_res[1])
     screen = pygame.display.set_mode(window_res)
@@ -184,26 +193,26 @@ def main():
                 highpass_state.is_open = False
                 highpass_state.focused_field = -1
                 highpass_state.pending_clear = -1
-                highpass_state.sigma_text = f"{highpass_state.sigma:.2f}"
+                highpass_state.sigma_factor_text = f"{highpass_state.sigma_factor:.4f}"
                 highpass_state.clip_text = f"{highpass_state.clip_limit:.4f}"
                 highpass_state.kernel_rows_text = str(highpass_state.kernel_rows)
                 highpass_state.kernel_cols_text = str(highpass_state.kernel_cols)
                 highpass_state.num_bins_text = str(highpass_state.num_bins)
             elif isinstance(hp_action, tuple):
-                sigma, clip, rows, cols, bins = hp_action
-                sigma = max(sigma, 0.1)
+                sigma_factor, clip, rows, cols, bins = hp_action
+                sigma_factor = max(sigma_factor, 1e-5)
                 clip = max(clip, 1e-4)
                 rows = max(rows, 1)
                 cols = max(cols, 1)
                 bins = max(bins, 2)
 
-                highpass_state.sigma = sigma
+                highpass_state.sigma_factor = sigma_factor
                 highpass_state.clip_limit = clip
                 highpass_state.kernel_rows = rows
                 highpass_state.kernel_cols = cols
                 highpass_state.num_bins = bins
 
-                highpass_state.sigma_text = f"{sigma:.2f}"
+                highpass_state.sigma_factor_text = f"{sigma_factor:.4f}"
                 highpass_state.clip_text = f"{clip:.4f}"
                 highpass_state.kernel_rows_text = str(rows)
                 highpass_state.kernel_cols_text = str(cols)
@@ -214,9 +223,11 @@ def main():
                 highpass_state.pending_clear = -1
 
                 if state.original_render_data is not None:
+                    base_min = min(project.canvas_resolution)
+                    sigma_pixels = sigma_factor * base_min * state.current_render_multiplier
                     filtered = apply_highpass_clahe(
                         state.original_render_data,
-                        sigma,
+                        sigma_pixels,
                         clip,
                         rows,
                         cols,
@@ -231,12 +242,20 @@ def main():
             if menu_action == -999:
                 menu_state.is_open = False
                 menu_state.input_focused = False
+                menu_state.streamlength_input_focused = False
+                menu_state.streamlength_pending_clear = False
+                menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
+                menu_state.pending_streamlength_factor = project.streamlength_factor
                 if menu_state.num_passes == 0:
                     menu_state.num_passes = 1
             elif menu_action and menu_action > 0:
                 action = menu_action
                 menu_state.is_open = False
                 menu_state.input_focused = False
+                menu_state.streamlength_input_focused = False
+                menu_state.streamlength_pending_clear = False
+                project.streamlength_factor = menu_state.pending_streamlength_factor
+                menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
                 if menu_state.num_passes == 0:
                     menu_state.num_passes = 1
 
