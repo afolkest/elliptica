@@ -5,6 +5,7 @@ from flowcol.types import Conductor
 from flowcol.mask_utils import load_conductor_masks
 
 MAX_CANVAS_DIM = 8192
+SUPERSAMPLE_CHOICES = [1.0, 1.5, 2.0, 3.0]
 
 
 def button(screen, x, y, w, h, text, mouse_pos, clicked):
@@ -33,10 +34,11 @@ def text_input(screen, x, y, w, h, value, mouse_pos, clicked):
     return None
 
 
-def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, mouse_down):
+def slider(screen, x, y, w, label, value, min_v, max_v, mouse_pos, is_dragging, mouse_down, unit="V"):
     """Draw slider, return (new_value, is_dragging)."""
     font = pygame.font.Font(None, 20)
-    label_surf = font.render(f"{label}: {value:.2f}V", True, (200, 200, 200))
+    suffix = f"{value:.2f}{unit}" if unit else f"{value:.2f}"
+    label_surf = font.render(f"{label}: {suffix}", True, (200, 200, 200))
     screen.blit(label_surf, (x, y - 18))
 
     track_rect = pygame.Rect(x, y, w, 8)
@@ -73,7 +75,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     screen.blit(backdrop, (0, 0))
 
     # Menu panel
-    menu_w, menu_h = 340, 330
+    menu_w, menu_h = 360, 430
     menu_x = (screen_w - menu_w) // 2
     menu_y = (screen_h - menu_h) // 2
     pygame.draw.rect(screen, (40, 40, 40), (menu_x, menu_y, menu_w, menu_h))
@@ -85,21 +87,63 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     screen.blit(title, (menu_x + (menu_w - title.get_width()) // 2, y))
     y += 50
 
-    # Multiplier buttons
-    font = pygame.font.Font(None, 22)
-    label = font.render("Resolution Multiplier:", True, (200, 200, 200))
+    label = font.render("Supersample Factor:", True, (200, 200, 200))
     screen.blit(label, (menu_x + 20, y))
     y += 30
 
-    # Draw multiplier buttons with proper spacing
-    button_w = 60
-    total_buttons = 4
-    spacing = (menu_w - 40 - total_buttons * button_w) // (total_buttons - 1)
-    for i, mult in enumerate([1, 2, 4, 8]):
-        btn_x = menu_x + 20 + i * (button_w + spacing)
-        rect = pygame.Rect(btn_x, y, button_w, 35)
+    super_button_w = 70
+    total_super = len(SUPERSAMPLE_CHOICES)
+    if state.supersample_index >= total_super:
+        state.supersample_index = 0
+        state.supersample_factor = SUPERSAMPLE_CHOICES[0]
+    spacing = (menu_w - 40 - total_super * super_button_w) // max(1, (total_super - 1)) if total_super > 1 else 0
+    for idx, factor in enumerate(SUPERSAMPLE_CHOICES):
+        btn_x = menu_x + 20 + idx * (super_button_w + spacing)
+        rect = pygame.Rect(btn_x, y, super_button_w, 35)
         hover = rect.collidepoint(mouse_pos)
-        is_selected = (menu.selected_multiplier == mult)
+        selected = (state.supersample_index == idx)
+
+        if selected:
+            color = (100, 200, 150)
+        elif hover:
+            color = (80, 80, 80)
+        else:
+            color = (50, 50, 50)
+
+        pygame.draw.rect(screen, color, rect)
+        pygame.draw.rect(screen, (100, 100, 100), rect, 1)
+
+        font_btn = pygame.font.Font(None, 24)
+        text_surf = font_btn.render(f"{factor:.1f}×", True, (200, 200, 200))
+        screen.blit(text_surf, (btn_x + (super_button_w - text_surf.get_width()) // 2, y + (35 - text_surf.get_height()) // 2))
+
+        if hover and mouse_down:
+            state.supersample_index = idx
+            state.supersample_factor = factor
+
+    y += 50
+
+    # Multiplier buttons
+    font = pygame.font.Font(None, 22)
+    label = font.render("Render Resolution:", True, (200, 200, 200))
+    screen.blit(label, (menu_x + 20, y))
+    y += 30
+
+    resolution_choices = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+    button_w = 70
+    button_h = 35
+    columns = 3
+    spacing = 15
+    rows = (len(resolution_choices) + columns - 1) // columns
+
+    for idx, mult in enumerate(resolution_choices):
+        row = idx // columns
+        col = idx % columns
+        btn_x = menu_x + 20 + col * (button_w + spacing)
+        btn_y = y + row * (button_h + 10)
+        rect = pygame.Rect(btn_x, btn_y, button_w, button_h)
+        hover = rect.collidepoint(mouse_pos)
+        is_selected = abs(menu.selected_multiplier - mult) < 1e-6
 
         if is_selected:
             color = (100, 120, 255)
@@ -111,14 +155,15 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         pygame.draw.rect(screen, color, rect)
         pygame.draw.rect(screen, (100, 100, 100), rect, 1)
 
-        font_btn = pygame.font.Font(None, 24)
-        text_surf = font_btn.render(f"{mult}×", True, (200, 200, 200))
-        screen.blit(text_surf, (btn_x + (button_w - text_surf.get_width()) // 2, y + (35 - text_surf.get_height()) // 2))
+        font_btn = pygame.font.Font(None, 22)
+        text_surf = font_btn.render(f"{mult:g}×", True, (200, 200, 200))
+        screen.blit(text_surf, (btn_x + (button_w - text_surf.get_width()) // 2, btn_y + (button_h - text_surf.get_height()) // 2))
 
         if hover and mouse_down:
             menu.selected_multiplier = mult
 
-    y += 50
+    y += rows * (button_h + 10)
+    y += 10
 
     # LIC passes input
     label = font.render("LIC Passes:", True, (200, 200, 200))
@@ -187,6 +232,8 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     )
 
     valid_stream = False
+    valid_seed = True
+    seed_value = state.noise_seed
 
     if menu.streamlength_input_focused and event_key:
         value = menu.streamlength_text
@@ -210,15 +257,74 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     except ValueError:
         valid_stream = False
 
+    y += 45
+
+    seed_label = font.render("Noise Seed:", True, (200, 200, 200))
+    screen.blit(seed_label, (menu_x + 20, y))
+    y += 30
+
+    seed_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    seed_hover = seed_rect.collidepoint(mouse_pos)
+
+    if seed_hover and mouse_down:
+        menu.seed_input_focused = True
+        menu.seed_pending_clear = True
+        menu.input_focused = False
+        menu.streamlength_input_focused = False
+
+    color = (70, 70, 70) if menu.seed_input_focused else (40, 40, 40)
+    pygame.draw.rect(screen, color, seed_rect)
+    pygame.draw.rect(
+        screen,
+        (100, 100, 100),
+        seed_rect,
+        2 if menu.seed_input_focused else 1,
+    )
+
+    seed_text = state.noise_seed_text
+    seed_display = seed_text if seed_text else ""
+    seed_surf = font_input.render(seed_display, True, (200, 200, 200))
+    screen.blit(
+        seed_surf,
+        (seed_rect.x + 8, seed_rect.y + (35 - seed_surf.get_height()) // 2),
+    )
+
+    if menu.seed_input_focused and event_key:
+        value = state.noise_seed_text
+        if menu.seed_pending_clear:
+            value = ""
+            menu.seed_pending_clear = False
+        if event_key == pygame.K_BACKSPACE:
+            value = value[:-1]
+        elif event_key in (pygame.K_MINUS, pygame.K_KP_MINUS):
+            if value == "":
+                value = "-"
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            value += chr(event_key)
+        state.noise_seed_text = value
+
+    try:
+        seed_value = int(state.noise_seed_text) if state.noise_seed_text not in ("", "-") else 0
+        valid_seed = True
+    except ValueError:
+        valid_seed = False
+
     y += 55
 
     # Render and Cancel buttons
     action = None
-    if button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down) and valid_stream:
+    if (
+        button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down)
+        and valid_stream
+        and valid_seed
+    ):
         action = menu.selected_multiplier
 
     if button(screen, menu_x + 160, y, 130, 35, "Cancel", mouse_pos, mouse_down):
         action = -999
+
+    if valid_seed:
+        state.noise_seed = seed_value
 
     return action
 
@@ -366,6 +472,9 @@ def panel(screen, project, state, mouse_pos, mouse_down):
             menu.streamlength_pending_clear = False
             menu.streamlength_text = f"{project.streamlength_factor:.4f}"
             menu.pending_streamlength_factor = project.streamlength_factor
+            menu.seed_input_focused = False
+            menu.seed_pending_clear = False
+            state.noise_seed_text = str(state.noise_seed)
 
         y += 50
     else:
@@ -381,6 +490,28 @@ def panel(screen, project, state, mouse_pos, mouse_down):
         title = font.render("Post-processing:", True, (220, 220, 220))
         screen.blit(title, (panel_x, y))
         y += 35
+
+        down = state.downsample
+        new_sigma, dragging = slider(
+            screen,
+            panel_x,
+            y,
+            180,
+            "Blur σ",
+            down.sigma_factor,
+            0.1,
+            2.0,
+            mouse_pos,
+            down.dragging,
+            mouse_down,
+            unit="",
+        )
+        if new_sigma != down.sigma_factor:
+            down.sigma_factor = new_sigma
+            down.sigma_text = f"{new_sigma:.2f}"
+            down.dirty = True
+        down.dragging = dragging
+        y += 45
 
         if button(screen, panel_x, y, 180, 35, "Enhance (HP+CLAHE)...", mouse_pos, mouse_down):
             menu = state.highpass_menu

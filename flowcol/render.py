@@ -3,7 +3,7 @@ import pygame
 from PIL import Image
 from pathlib import Path
 from datetime import datetime
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, zoom
 from skimage.exposure import equalize_adapthist
 from flowcol.types import RenderInfo, Project
 from flowcol.lic import convolve, get_cosine_kernel
@@ -67,7 +67,13 @@ def save_render(arr: np.ndarray, project: Project, multiplier: int) -> RenderInf
     filename = f"lic_{multiplier}x_{timestamp}.png"
     filepath = renders_dir / filename
 
-    img = (arr * 255).astype(np.uint8)
+    arr_min = float(arr.min())
+    arr_max = float(arr.max())
+    if arr_max > arr_min:
+        norm = (arr - arr_min) / (arr_max - arr_min)
+    else:
+        norm = np.zeros_like(arr)
+    img = (norm * 255).astype(np.uint8)
     Image.fromarray(img, mode='L').save(filepath)
 
     render_info = RenderInfo(multiplier=multiplier, filepath=str(filepath), timestamp=timestamp)
@@ -104,3 +110,20 @@ def apply_highpass_clahe(
     if max_val > 1.0 or min_val < 0.0:
         enhanced = enhanced * (max_val - min_val) + min_val
     return enhanced
+
+
+def downsample_lic(
+    arr: np.ndarray,
+    target_shape: tuple[int, int],
+    supersample: float,
+    sigma: float,
+) -> np.ndarray:
+    """Gaussian blur + bilinear resize from supersampled grid to target resolution."""
+    if arr.shape == target_shape:
+        return arr.copy()
+
+    sigma = max(sigma, 0.0)
+    filtered = gaussian_filter(arr, sigma=sigma) if sigma > 0 else arr
+    scale_y = target_shape[0] / filtered.shape[0]
+    scale_x = target_shape[1] / filtered.shape[1]
+    return zoom(filtered, (scale_y, scale_x), order=1)

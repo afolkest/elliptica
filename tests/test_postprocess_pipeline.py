@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "LineIntegralConvolutions" / "src"))
 
 from flowcol.types import Project, Conductor
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, apply_highpass_clahe
+from flowcol.render import compute_lic, apply_highpass_clahe, downsample_lic
 from flowcol.mask_utils import load_alpha
 from vegtamr.lic import compute_lic_with_postprocessing
 
@@ -32,12 +32,19 @@ def test_full_pipeline_matches_reference():
     base_min = float(min(project.canvas_resolution))
     project.streamlength_factor = 30.0 / base_min
 
-    ex, ey = compute_field(project, multiplier=1)
+    multiplier = 2
+    supersample = 1.5
+    scale = multiplier * supersample
+    compute_w = int(round(project.canvas_resolution[0] * scale))
+    compute_h = int(round(project.canvas_resolution[1] * scale))
+    compute_min = min(compute_w, compute_h)
+
+    ex, ey = compute_field(project, multiplier=multiplier, supersample=supersample)
 
     rng = np.random.default_rng(0)
-    seed_texture = rng.random(project.canvas_resolution[::-1]).astype(np.float32)
+    seed_texture = rng.random((compute_h, compute_w)).astype(np.float32)
 
-    pixel_streamlength = max(int(round(project.streamlength_factor * base_min)), 1)
+    pixel_streamlength = max(int(round(project.streamlength_factor * compute_min)), 1)
     ours_lic = compute_lic(
         ex,
         ey,
@@ -47,8 +54,8 @@ def test_full_pipeline_matches_reference():
         seed=None,
         boundaries="closed",
     )
-    sigma_factor = 3.0 / base_min
-    sigma_pixels = sigma_factor * base_min
+    sigma_factor = 3.0 / 1024.0
+    sigma_pixels = sigma_factor * compute_min
     ours_post = apply_highpass_clahe(
         ours_lic,
         sigma=sigma_pixels,
@@ -57,7 +64,14 @@ def test_full_pipeline_matches_reference():
         kernel_cols=8,
         num_bins=150,
     )
-    ours_display = np.clip(ours_post, 0.0, 1.0)
+    downsample_sigma = 0.6 * supersample
+    render_shape = (
+        project.canvas_resolution[1] * multiplier,
+        project.canvas_resolution[0] * multiplier,
+    )
+    ours_down = downsample_lic(ours_post, render_shape, supersample, downsample_sigma)
+    ours_min, ours_max = float(ours_down.min()), float(ours_down.max())
+    ours_display = (ours_down - ours_min) / (ours_max - ours_min + 1e-10)
 
     mag = np.sqrt(ex**2 + ey**2)
     mag_max = float(np.max(mag)) if np.max(mag) > 1e-10 else 1e-10
@@ -80,8 +94,9 @@ def test_full_pipeline_matches_reference():
         run_in_parallel=True,
         verbose=False,
     )
-
-    reference_display = np.clip(reference, 0.0, 1.0)
+    reference_down = downsample_lic(reference, render_shape, supersample, downsample_sigma)
+    ref_min, ref_max = float(reference_down.min()), float(reference_down.max())
+    reference_display = (reference_down - ref_min) / (ref_max - ref_min + 1e-10)
 
     diff = np.abs(ours_display - reference_display)
     mean_diff = float(diff.mean())

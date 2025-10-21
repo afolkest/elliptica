@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 from flowcol.types import Conductor, Project, UIState
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, array_to_surface, save_render, apply_highpass_clahe
+from flowcol.render import compute_lic, array_to_surface, save_render, apply_highpass_clahe, downsample_lic
 from ui_panel import panel, render_menu, highpass_menu
 
 BG_COLOR = (20, 20, 20)
@@ -60,32 +60,63 @@ def update_render_surface(project: Project, state: UIState, arr: np.ndarray):
         state.rendered_surface = pygame.transform.smoothscale(surface, (display_w, display_h))
 
 
-def perform_render(project: Project, state: UIState, multiplier: int):
-    canvas_w, canvas_h = project.canvas_resolution
-    render_w, render_h = canvas_w * multiplier, canvas_h * multiplier
+def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
+    if state.highres_render_data is None or state.current_render_multiplier <= 0:
+        return None
 
-    if render_w > MAX_RENDER_DIM or render_h > MAX_RENDER_DIM:
+    render_w = max(1, int(round(project.canvas_resolution[0] * state.current_render_multiplier)))
+    render_h = max(1, int(round(project.canvas_resolution[1] * state.current_render_multiplier)))
+    if render_w <= 0 or render_h <= 0:
+        return None
+
+    sigma = state.downsample.sigma_factor * state.current_supersample
+    display_array = downsample_lic(
+        state.highres_render_data,
+        (render_h, render_w),
+        state.current_supersample,
+        sigma,
+    )
+
+    state.current_render_data = display_array
+    update_render_surface(project, state, display_array)
+    return display_array
+
+
+def perform_render(project: Project, state: UIState, multiplier: float):
+    canvas_w, canvas_h = project.canvas_resolution
+
+    supersample = state.supersample_factor
+    scale = multiplier * supersample
+    compute_w = max(1, int(round(canvas_w * scale)))
+    compute_h = max(1, int(round(canvas_h * scale)))
+
+    if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return False
 
-    ex, ey = compute_field(project, multiplier)
+    ex, ey = compute_field(project, multiplier, supersample)
     num_passes = max(1, state.render_menu.num_passes)
-    base_min = min(project.canvas_resolution)
-    streamlength_pixels = max(int(round(project.streamlength_factor * base_min * multiplier)), 1)
+    min_compute = min(compute_w, compute_h)
+    streamlength_pixels = max(int(round(project.streamlength_factor * min_compute)), 1)
+    seed = state.noise_seed
     lic_array = compute_lic(
         ex,
         ey,
         streamlength_pixels,
         num_passes=num_passes,
-        seed=0,
+        seed=seed,
     )
-    save_render(lic_array, project, multiplier)
-
+    state.highres_render_data = lic_array.copy()
     state.original_render_data = lic_array.copy()
-    state.current_render_data = lic_array
     state.current_render_multiplier = multiplier
+    state.current_supersample = supersample
+    state.current_noise_seed = seed
+    state.current_compute_resolution = (compute_w, compute_h)
     state.render_mode = "render"
 
-    update_render_surface(project, state, lic_array)
+    display_array = recompute_display(project, state)
+    if display_array is not None:
+        save_render(display_array, project, multiplier)
+    state.downsample.dirty = False
 
     return True
 
@@ -141,6 +172,9 @@ def handle_events(state: UIState, project: Project, canvas_res: tuple[int, int])
                     menu_state.streamlength_pending_clear = False
                     menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
                     menu_state.pending_streamlength_factor = project.streamlength_factor
+                    menu_state.seed_input_focused = False
+                    menu_state.seed_pending_clear = False
+                    state.noise_seed_text = str(state.noise_seed)
                     if menu_state.num_passes == 0:
                         menu_state.num_passes = 1
                 else:
@@ -164,6 +198,8 @@ def main():
     state.render_menu.pending_streamlength_factor = project.streamlength_factor
     state.render_menu.streamlength_text = f"{project.streamlength_factor:.4f}"
     state.highpass_menu.sigma_factor_text = f"{state.highpass_menu.sigma_factor:.4f}"
+    state.noise_seed_text = str(state.noise_seed)
+    state.downsample.sigma_text = f"{state.downsample.sigma_factor:.2f}"
 
     window_res = (canvas_res[0] + panel_width, canvas_res[1])
     screen = pygame.display.set_mode(window_res)
@@ -223,8 +259,12 @@ def main():
                 highpass_state.pending_clear = -1
 
                 if state.original_render_data is not None:
-                    base_min = min(project.canvas_resolution)
-                    sigma_pixels = sigma_factor * base_min * state.current_render_multiplier
+                    compute_h, compute_w = state.current_compute_resolution
+                    if compute_h == 0 or compute_w == 0:
+                        compute_min = min(project.canvas_resolution) * state.current_render_multiplier * state.current_supersample
+                    else:
+                        compute_min = min(compute_h, compute_w)
+                    sigma_pixels = sigma_factor * compute_min
                     filtered = apply_highpass_clahe(
                         state.original_render_data,
                         sigma_pixels,
@@ -233,8 +273,11 @@ def main():
                         cols,
                         bins,
                     )
-                    state.current_render_data = filtered
-                    update_render_surface(project, state, filtered)
+                    state.highres_render_data = filtered
+                    recompute_display(project, state)
+        elif state.render_mode == "render" and not state.downsample.dragging and state.downsample.dirty:
+            state.downsample.dirty = False
+            recompute_display(project, state)
         menu_state = state.render_menu
 
         if menu_state.is_open:
@@ -246,6 +289,9 @@ def main():
                 menu_state.streamlength_pending_clear = False
                 menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
                 menu_state.pending_streamlength_factor = project.streamlength_factor
+                menu_state.seed_input_focused = False
+                menu_state.seed_pending_clear = False
+                state.noise_seed_text = str(state.noise_seed)
                 if menu_state.num_passes == 0:
                     menu_state.num_passes = 1
             elif menu_action and menu_action > 0:
@@ -254,8 +300,11 @@ def main():
                 menu_state.input_focused = False
                 menu_state.streamlength_input_focused = False
                 menu_state.streamlength_pending_clear = False
+                menu_state.seed_input_focused = False
+                menu_state.seed_pending_clear = False
                 project.streamlength_factor = menu_state.pending_streamlength_factor
                 menu_state.streamlength_text = f"{project.streamlength_factor:.4f}"
+                state.noise_seed_text = str(state.noise_seed)
                 if menu_state.num_passes == 0:
                     menu_state.num_passes = 1
 
@@ -270,8 +319,8 @@ def main():
             screen = pygame.display.set_mode(expected_window)
         elif action == -3:
             if state.original_render_data is not None:
-                state.current_render_data = state.original_render_data.copy()
-                update_render_surface(project, state, state.current_render_data)
+                state.highres_render_data = state.original_render_data.copy()
+                recompute_display(project, state)
 
         pygame.display.flip()
         clock.tick(60)

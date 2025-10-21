@@ -4,20 +4,24 @@ from flowcol.types import Project
 from flowcol.poisson import solve_poisson_system
 
 
-def compute_field(project: Project, multiplier: int = 1) -> tuple[np.ndarray, np.ndarray]:
-    """Compute electric field from conductors. Returns (Ex, Ey)."""
+def compute_field(project: Project, multiplier: float = 1.0, supersample: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """Compute electric field from conductors. Returns (Ex, Ey) on supersampled grid."""
     canvas_w, canvas_h = project.canvas_resolution
-    field_w, field_h = canvas_w * multiplier, canvas_h * multiplier
+    scale = multiplier * supersample
+    field_w = max(1, int(round(canvas_w * scale)))
+    field_h = max(1, int(round(canvas_h * scale)))
+    scale_x = field_w / max(canvas_w, 1)
+    scale_y = field_h / max(canvas_h, 1)
 
     dirichlet_mask = np.zeros((field_h, field_w), dtype=bool)
     dirichlet_values = np.zeros((field_h, field_w), dtype=float)
 
     for conductor in project.conductors:
-        x = conductor.position[0] * multiplier
-        y = conductor.position[1] * multiplier
+        x = conductor.position[0] * scale_x
+        y = conductor.position[1] * scale_y
 
-        if multiplier > 1:
-            scaled_mask = zoom(conductor.mask, multiplier, order=1)
+        if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
+            scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=1)
         else:
             scaled_mask = conductor.mask
 

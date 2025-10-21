@@ -1,2 +1,4 @@
 -add ability to control random seed for texture
 -at render, add support for how many rounds we do 
+-noise oversampling
+-blue noise 
