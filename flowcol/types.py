@@ -64,6 +64,8 @@ class HighPassMenuState:
     kernel_rows_text: str = str(defaults.DEFAULT_CLAHE_KERNEL_ROWS)
     kernel_cols_text: str = str(defaults.DEFAULT_CLAHE_KERNEL_COLS)
     num_bins_text: str = str(defaults.DEFAULT_CLAHE_BINS)
+    strength: float = defaults.DEFAULT_CLAHE_STRENGTH
+    strength_dragging: bool = False
     focused_field: int = -1
     pending_clear: int = -1
 

@@ -267,19 +267,22 @@ def main():
                 highpass_state.kernel_rows_text = str(highpass_state.kernel_rows)
                 highpass_state.kernel_cols_text = str(highpass_state.kernel_cols)
                 highpass_state.num_bins_text = str(highpass_state.num_bins)
+                highpass_state.strength_dragging = False
             elif isinstance(hp_action, tuple):
-                sigma_factor, clip, rows, cols, bins = hp_action
+                sigma_factor, clip, rows, cols, bins, strength = hp_action
                 sigma_factor = max(sigma_factor, 1e-5)
                 clip = max(clip, 1e-4)
                 rows = max(rows, 1)
                 cols = max(cols, 1)
                 bins = max(bins, 2)
+                strength = np.clip(strength, 0.0, 1.0)
 
                 highpass_state.sigma_factor = sigma_factor
                 highpass_state.clip_limit = clip
                 highpass_state.kernel_rows = rows
                 highpass_state.kernel_cols = cols
                 highpass_state.num_bins = bins
+                highpass_state.strength = strength
 
                 highpass_state.sigma_factor_text = f"{sigma_factor:.4f}"
                 highpass_state.clip_text = f"{clip:.4f}"
@@ -290,6 +293,7 @@ def main():
                 highpass_state.is_open = False
                 highpass_state.focused_field = -1
                 highpass_state.pending_clear = -1
+                highpass_state.strength_dragging = False
 
                 if state.original_render_data is not None:
                     compute_h, compute_w = state.current_compute_resolution
@@ -305,6 +309,7 @@ def main():
                         rows,
                         cols,
                         bins,
+                        strength,
                     )
                     state.highres_render_data = filtered
                     recompute_display(project, state)

@@ -129,13 +129,15 @@ def apply_highpass_clahe(
     kernel_rows: int,
     kernel_cols: int,
     num_bins: int,
+    strength: float = defaults.DEFAULT_CLAHE_STRENGTH,
 ) -> np.ndarray:
-    """Gaussian high-pass followed by CLAHE. Output retains original dynamic range."""
+    """Gaussian high-pass followed by CLAHE blended with original array."""
     sigma = max(sigma, 1e-3)
     clip_limit = max(clip_limit, 1e-4)
     kernel_rows = max(kernel_rows, 1)
     kernel_cols = max(kernel_cols, 1)
     num_bins = max(num_bins, 2)
+    strength = float(np.clip(strength, 0.0, 1.0))
 
     high = arr - gaussian_filter(arr, sigma)
     min_val = float(high.min())
@@ -148,7 +150,11 @@ def apply_highpass_clahe(
     )
     if max_val > 1.0 or min_val < 0.0:
         enhanced = enhanced * (max_val - min_val) + min_val
-    return enhanced
+    if strength >= 1.0:
+        return enhanced
+    if strength <= 0.0:
+        return arr
+    return (1.0 - strength) * arr + strength * enhanced
 
 
 def downsample_lic(

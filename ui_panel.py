@@ -469,7 +469,28 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
 
         y += 46
 
-    if menu.focused_field != -1 and event_key:
+    strength_y = y
+    strength_w = menu_w - 40
+    new_strength, dragging = slider(
+        screen,
+        menu_x + 20,
+        strength_y,
+        strength_w,
+        "Strength",
+        menu.strength,
+        0.0,
+        1.0,
+        mouse_pos,
+        menu.strength_dragging,
+        mouse_down,
+        unit="",
+    )
+    if new_strength != menu.strength:
+        menu.strength = new_strength
+    menu.strength_dragging = dragging
+    y += 60
+
+    if menu.focused_field != -1 and event_key and not menu.strength_dragging:
         attr = fields[menu.focused_field]
         name = attr[1]
         is_float = attr[2]
@@ -503,6 +524,7 @@ def highpass_menu(screen, state, mouse_pos, mouse_down, event_key):
                 int(menu.kernel_rows_text),
                 int(menu.kernel_cols_text),
                 int(menu.num_bins_text),
+                menu.strength,
             )
             action = params
     if button(screen, menu_x + 160, y, 120, 35, "Cancel", mouse_pos, mouse_down):
@@ -668,7 +690,7 @@ def panel(screen, project, state, mouse_pos, mouse_down, event_key=None):
         down.dragging = dragging
         y += 45
 
-        if button(screen, panel_x, y, 180, 35, "Enhance (HP+CLAHE)...", mouse_pos, mouse_down):
+        if button(screen, panel_x, y, 180, 35, "Equalize...", mouse_pos, mouse_down):
             menu = state.highpass_menu
             menu.is_open = True
             menu.focused_field = 0
