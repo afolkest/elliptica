@@ -32,7 +32,7 @@ class Project:
 class RenderMenuState:
     is_open: bool = False
     selected_multiplier: float = 1.0
-    num_passes: int = 1
+    num_passes: int = 2
     input_focused: bool = False
     streamlength_text: str = "0.0293"
     streamlength_input_focused: bool = False
@@ -44,6 +44,10 @@ class RenderMenuState:
     margin_input_focused: bool = False
     margin_pending_clear: bool = False
     pending_margin_factor: float = 0.10
+    noise_sigma_text: str = "2.0"
+    noise_sigma_input_focused: bool = False
+    noise_sigma_pending_clear: bool = False
+    pending_noise_sigma: float = 2.0
 
 
 @dataclass
@@ -111,3 +115,4 @@ class UIState:
     canvas_height_text: str = ""
     canvas_focus: int = -1
     canvas_pending_clear: bool = False
+    noise_sigma: float = 2.0

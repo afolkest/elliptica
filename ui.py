@@ -110,6 +110,7 @@ def perform_render(project: Project, state: UIState, multiplier: float):
         streamlength_pixels,
         num_passes=num_passes,
         seed=seed,
+        noise_sigma=state.noise_sigma,
     )
 
     canvas_scaled_w = max(1, int(round(canvas_w * scale)))
@@ -225,6 +226,8 @@ def main():
     state.render_menu.streamlength_text = f"{project.streamlength_factor:.4f}"
     state.render_menu.margin_text = f"{state.margin_factor:.3f}"
     state.render_menu.pending_margin_factor = state.margin_factor
+    state.render_menu.noise_sigma_text = f"{state.noise_sigma:.2f}"
+    state.render_menu.pending_noise_sigma = state.noise_sigma
     state.highpass_menu.sigma_factor_text = f"{state.highpass_menu.sigma_factor:.4f}"
     state.noise_seed_text = str(state.noise_seed)
     state.downsample.sigma_text = f"{state.downsample.sigma_factor:.2f}"

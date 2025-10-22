@@ -9,23 +9,29 @@ from flowcol.types import RenderInfo, Project
 from flowcol.lic import convolve, get_cosine_kernel
 
 
-def generate_noise(shape: tuple[int, int], seed: int | None, oversample: float = 1.5) -> np.ndarray:
+def generate_noise(
+    shape: tuple[int, int],
+    seed: int | None,
+    oversample: float = 1.0,
+    lowpass_sigma: float = 2.0,
+) -> np.ndarray:
     height, width = shape
-    if oversample <= 1.0:
-        rng = np.random.default_rng(seed)
-        base = rng.random((height, width)).astype(np.float32)
-        return base
-
     rng = np.random.default_rng(seed)
-    high_h = max(1, int(round(height * oversample)))
-    high_w = max(1, int(round(width * oversample)))
-    high = rng.random((high_h, high_w)).astype(np.float32)
+    if oversample > 1.0:
+        high_h = max(1, int(round(height * oversample)))
+        high_w = max(1, int(round(width * oversample)))
+        base = rng.random((high_h, high_w)).astype(np.float32)
+    else:
+        base = rng.random((height, width)).astype(np.float32)
 
-    blurred = gaussian_filter(high, sigma=oversample)
-    filtered = high - blurred
-    scale_y = height / high_h
-    scale_x = width / high_w
-    base = zoom(filtered, (scale_y, scale_x), order=1)
+    sigma = max(lowpass_sigma, 1e-3)
+    base = gaussian_filter(base, sigma=sigma)
+
+    if oversample > 1.0:
+        scale_y = height / base.shape[0]
+        scale_x = width / base.shape[1]
+        base = zoom(base, (scale_y, scale_x), order=1)
+
     base_min = float(base.min())
     base_max = float(base.max())
     if base_max > base_min:
@@ -45,6 +51,7 @@ def compute_lic(
     seed: int | None = 0,
     boundaries: str = "closed",
     noise_oversample: float = 1.5,
+    noise_sigma: float = 2.0,
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1]."""
     field_h, field_w = ex.shape
@@ -52,7 +59,12 @@ def compute_lic(
     streamlength = max(int(streamlength), 1)
 
     if texture is None:
-        texture = generate_noise((field_h, field_w), seed, oversample=noise_oversample)
+        texture = generate_noise(
+            (field_h, field_w),
+            seed,
+            oversample=noise_oversample,
+            lowpass_sigma=noise_sigma,
+        )
     else:
         texture = texture.astype(np.float32, copy=False)
 

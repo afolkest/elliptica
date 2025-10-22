@@ -75,9 +75,9 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     screen.blit(backdrop, (0, 0))
 
     # Menu panel
-    menu_w, menu_h = 360, 430
+    menu_w, menu_h = 600, 520
     menu_x = (screen_w - menu_w) // 2
-    menu_y = (screen_h - menu_h) // 2
+    menu_y = max(40, (screen_h - menu_h) // 2)
     pygame.draw.rect(screen, (40, 40, 40), (menu_x, menu_y, menu_w, menu_h))
     pygame.draw.rect(screen, (100, 100, 100), (menu_x, menu_y, menu_w, menu_h), 2)
 
@@ -125,6 +125,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     # Multiplier buttons
     font = pygame.font.Font(None, 22)
+    font_input = pygame.font.Font(None, 24)
     label = font.render("Render Resolution:", True, (200, 200, 200))
     screen.blit(label, (menu_x + 20, y))
     y += 30
@@ -163,33 +164,43 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
             menu.selected_multiplier = mult
 
     y += rows * (button_h + 10)
-    y += 10
+    y += 20
 
-    # LIC passes input
+    col1_x = menu_x + 30
+    col2_x = menu_x + menu_w // 2 + 20
+    row_height = 80
+    row_y = y
+
+    input_w = 140
+    input_h = 36
+
+    valid_stream = False
+    valid_margin = False
+    valid_seed = False
+    valid_sigma = False
+    seed_value = state.noise_seed
+
+    # Row 1: LIC passes (left) and streamlength factor (right)
     label = font.render("LIC Passes:", True, (200, 200, 200))
-    screen.blit(label, (menu_x + 20, y))
-    y += 30
+    screen.blit(label, (col1_x, row_y))
+    passes_rect = pygame.Rect(col1_x, row_y + 28, input_w, input_h)
+    passes_hover = passes_rect.collidepoint(mouse_pos)
 
-    input_rect = pygame.Rect(menu_x + 20, y, 80, 35)
-    input_hover = input_rect.collidepoint(mouse_pos)
-
-    if input_hover and mouse_down:
+    if passes_hover and mouse_down:
         menu.input_focused = True
         menu.streamlength_input_focused = False
         menu.streamlength_pending_clear = False
         menu.margin_input_focused = False
         menu.seed_input_focused = False
+        menu.noise_sigma_input_focused = False
 
     color = (70, 70, 70) if menu.input_focused else (40, 40, 40)
-    pygame.draw.rect(screen, color, input_rect)
-    pygame.draw.rect(screen, (100, 100, 100), input_rect, 2 if menu.input_focused else 1)
+    pygame.draw.rect(screen, color, passes_rect)
+    pygame.draw.rect(screen, (100, 100, 100), passes_rect, 2 if menu.input_focused else 1)
+    passes_text = str(menu.num_passes) if menu.num_passes > 0 else ""
+    passes_surf = font_input.render(passes_text, True, (200, 200, 200))
+    screen.blit(passes_surf, (passes_rect.x + 8, passes_rect.y + (input_h - passes_surf.get_height()) // 2))
 
-    font_input = pygame.font.Font(None, 24)
-    display_text = str(menu.num_passes) if menu.num_passes > 0 else ""
-    text_surf = font_input.render(display_text, True, (200, 200, 200))
-    screen.blit(text_surf, (menu_x + 30, y + (35 - text_surf.get_height()) // 2))
-
-    # Handle keyboard input for number
     if menu.input_focused and event_key:
         if event_key == pygame.K_BACKSPACE:
             menu.num_passes = menu.num_passes // 10
@@ -202,13 +213,9 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
                 if new_val <= 99:
                     menu.num_passes = new_val
 
-    y += 45
-
     label = font.render("Streamlength factor:", True, (200, 200, 200))
-    screen.blit(label, (menu_x + 20, y))
-    y += 30
-
-    stream_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    screen.blit(label, (col2_x, row_y))
+    stream_rect = pygame.Rect(col2_x, row_y + 28, input_w + 20, input_h)
     stream_hover = stream_rect.collidepoint(mouse_pos)
 
     if stream_hover and mouse_down:
@@ -217,27 +224,14 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.input_focused = False
         menu.margin_input_focused = False
         menu.seed_input_focused = False
+        menu.noise_sigma_input_focused = False
 
     color = (70, 70, 70) if menu.streamlength_input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, stream_rect)
-    pygame.draw.rect(
-        screen,
-        (100, 100, 100),
-        stream_rect,
-        2 if menu.streamlength_input_focused else 1,
-    )
-
-    stream_text = menu.streamlength_text
-    stream_display = stream_text if stream_text else ""
-    text_surf = font_input.render(stream_display, True, (200, 200, 200))
-    screen.blit(
-        text_surf,
-        (stream_rect.x + 8, stream_rect.y + (35 - text_surf.get_height()) // 2),
-    )
-
-    valid_stream = False
-    valid_seed = True
-    seed_value = state.noise_seed
+    pygame.draw.rect(screen, (100, 100, 100), stream_rect, 2 if menu.streamlength_input_focused else 1)
+    stream_text = menu.streamlength_text if menu.streamlength_text else ""
+    stream_surf = font_input.render(stream_text, True, (200, 200, 200))
+    screen.blit(stream_surf, (stream_rect.x + 8, stream_rect.y + (input_h - stream_surf.get_height()) // 2))
 
     if menu.streamlength_input_focused and event_key:
         value = menu.streamlength_text
@@ -261,13 +255,12 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     except ValueError:
         valid_stream = False
 
-    y += 45
+    row_y += row_height
 
+    # Row 2: Padding margin (left) and noise seed (right)
     margin_label = font.render("Padding margin:", True, (200, 200, 200))
-    screen.blit(margin_label, (menu_x + 20, y))
-    y += 30
-
-    margin_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    screen.blit(margin_label, (col1_x, row_y))
+    margin_rect = pygame.Rect(col1_x, row_y + 28, input_w + 10, input_h)
     margin_hover = margin_rect.collidepoint(mouse_pos)
 
     if margin_hover and mouse_down:
@@ -276,25 +269,14 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.input_focused = False
         menu.streamlength_input_focused = False
         menu.seed_input_focused = False
+        menu.noise_sigma_input_focused = False
 
     color = (70, 70, 70) if menu.margin_input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, margin_rect)
-    pygame.draw.rect(
-        screen,
-        (100, 100, 100),
-        margin_rect,
-        2 if menu.margin_input_focused else 1,
-    )
-
-    margin_text = menu.margin_text
-    margin_display = margin_text if margin_text else ""
-    margin_surf = font_input.render(margin_display, True, (200, 200, 200))
-    screen.blit(
-        margin_surf,
-        (margin_rect.x + 8, margin_rect.y + (35 - margin_surf.get_height()) // 2),
-    )
-
-    valid_margin = True
+    pygame.draw.rect(screen, (100, 100, 100), margin_rect, 2 if menu.margin_input_focused else 1)
+    margin_text = menu.margin_text if menu.margin_text else ""
+    margin_surf = font_input.render(margin_text, True, (200, 200, 200))
+    screen.blit(margin_surf, (margin_rect.x + 8, margin_rect.y + (input_h - margin_surf.get_height()) // 2))
 
     if menu.margin_input_focused and event_key:
         value = menu.margin_text
@@ -318,13 +300,9 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     except ValueError:
         valid_margin = False
 
-    y += 45
-
     seed_label = font.render("Noise Seed:", True, (200, 200, 200))
-    screen.blit(seed_label, (menu_x + 20, y))
-    y += 30
-
-    seed_rect = pygame.Rect(menu_x + 20, y, 120, 35)
+    screen.blit(seed_label, (col2_x, row_y))
+    seed_rect = pygame.Rect(col2_x, row_y + 28, input_w + 20, input_h)
     seed_hover = seed_rect.collidepoint(mouse_pos)
 
     if seed_hover and mouse_down:
@@ -333,23 +311,14 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
         menu.input_focused = False
         menu.streamlength_input_focused = False
         menu.margin_input_focused = False
+        menu.noise_sigma_input_focused = False
 
     color = (70, 70, 70) if menu.seed_input_focused else (40, 40, 40)
     pygame.draw.rect(screen, color, seed_rect)
-    pygame.draw.rect(
-        screen,
-        (100, 100, 100),
-        seed_rect,
-        2 if menu.seed_input_focused else 1,
-    )
-
-    seed_text = state.noise_seed_text
-    seed_display = seed_text if seed_text else ""
-    seed_surf = font_input.render(seed_display, True, (200, 200, 200))
-    screen.blit(
-        seed_surf,
-        (seed_rect.x + 8, seed_rect.y + (35 - seed_surf.get_height()) // 2),
-    )
+    pygame.draw.rect(screen, (100, 100, 100), seed_rect, 2 if menu.seed_input_focused else 1)
+    seed_text = state.noise_seed_text if state.noise_seed_text else ""
+    seed_surf = font_input.render(seed_text, True, (200, 200, 200))
+    screen.blit(seed_surf, (seed_rect.x + 8, seed_rect.y + (input_h - seed_surf.get_height()) // 2))
 
     if menu.seed_input_focused and event_key:
         value = state.noise_seed_text
@@ -371,23 +340,74 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     except ValueError:
         valid_seed = False
 
-    y += 55
+    row_y += row_height
+
+    # Row 3: Noise LP sigma (left column, spans right for spacing)
+    sigma_label = font.render("Noise LP sigma:", True, (200, 200, 200))
+    screen.blit(sigma_label, (col1_x, row_y))
+    sigma_rect = pygame.Rect(col1_x, row_y + 28, input_w + 20, input_h)
+    sigma_hover = sigma_rect.collidepoint(mouse_pos)
+
+    if sigma_hover and mouse_down:
+        menu.noise_sigma_input_focused = True
+        menu.noise_sigma_pending_clear = True
+        menu.input_focused = False
+        menu.streamlength_input_focused = False
+        menu.margin_input_focused = False
+        menu.seed_input_focused = False
+
+    color = (70, 70, 70) if menu.noise_sigma_input_focused else (40, 40, 40)
+    pygame.draw.rect(screen, color, sigma_rect)
+    pygame.draw.rect(screen, (100, 100, 100), sigma_rect, 2 if menu.noise_sigma_input_focused else 1)
+    sigma_text = menu.noise_sigma_text if menu.noise_sigma_text else ""
+    sigma_surf = font_input.render(sigma_text, True, (200, 200, 200))
+    screen.blit(sigma_surf, (sigma_rect.x + 8, sigma_rect.y + (input_h - sigma_surf.get_height()) // 2))
+
+    if menu.noise_sigma_input_focused and event_key:
+        value = menu.noise_sigma_text
+        if menu.noise_sigma_pending_clear:
+            value = ""
+            menu.noise_sigma_pending_clear = False
+        if event_key == pygame.K_BACKSPACE:
+            value = value[:-1]
+        elif event_key in (pygame.K_PERIOD, pygame.K_KP_PERIOD):
+            if '.' not in value:
+                value = value + ('.' if value else '0.')
+        elif pygame.K_0 <= event_key <= pygame.K_9:
+            value += chr(event_key)
+        menu.noise_sigma_text = value
+
+    try:
+        parsed_sigma = float(menu.noise_sigma_text)
+        valid_sigma = parsed_sigma > 0.0
+        if valid_sigma:
+            menu.pending_noise_sigma = parsed_sigma
+    except ValueError:
+        valid_sigma = False
+
+    row_y += row_height
+    y = row_y + 10
 
     # Render and Cancel buttons
     action = None
+    render_btn_x = menu_x + 30
+    cancel_btn_x = menu_x + menu_w - 160
     if (
-        button(screen, menu_x + 20, y, 130, 35, "Render", mouse_pos, mouse_down)
+        button(screen, render_btn_x, y, 130, 35, "Render", mouse_pos, mouse_down)
         and valid_stream
         and valid_seed
         and valid_margin
+        and valid_sigma
     ):
         action = menu.selected_multiplier
 
-    if button(screen, menu_x + 160, y, 130, 35, "Cancel", mouse_pos, mouse_down):
+    if button(screen, cancel_btn_x, y, 130, 35, "Cancel", mouse_pos, mouse_down):
         action = -999
 
     if valid_seed:
         state.noise_seed = seed_value
+    if valid_sigma:
+        state.noise_sigma = menu.pending_noise_sigma
 
     return action
 
