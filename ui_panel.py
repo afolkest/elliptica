@@ -564,7 +564,7 @@ def panel(screen, project, state, mouse_pos, mouse_down, event_key=None):
 
                 canvas_w, canvas_h = project.canvas_resolution
                 pos = ((canvas_w - mask_w) / 2.0, (canvas_h - mask_h) / 2.0)
-                project.conductors.append(Conductor(mask=mask, voltage=0.0, position=pos, interior_mask=interior))
+                project.conductors.append(Conductor(mask=mask, voltage=0.5, position=pos, interior_mask=interior))
                 state.field_dirty = True
                 if canvas_changed:
                     state.canvas_width_text = str(project.canvas_resolution[0])
