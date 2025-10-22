@@ -7,13 +7,14 @@ from scipy.ndimage import gaussian_filter, zoom
 from skimage.exposure import equalize_adapthist
 from flowcol.types import RenderInfo, Project
 from flowcol.lic import convolve, get_cosine_kernel
+from flowcol import defaults
 
 
 def generate_noise(
     shape: tuple[int, int],
     seed: int | None,
     oversample: float = 1.0,
-    lowpass_sigma: float = 2.0,
+    lowpass_sigma: float = defaults.DEFAULT_NOISE_SIGMA,
 ) -> np.ndarray:
     height, width = shape
     rng = np.random.default_rng(seed)
@@ -51,7 +52,7 @@ def compute_lic(
     seed: int | None = 0,
     boundaries: str = "closed",
     noise_oversample: float = 1.5,
-    noise_sigma: float = 2.0,
+    noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA,
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1]."""
     field_h, field_w = ex.shape

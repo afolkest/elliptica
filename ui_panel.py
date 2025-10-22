@@ -3,9 +3,11 @@ import numpy as np
 import subprocess
 from flowcol.types import Conductor
 from flowcol.mask_utils import load_conductor_masks
+from flowcol import defaults
 
 MAX_CANVAS_DIM = 8192
-SUPERSAMPLE_CHOICES = [1.0, 1.5, 2.0, 3.0]
+SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
+RESOLUTION_CHOICES = defaults.RENDER_RESOLUTION_CHOICES
 
 
 def button(screen, x, y, w, h, text, mouse_pos, clicked):
@@ -130,7 +132,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
     screen.blit(label, (menu_x + 20, y))
     y += 30
 
-    resolution_choices = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0]
+    resolution_choices = RESOLUTION_CHOICES
     button_w = 70
     button_h = 35
     columns = 3

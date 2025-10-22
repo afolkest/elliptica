@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 import numpy as np
 from typing import Optional
+from flowcol import defaults
 
 
 @dataclass
@@ -23,54 +24,54 @@ class RenderInfo:
 @dataclass
 class Project:
     conductors: list[Conductor] = field(default_factory=list)
-    canvas_resolution: tuple[int, int] = (1024, 1024)
-    streamlength_factor: float = 30.0 / 1024.0
-    renders: list[RenderInfo] = field(default_factory=list)          
+    canvas_resolution: tuple[int, int] = defaults.DEFAULT_CANVAS_RESOLUTION
+    streamlength_factor: float = defaults.DEFAULT_STREAMLENGTH_FACTOR
+    renders: list[RenderInfo] = field(default_factory=list)
 
 
 @dataclass
 class RenderMenuState:
     is_open: bool = False
-    selected_multiplier: float = 1.0
-    num_passes: int = 2
+    selected_multiplier: float = defaults.RENDER_RESOLUTION_CHOICES[0]
+    num_passes: int = defaults.DEFAULT_RENDER_PASSES
     input_focused: bool = False
-    streamlength_text: str = "0.0293"
+    streamlength_text: str = f"{defaults.DEFAULT_STREAMLENGTH_FACTOR:.4f}"
     streamlength_input_focused: bool = False
     streamlength_pending_clear: bool = False
-    pending_streamlength_factor: float = 30.0 / 1024.0
+    pending_streamlength_factor: float = defaults.DEFAULT_STREAMLENGTH_FACTOR
     seed_input_focused: bool = False
     seed_pending_clear: bool = False
-    margin_text: str = "0.10"
+    margin_text: str = f"{defaults.DEFAULT_PADDING_MARGIN:.2f}"
     margin_input_focused: bool = False
     margin_pending_clear: bool = False
-    pending_margin_factor: float = 0.10
-    noise_sigma_text: str = "2.0"
+    pending_margin_factor: float = defaults.DEFAULT_PADDING_MARGIN
+    noise_sigma_text: str = f"{defaults.DEFAULT_NOISE_SIGMA:.1f}"
     noise_sigma_input_focused: bool = False
     noise_sigma_pending_clear: bool = False
-    pending_noise_sigma: float = 2.0
+    pending_noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA
 
 
 @dataclass
 class HighPassMenuState:
     is_open: bool = False
-    sigma_factor: float = 3.0 / 1024.0
-    clip_limit: float = 0.01
-    kernel_rows: int = 8
-    kernel_cols: int = 8
-    num_bins: int = 150
-    sigma_factor_text: str = "0.0029"
-    clip_text: str = "0.01"
-    kernel_rows_text: str = "8"
-    kernel_cols_text: str = "8"
-    num_bins_text: str = "150"
+    sigma_factor: float = defaults.DEFAULT_HIGHPASS_SIGMA_FACTOR
+    clip_limit: float = defaults.DEFAULT_CLAHE_CLIP_LIMIT
+    kernel_rows: int = defaults.DEFAULT_CLAHE_KERNEL_ROWS
+    kernel_cols: int = defaults.DEFAULT_CLAHE_KERNEL_COLS
+    num_bins: int = defaults.DEFAULT_CLAHE_BINS
+    sigma_factor_text: str = f"{defaults.DEFAULT_HIGHPASS_SIGMA_FACTOR:.4f}"
+    clip_text: str = f"{defaults.DEFAULT_CLAHE_CLIP_LIMIT:.2f}"
+    kernel_rows_text: str = str(defaults.DEFAULT_CLAHE_KERNEL_ROWS)
+    kernel_cols_text: str = str(defaults.DEFAULT_CLAHE_KERNEL_COLS)
+    num_bins_text: str = str(defaults.DEFAULT_CLAHE_BINS)
     focused_field: int = -1
     pending_clear: int = -1
 
 
 @dataclass
 class DownsampleState:
-    sigma_factor: float = 0.6
-    sigma_text: str = "0.60"
+    sigma_factor: float = defaults.DEFAULT_DOWNSAMPLE_SIGMA
+    sigma_text: str = f"{defaults.DEFAULT_DOWNSAMPLE_SIGMA:.2f}"
     focused: bool = False
     pending_clear: bool = False
     dragging: bool = False
@@ -84,7 +85,7 @@ class UIState:
     render_mode: str = "edit"
     original_render_data: Optional[np.ndarray] = None
     current_render_data: Optional[np.ndarray] = None
-    current_render_multiplier: float = 1.0
+    current_render_multiplier: float = defaults.RENDER_RESOLUTION_CHOICES[0]
     rendered_surface: Optional[object] = None
 
     render_menu: RenderMenuState = field(default_factory=RenderMenuState)
@@ -98,16 +99,16 @@ class UIState:
 
     field_dirty: bool = True
 
-    supersample_factor: float = 1.0
+    supersample_factor: float = defaults.SUPERSAMPLE_CHOICES[0]
     supersample_index: int = 0
-    noise_seed: int = 0
-    noise_seed_text: str = "0"
+    noise_seed: int = defaults.DEFAULT_NOISE_SEED
+    noise_seed_text: str = str(defaults.DEFAULT_NOISE_SEED)
 
     highres_render_data: Optional[np.ndarray] = None
-    current_supersample: float = 1.0
-    current_noise_seed: int = 0
+    current_supersample: float = defaults.SUPERSAMPLE_CHOICES[0]
+    current_noise_seed: int = defaults.DEFAULT_NOISE_SEED
     current_compute_resolution: tuple[int, int] = (0, 0)
-    margin_factor: float = 0.10
+    margin_factor: float = defaults.DEFAULT_PADDING_MARGIN
     current_canvas_scaled: tuple[int, int] = (0, 0)
     current_margin: float = 0.0
     current_render_shape: tuple[int, int] = (0, 0)
@@ -115,4 +116,4 @@ class UIState:
     canvas_height_text: str = ""
     canvas_focus: int = -1
     canvas_pending_clear: bool = False
-    noise_sigma: float = 2.0
+    noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA
