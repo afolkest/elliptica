@@ -6,7 +6,15 @@ import numpy as np
 from PIL import Image
 from flowcol.types import Conductor, Project, UIState
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, array_to_surface, save_render, apply_highpass_clahe, downsample_lic
+from flowcol.render import (
+    compute_lic,
+    array_to_surface,
+    save_render,
+    downsample_lic,
+    list_color_palettes,
+    apply_gaussian_highpass,
+    apply_highpass_clahe,
+)
 from ui_panel import panel, render_menu, highpass_menu
 
 BG_COLOR = (20, 20, 20)
@@ -48,10 +56,68 @@ def draw_render_mode(screen: pygame.Surface, state: UIState):
         screen.blit(state.rendered_surface, (0, 0))
 
 
+def _current_palette_name(state: UIState) -> str | None:
+    palettes = list_color_palettes()
+    if not palettes:
+        return None
+    idx = state.color_palette_index % len(palettes)
+    return palettes[idx]
+
+
+def _reference_resolution(project: Project, state: UIState) -> float:
+    compute_h, compute_w = state.current_compute_resolution
+    if compute_h > 0 and compute_w > 0:
+        return float(min(compute_h, compute_w))
+    canvas_min = float(min(project.canvas_resolution))
+    if state.current_render_multiplier > 0:
+        return canvas_min * state.current_render_multiplier * state.current_supersample
+    return canvas_min
+
+
+def update_postprocess_highres(project: Project, state: UIState) -> np.ndarray | None:
+    """Rebuild high-resolution data after post-processing adjustments."""
+    if state.original_render_data is None:
+        state.highres_render_data = None
+        return None
+
+    ref_size = _reference_resolution(project, state)
+    working = state.original_render_data.astype(np.float32, copy=True)
+
+    if state.detail_enabled:
+        detail_sigma = max(state.detail_sigma_factor, 0.0) * ref_size
+        if detail_sigma > 0.0:
+            working = apply_gaussian_highpass(working, detail_sigma)
+
+    hp_menu = state.highpass_menu
+    if getattr(hp_menu, "enabled", False):
+        sigma_px = max(hp_menu.sigma_factor * ref_size, 0.0)
+        working = apply_highpass_clahe(
+            working,
+            sigma_px,
+            hp_menu.clip_limit,
+            hp_menu.kernel_rows,
+            hp_menu.kernel_cols,
+            hp_menu.num_bins,
+            hp_menu.strength,
+        )
+
+    state.highres_render_data = working
+    state.postprocess_dirty = False
+    return working
+
+
 def update_render_surface(project: Project, state: UIState, arr: np.ndarray):
     canvas_w, canvas_h = project.canvas_resolution
     render_h, render_w = arr.shape
-    surface = array_to_surface(arr)
+    palette_name = _current_palette_name(state)
+    surface = array_to_surface(
+        arr,
+        use_color=state.color_enabled,
+        palette=palette_name,
+        contrast=state.color_contrast,
+        gamma=state.color_gamma,
+        clip_percent=state.color_clip_percent,
+    )
     if render_w <= canvas_w and render_h <= canvas_h:
         state.rendered_surface = surface
     else:
@@ -61,8 +127,12 @@ def update_render_surface(project: Project, state: UIState, arr: np.ndarray):
 
 
 def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
-    if state.highres_render_data is None or state.current_render_multiplier <= 0:
+    if state.original_render_data is None or state.current_render_multiplier <= 0:
         return None
+
+    if state.highres_render_data is None or state.postprocess_dirty:
+        if update_postprocess_highres(project, state) is None:
+            return None
 
     render_h, render_w = state.current_render_shape
     if render_w <= 0 or render_h <= 0:
@@ -125,8 +195,8 @@ def perform_render(project: Project, state: UIState, multiplier: float):
     crop_y1 = min(crop_y0 + canvas_scaled_h, lic_array.shape[0])
     lic_cropped = lic_array[crop_y0:crop_y1, crop_x0:crop_x1]
 
-    state.highres_render_data = lic_cropped.copy()
-    state.original_render_data = lic_cropped.copy()
+    state.original_render_data = lic_cropped.astype(np.float32, copy=True)
+    state.highres_render_data = None
     state.current_render_multiplier = multiplier
     state.current_supersample = supersample
     state.current_noise_seed = seed
@@ -135,10 +205,21 @@ def perform_render(project: Project, state: UIState, multiplier: float):
     state.current_margin = margin_physical
     state.current_render_shape = (render_h, render_w)
     state.render_mode = "render"
+    state.postprocess_dirty = True
 
     display_array = recompute_display(project, state)
     if display_array is not None:
-        save_render(display_array, project, multiplier)
+        palette_name = _current_palette_name(state)
+        save_render(
+            display_array,
+            project,
+            multiplier,
+            use_color=state.color_enabled,
+            palette=palette_name,
+            contrast=state.color_contrast,
+            gamma=state.color_gamma,
+            clip_percent=state.color_clip_percent,
+        )
     state.downsample.dirty = False
 
     return True
@@ -294,25 +375,13 @@ def main():
                 highpass_state.focused_field = -1
                 highpass_state.pending_clear = -1
                 highpass_state.strength_dragging = False
-
-                if state.original_render_data is not None:
-                    compute_h, compute_w = state.current_compute_resolution
-                    if compute_h == 0 or compute_w == 0:
-                        compute_min = min(project.canvas_resolution) * state.current_render_multiplier * state.current_supersample
-                    else:
-                        compute_min = min(compute_h, compute_w)
-                    sigma_pixels = sigma_factor * compute_min
-                    filtered = apply_highpass_clahe(
-                        state.original_render_data,
-                        sigma_pixels,
-                        clip,
-                        rows,
-                        cols,
-                        bins,
-                        strength,
-                    )
-                    state.highres_render_data = filtered
+                highpass_state.enabled = True
+                state.postprocess_dirty = True
+                if state.render_mode == "render":
                     recompute_display(project, state)
+                    state.downsample.dirty = False
+                else:
+                    state.downsample.dirty = True
         elif state.render_mode == "render" and state.downsample.dirty:
             state.downsample.dirty = False
             recompute_display(project, state)
@@ -365,8 +434,20 @@ def main():
             screen = pygame.display.set_mode(expected_window)
         elif action == -3:
             if state.original_render_data is not None:
-                state.highres_render_data = state.original_render_data.copy()
-                recompute_display(project, state)
+                state.detail_enabled = False
+                state.detail_sigma_factor = 0.02
+                state.detail_factor_text = f"{state.detail_sigma_factor:.3f}"
+                state.detail_input_focused = False
+                state.detail_pending_clear = False
+                hp_menu = state.highpass_menu
+                hp_menu.enabled = False
+                state.highres_render_data = None
+                state.postprocess_dirty = True
+                if state.render_mode == "render":
+                    recompute_display(project, state)
+                    state.downsample.dirty = False
+                else:
+                    state.downsample.dirty = True
 
         pygame.display.flip()
         clock.tick(60)
