@@ -12,8 +12,7 @@ from flowcol.types import Project, Conductor
 from flowcol.field import compute_field
 from flowcol.render import (
     compute_lic,
-    apply_gaussian_highpass,
-    apply_clahe_enhancement,
+    apply_highpass_clahe,
     downsample_lic,
 )
 from flowcol.mask_utils import load_alpha
@@ -61,13 +60,14 @@ def test_full_pipeline_matches_reference():
     )
     sigma_factor = 3.0 / 1024.0
     sigma_pixels = sigma_factor * compute_min
-    high_pass = apply_gaussian_highpass(ours_lic, sigma=sigma_pixels)
-    ours_post = apply_clahe_enhancement(
-        high_pass,
+    ours_post = apply_highpass_clahe(
+        ours_lic,
+        sigma=sigma_pixels,
         clip_limit=0.01,
         kernel_rows=8,
         kernel_cols=8,
         num_bins=150,
+        strength=1.0,
     )
     downsample_sigma = 0.6 * supersample
     render_shape = (

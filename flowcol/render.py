@@ -1,5 +1,4 @@
 import numpy as np
-import pygame
 from PIL import Image
 from pathlib import Path
 from datetime import datetime
@@ -42,6 +41,20 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
             (0.60, 0.26, 0.08),
             (0.75, 0.55, 0.35),
             (0.88, 0.89, 0.90),
+        ],
+        dtype=np.float32,
+    ),
+    "Twilight Peach": np.array(
+        [
+            (0.15, 0.05, 0.30),
+            (0.40, 0.20, 0.55),
+            (0.65, 0.45, 0.75),
+            (0.90, 0.75, 0.85),
+            (1.00, 0.95, 0.90),
+            (0.95, 0.80, 0.65),
+            (0.85, 0.60, 0.45),
+            (0.65, 0.40, 0.35),
+            (0.35, 0.20, 0.30),
         ],
         dtype=np.float32,
     ),
@@ -90,8 +103,8 @@ def generate_noise(
     else:
         base = rng.random((height, width)).astype(np.float32)
 
-    sigma = max(lowpass_sigma, 1e-3)
-    base = gaussian_filter(base, sigma=sigma)
+    if lowpass_sigma > 0.0:
+        base = gaussian_filter(base, sigma=lowpass_sigma)
 
     if oversample > 1.0:
         scale_y = height / base.shape[0]
@@ -200,6 +213,30 @@ def colorize_array(
     return (rgb * 255.0).astype(np.uint8)
 
 
+def array_to_pil(
+    arr: np.ndarray,
+    *,
+    use_color: bool = False,
+    palette: str | None = None,
+    contrast: float = 1.0,
+    gamma: float = 1.0,
+    clip_percent: float = 0.5,
+) -> Image.Image:
+    """Convert scalar array to PIL Image, optionally colorized.
+
+    Framework-agnostic version for Streamlit, headless rendering, etc.
+
+    Note: Default clip_percent=0.5 matches gauss_law_morph behavior.
+    """
+    if use_color:
+        rgb = colorize_array(arr, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
+        return Image.fromarray(rgb, mode='RGB')
+    else:
+        norm = _normalize_unit(arr)
+        img = (norm * 255.0).astype(np.uint8)
+        return Image.fromarray(img, mode='L').convert('RGB')
+
+
 def array_to_surface(
     arr: np.ndarray,
     *,
@@ -208,19 +245,14 @@ def array_to_surface(
     contrast: float = 1.0,
     gamma: float = 1.0,
     clip_percent: float = 0.5,
-) -> pygame.Surface:
+):
     """Convert scalar array to pygame surface, optionally colorized.
 
     Note: UI always passes clip_percent explicitly from state (defaults to 0.0 there).
           This default of 0.5 is for direct API usage to match gauss_law_morph behavior.
     """
-    if use_color:
-        rgb = colorize_array(arr, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
-        pil_img = Image.fromarray(rgb, mode='RGB')
-    else:
-        norm = _normalize_unit(arr)
-        img = (norm * 255.0).astype(np.uint8)
-        pil_img = Image.fromarray(img, mode='L').convert('RGB')
+    import pygame
+    pil_img = array_to_pil(arr, use_color=use_color, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
     return pygame.image.fromstring(pil_img.tobytes(), pil_img.size, pil_img.mode)
 
 
@@ -243,13 +275,8 @@ def save_render(
     filename = f"lic_{multiplier}x_{timestamp}.png"
     filepath = renders_dir / filename
 
-    if use_color:
-        rgb = colorize_array(arr, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
-        Image.fromarray(rgb, mode='RGB').save(filepath)
-    else:
-        norm = _normalize_unit(arr)
-        img = (norm * 255.0).astype(np.uint8)
-        Image.fromarray(img, mode='L').save(filepath)
+    pil_img = array_to_pil(arr, use_color=use_color, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
+    pil_img.save(filepath)
 
     render_info = RenderInfo(multiplier=multiplier, filepath=str(filepath), timestamp=timestamp)
     project.renders.append(render_info)
