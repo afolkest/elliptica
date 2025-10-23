@@ -108,7 +108,7 @@ def run_pipeline(
     mask_canvas, position = place_mask(shell, canvas_size, width_frac=0.8)
 
     project = Project(canvas_resolution=canvas_size)
-    conductor = Conductor(mask=mask_canvas, voltage=10.0, position=position)
+    conductor = Conductor(mask=mask_canvas, voltage=10.0, position=(0.0, 0.0))
     project.conductors.append(conductor)
 
     ex, ey = compute_field(project)
@@ -143,6 +143,10 @@ def run_pipeline(
         lic = apply_gaussian_highpass(lic, sigma_px)
 
     lic_down = downsample_lic(lic, (resolution, resolution), supersample=1.0, sigma=0.0)
+
+    # Apply adaptive histogram equalization like gauss_law_morph (lic_core.py:enhance)
+    from skimage import exposure
+    lic_down = exposure.equalize_adapthist(lic_down, clip_limit=0.02, nbins=256)
 
     # Use percentile normalization like gauss_law_morph (colorschemes.py:478-485)
     vmin = float(np.percentile(lic_down, 0.5))
