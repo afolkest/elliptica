@@ -68,6 +68,7 @@ class HighPassMenuState:
     strength_dragging: bool = False
     focused_field: int = -1
     pending_clear: int = -1
+    enabled: bool = False
 
 
 @dataclass
@@ -85,6 +86,18 @@ class UIState:
     project: Project
 
     render_mode: str = "edit"
+    color_enabled: bool = False
+    color_palette_index: int = 0
+    color_contrast: float = 1.0
+    color_gamma: float = 1.0
+    color_contrast_dragging: bool = False
+    color_gamma_dragging: bool = False
+    color_clip_percent: float = 0.0
+    detail_enabled: bool = False
+    detail_sigma_factor: float = 0.02
+    detail_factor_text: str = "0.020"
+    detail_input_focused: bool = False
+    detail_pending_clear: bool = False
     original_render_data: Optional[np.ndarray] = None
     current_render_data: Optional[np.ndarray] = None
     current_render_multiplier: float = defaults.RENDER_RESOLUTION_CHOICES[0]
@@ -119,3 +132,4 @@ class UIState:
     canvas_focus: int = -1
     canvas_pending_clear: bool = False
     noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA
+    postprocess_dirty: bool = True

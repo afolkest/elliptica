@@ -10,7 +10,12 @@ sys.path.insert(0, str(ROOT / "LineIntegralConvolutions" / "src"))
 
 from flowcol.types import Project, Conductor
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, apply_highpass_clahe, downsample_lic
+from flowcol.render import (
+    compute_lic,
+    apply_gaussian_highpass,
+    apply_clahe_enhancement,
+    downsample_lic,
+)
 from flowcol.mask_utils import load_alpha
 from vegtamr.lic import compute_lic_with_postprocessing
 
@@ -56,9 +61,9 @@ def test_full_pipeline_matches_reference():
     )
     sigma_factor = 3.0 / 1024.0
     sigma_pixels = sigma_factor * compute_min
-    ours_post = apply_highpass_clahe(
-        ours_lic,
-        sigma=sigma_pixels,
+    high_pass = apply_gaussian_highpass(ours_lic, sigma=sigma_pixels)
+    ours_post = apply_clahe_enhancement(
+        high_pass,
         clip_limit=0.01,
         kernel_rows=8,
         kernel_cols=8,

@@ -4,6 +4,7 @@ import subprocess
 from flowcol.types import Conductor
 from flowcol.mask_utils import load_conductor_masks
 from flowcol import defaults
+from flowcol.render import list_color_palettes
 
 MAX_CANVAS_DIM = 8192
 SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
@@ -663,6 +664,71 @@ def panel(screen, project, state, mouse_pos, mouse_down, event_key=None):
             action = -3
         y += 50
 
+        color_label = "Color: On" if state.color_enabled else "Color: Off"
+        if button(screen, panel_x, y, 180, 35, color_label, mouse_pos, mouse_down):
+            state.color_enabled = not state.color_enabled
+            state.downsample.dirty = True
+        y += 45
+
+        palettes = list_color_palettes()
+        if palettes:
+            palette_name = palettes[state.color_palette_index % len(palettes)]
+            if button(screen, panel_x, y, 180, 35, f"Palette: {palette_name}", mouse_pos, mouse_down):
+                state.color_palette_index = (state.color_palette_index + 1) % len(palettes)
+                state.downsample.dirty = True
+            y += 45
+
+        clip_label = "Clip: Off" if state.color_clip_percent <= 0.0 else f"Clip: {state.color_clip_percent:.1f}%"
+        if button(screen, panel_x, y, 180, 35, clip_label, mouse_pos, mouse_down):
+            if state.color_clip_percent <= 0.0:
+                state.color_clip_percent = 0.5
+            elif state.color_clip_percent < 1.0:
+                state.color_clip_percent = 1.0
+            else:
+                state.color_clip_percent = 0.0
+            state.downsample.dirty = True
+        y += 45
+
+        new_contrast, contrast_dragging = slider(
+            screen,
+            panel_x,
+            y,
+            180,
+            "Contrast",
+            state.color_contrast,
+            0.5,
+            2.0,
+            mouse_pos,
+            state.color_contrast_dragging,
+            mouse_down,
+            unit="",
+        )
+        if new_contrast != state.color_contrast:
+            state.color_contrast = new_contrast
+            state.downsample.dirty = True
+        state.color_contrast_dragging = contrast_dragging
+        y += 45
+
+        new_gamma, gamma_dragging = slider(
+            screen,
+            panel_x,
+            y,
+            180,
+            "Gamma",
+            state.color_gamma,
+            0.3,
+            3.0,
+            mouse_pos,
+            state.color_gamma_dragging,
+            mouse_down,
+            unit="",
+        )
+        if new_gamma != state.color_gamma:
+            state.color_gamma = new_gamma
+            state.downsample.dirty = True
+        state.color_gamma_dragging = gamma_dragging
+        y += 45
+
         font = pygame.font.Font(None, 22)
         title = font.render("Post-processing:", True, (220, 220, 220))
         screen.blit(title, (panel_x, y))
@@ -688,6 +754,72 @@ def panel(screen, project, state, mouse_pos, mouse_down, event_key=None):
             down.sigma_text = f"{new_sigma:.2f}"
             down.dirty = True
         down.dragging = dragging
+        y += 45
+        detail_label = f"Detail HP: {'On' if state.detail_enabled else 'Off'} ({state.detail_sigma_factor:.3f})"
+        if button(screen, panel_x, y, 180, 35, detail_label, mouse_pos, mouse_down):
+            state.detail_input_focused = False
+            if not state.detail_enabled and state.detail_sigma_factor <= 0.0:
+                state.detail_sigma_factor = 0.02
+                state.detail_factor_text = f"{state.detail_sigma_factor:.3f}"
+            state.detail_enabled = not state.detail_enabled
+            state.postprocess_dirty = True
+            state.downsample.dirty = True
+        y += 45
+
+        font = pygame.font.Font(None, 22)
+        label = font.render("Detail σ factor:", True, (220, 220, 220))
+        screen.blit(label, (panel_x, y))
+        y += 28
+
+        factor_rect = pygame.Rect(panel_x, y, 180, 35)
+        hover = factor_rect.collidepoint(mouse_pos)
+        if hover and mouse_down:
+            state.detail_input_focused = True
+            state.detail_pending_clear = True
+
+        color = (70, 70, 70) if state.detail_input_focused else (40, 40, 40)
+        pygame.draw.rect(screen, color, factor_rect)
+        pygame.draw.rect(
+            screen,
+            (100, 100, 100),
+            factor_rect,
+            2 if state.detail_input_focused else 1,
+        )
+
+        font_input = pygame.font.Font(None, 24)
+        display_text = state.detail_factor_text if state.detail_factor_text else ""
+        text_surf = font_input.render(display_text, True, (200, 200, 200))
+        screen.blit(
+            text_surf,
+            (
+                factor_rect.x + 8,
+                factor_rect.y + (factor_rect.height - text_surf.get_height()) // 2,
+            ),
+        )
+
+        if state.detail_input_focused and event_key:
+            value = state.detail_factor_text
+            if state.detail_pending_clear:
+                value = ""
+                state.detail_pending_clear = False
+            if event_key == pygame.K_BACKSPACE:
+                value = value[:-1]
+            elif event_key in (pygame.K_PERIOD, pygame.K_KP_PERIOD):
+                if '.' not in value:
+                    value = value + ('.' if value else '0.')
+            elif pygame.K_0 <= event_key <= pygame.K_9:
+                value += chr(event_key)
+            state.detail_factor_text = value
+
+        try:
+            parsed_factor = float(state.detail_factor_text) if state.detail_factor_text not in ("", ".", "-") else state.detail_sigma_factor
+            parsed_factor = max(parsed_factor, 0.0)
+            if not np.isclose(parsed_factor, state.detail_sigma_factor):
+                state.detail_sigma_factor = parsed_factor
+                state.postprocess_dirty = True
+                state.downsample.dirty = True
+        except ValueError:
+            pass
         y += 45
 
         if button(screen, panel_x, y, 180, 35, "Equalize...", mouse_pos, mouse_down):
