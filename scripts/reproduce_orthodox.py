@@ -30,7 +30,7 @@ if str(ROOT) not in sys.path:
 
 from flowcol.types import Project, Conductor
 from flowcol.field import compute_field
-from flowcol.render import compute_lic, apply_gaussian_highpass, downsample_lic, _normalize_unit  # reuse normalization helper
+from flowcol.render import compute_lic, apply_gaussian_highpass, downsample_lic, _normalize_unit, _get_palette_lut
 
 def load_mask(path: Path) -> np.ndarray:
     """Load mask from RGBA alpha channel."""
@@ -144,20 +144,34 @@ def run_pipeline(
 
     lic_down = downsample_lic(lic, (resolution, resolution), supersample=1.0, sigma=0.0)
 
+    # Normalize to [0,1] before CLAHE (highpass creates negative values)
+    lic_min = float(lic_down.min())
+    lic_max = float(lic_down.max())
+    if lic_max > lic_min:
+        lic_down = (lic_down - lic_min) / (lic_max - lic_min)
+    else:
+        lic_down = np.zeros_like(lic_down)
+
     # Apply adaptive histogram equalization like gauss_law_morph (lic_core.py:enhance)
     from skimage import exposure
-    lic_down = exposure.equalize_adapthist(lic_down, clip_limit=0.02, nbins=256)
 
-    # Use percentile normalization like gauss_law_morph (colorschemes.py:478-485)
-    vmin = float(np.percentile(lic_down, 0.5))
-    vmax = float(np.percentile(lic_down, 99.5))
+    # Apply CLAHE
+    enhanced = exposure.equalize_adapthist(lic_down, clip_limit=0.02, nbins=256)
+
+    # Apply percentile normalization (matching gauss_law_morph)
+    clip_percent = 0.5  # Clip bottom and top 0.5%
+    vmin = float(np.percentile(enhanced, clip_percent))
+    vmax = float(np.percentile(enhanced, 100.0 - clip_percent))
     if vmax > vmin:
-        norm = np.clip((lic_down - vmin) / (vmax - vmin + 1e-10), 0.0, 1.0)
+        norm = np.clip((enhanced - vmin) / (vmax - vmin), 0.0, 1.0)
     else:
-        norm = _normalize_unit(lic_down)
-    cmap = plt.get_cmap("twilight_shifted")
-    rgb = cmap(norm)[:, :, :3]
-    rgb_uint8 = (np.clip(rgb, 0.0, 1.0) * 255).astype(np.uint8)
+        norm = enhanced
+
+    # Use Twilight Peach colormap (flowcol's copy of gauss_law_morph's twilight_shifted)
+    lut = _get_palette_lut("Twilight Peach")
+    idx = np.clip((norm * (lut.shape[0] - 1)).astype(np.int32), 0, lut.shape[0] - 1)
+    rgb = lut[idx]
+    rgb_uint8 = (rgb * 255.0).astype(np.uint8)
 
     Image.fromarray(rgb_uint8, mode="RGB").save(output_path)
     print(f"Saved render to {output_path}")

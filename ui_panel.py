@@ -345,8 +345,8 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     row_y += row_height
 
-    # Row 3: Noise LP sigma (left column, spans right for spacing)
-    sigma_label = font.render("Noise LP sigma:", True, (200, 200, 200))
+    # Row 3: Noise lowpass sigma (left column, spans right for spacing)
+    sigma_label = font.render("Noise lowpass sigma:", True, (200, 200, 200))
     screen.blit(sigma_label, (col1_x, row_y))
     sigma_rect = pygame.Rect(col1_x, row_y + 28, input_w + 20, input_h)
     sigma_hover = sigma_rect.collidepoint(mouse_pos)
@@ -382,7 +382,7 @@ def render_menu(screen, state, mouse_pos, mouse_down, event_key):
 
     try:
         parsed_sigma = float(menu.noise_sigma_text)
-        valid_sigma = parsed_sigma > 0.0
+        valid_sigma = parsed_sigma >= 0.0
         if valid_sigma:
             menu.pending_noise_sigma = parsed_sigma
     except ValueError:

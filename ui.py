@@ -4,24 +4,22 @@
 import pygame
 import numpy as np
 from PIL import Image
-from flowcol.types import Conductor, Project, UIState
-from flowcol.field import compute_field
-from flowcol.render import (
-    compute_lic,
-    array_to_surface,
-    save_render,
-    downsample_lic,
-    list_color_palettes,
-    apply_gaussian_highpass,
-    apply_highpass_clahe,
+from flowcol.types import Conductor, Project
+from ui_state import UIState
+from flowcol.render import array_to_surface, save_render, list_color_palettes
+from flowcol.pipeline import (
+    perform_render as pipeline_render,
+    apply_postprocess,
+    downsample_for_display,
+    get_palette_name,
+    compute_reference_resolution,
+    PostProcessConfig,
 )
 from ui_panel import panel, render_menu, highpass_menu
 
 BG_COLOR = (20, 20, 20)
 CONDUCTOR_COLORS = [(100, 150, 255, 180), (255, 100, 150, 180), (150, 255, 100, 180), (255, 200, 100, 180)]
 SELECTED_COLOR = (255, 255, 100, 200)
-
-MAX_RENDER_DIM = 32768
 
 
 def mask_to_surface(mask: np.ndarray, color: tuple) -> pygame.Surface:
@@ -56,51 +54,33 @@ def draw_render_mode(screen: pygame.Surface, state: UIState):
         screen.blit(state.rendered_surface, (0, 0))
 
 
-def _current_palette_name(state: UIState) -> str | None:
-    palettes = list_color_palettes()
-    if not palettes:
-        return None
-    idx = state.color_palette_index % len(palettes)
-    return palettes[idx]
-
-
-def _reference_resolution(project: Project, state: UIState) -> float:
-    compute_h, compute_w = state.current_compute_resolution
-    if compute_h > 0 and compute_w > 0:
-        return float(min(compute_h, compute_w))
-    canvas_min = float(min(project.canvas_resolution))
-    if state.current_render_multiplier > 0:
-        return canvas_min * state.current_render_multiplier * state.current_supersample
-    return canvas_min
-
-
 def update_postprocess_highres(project: Project, state: UIState) -> np.ndarray | None:
     """Rebuild high-resolution data after post-processing adjustments."""
     if state.original_render_data is None:
         state.highres_render_data = None
         return None
 
-    ref_size = _reference_resolution(project, state)
-    working = state.original_render_data.astype(np.float32, copy=True)
-
-    if state.detail_enabled:
-        detail_sigma = max(state.detail_sigma_factor, 0.0) * ref_size
-        if detail_sigma > 0.0:
-            working = apply_gaussian_highpass(working, detail_sigma)
+    ref_size = compute_reference_resolution(
+        state.current_compute_resolution,
+        project.canvas_resolution,
+        state.current_render_multiplier,
+        state.current_supersample,
+    )
 
     hp_menu = state.highpass_menu
-    if getattr(hp_menu, "enabled", False):
-        sigma_px = max(hp_menu.sigma_factor * ref_size, 0.0)
-        working = apply_highpass_clahe(
-            working,
-            sigma_px,
-            hp_menu.clip_limit,
-            hp_menu.kernel_rows,
-            hp_menu.kernel_cols,
-            hp_menu.num_bins,
-            hp_menu.strength,
-        )
+    config = PostProcessConfig(
+        detail_enabled=state.detail_enabled,
+        detail_sigma_factor=state.detail_sigma_factor,
+        highpass_enabled=getattr(hp_menu, "enabled", False),
+        highpass_sigma_factor=hp_menu.sigma_factor,
+        highpass_clip_limit=hp_menu.clip_limit,
+        highpass_kernel_rows=hp_menu.kernel_rows,
+        highpass_kernel_cols=hp_menu.kernel_cols,
+        highpass_num_bins=hp_menu.num_bins,
+        highpass_strength=hp_menu.strength,
+    )
 
+    working = apply_postprocess(state.original_render_data, config, ref_size)
     state.highres_render_data = working
     state.postprocess_dirty = False
     return working
@@ -109,7 +89,7 @@ def update_postprocess_highres(project: Project, state: UIState) -> np.ndarray |
 def update_render_surface(project: Project, state: UIState, arr: np.ndarray):
     canvas_w, canvas_h = project.canvas_resolution
     render_h, render_w = arr.shape
-    palette_name = _current_palette_name(state)
+    palette_name = get_palette_name(state.color_palette_index)
     surface = array_to_surface(
         arr,
         use_color=state.color_enabled,
@@ -138,12 +118,11 @@ def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
     if render_w <= 0 or render_h <= 0:
         return None
 
-    sigma = state.downsample.sigma_factor * state.current_supersample
-    display_array = downsample_lic(
+    display_array = downsample_for_display(
         state.highres_render_data,
         (render_h, render_w),
         state.current_supersample,
-        sigma,
+        state.downsample.sigma_factor,
     )
 
     state.current_render_data = display_array
@@ -153,63 +132,38 @@ def recompute_display(project: Project, state: UIState) -> np.ndarray | None:
 
 def perform_render(project: Project, state: UIState, multiplier: float):
     canvas_w, canvas_h = project.canvas_resolution
-
     render_w = max(1, int(round(canvas_w * multiplier)))
     render_h = max(1, int(round(canvas_h * multiplier)))
 
-    supersample = state.supersample_factor
-    scale = multiplier * supersample
-    margin_physical = state.margin_factor * float(min(canvas_w, canvas_h))
-    margin_tuple = (margin_physical, margin_physical)
-    domain_w = canvas_w + 2.0 * margin_physical
-    domain_h = canvas_h + 2.0 * margin_physical
-    compute_w = max(1, int(round(domain_w * scale)))
-    compute_h = max(1, int(round(domain_h * scale)))
-
-    if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
-        return False
-
-    ex, ey = compute_field(project, multiplier, supersample, margin_tuple)
-    num_passes = max(1, state.render_menu.num_passes)
-    min_compute = min(compute_w, compute_h)
-    streamlength_pixels = max(int(round(project.streamlength_factor * min_compute)), 1)
-    seed = state.noise_seed
-    lic_array = compute_lic(
-        ex,
-        ey,
-        streamlength_pixels,
-        num_passes=num_passes,
-        seed=seed,
-        noise_sigma=state.noise_sigma,
+    result = pipeline_render(
+        project,
+        multiplier,
+        state.supersample_factor,
+        state.render_menu.num_passes,
+        state.margin_factor,
+        state.noise_seed,
+        state.noise_sigma,
+        project.streamlength_factor,
     )
 
-    canvas_scaled_w = max(1, int(round(canvas_w * scale)))
-    canvas_scaled_h = max(1, int(round(canvas_h * scale)))
-    offset_x = int(round(margin_physical * scale))
-    offset_y = int(round(margin_physical * scale))
-    offset_x = min(offset_x, max(0, lic_array.shape[1] - canvas_scaled_w))
-    offset_y = min(offset_y, max(0, lic_array.shape[0] - canvas_scaled_h))
-    crop_x0 = max(0, offset_x)
-    crop_y0 = max(0, offset_y)
-    crop_x1 = min(crop_x0 + canvas_scaled_w, lic_array.shape[1])
-    crop_y1 = min(crop_y0 + canvas_scaled_h, lic_array.shape[0])
-    lic_cropped = lic_array[crop_y0:crop_y1, crop_x0:crop_x1]
+    if result is None:
+        return False
 
-    state.original_render_data = lic_cropped.astype(np.float32, copy=True)
+    state.original_render_data = result.array
     state.highres_render_data = None
     state.current_render_multiplier = multiplier
-    state.current_supersample = supersample
-    state.current_noise_seed = seed
-    state.current_compute_resolution = (compute_h, compute_w)
-    state.current_canvas_scaled = lic_cropped.shape
-    state.current_margin = margin_physical
+    state.current_supersample = state.supersample_factor
+    state.current_noise_seed = state.noise_seed
+    state.current_compute_resolution = result.compute_resolution
+    state.current_canvas_scaled = result.canvas_scaled_shape
+    state.current_margin = result.margin
     state.current_render_shape = (render_h, render_w)
     state.render_mode = "render"
     state.postprocess_dirty = True
 
     display_array = recompute_display(project, state)
     if display_array is not None:
-        palette_name = _current_palette_name(state)
+        palette_name = get_palette_name(state.color_palette_index)
         save_render(
             display_array,
             project,
