@@ -43,6 +43,12 @@ RESOLUTION_CHOICES = defaults.RENDER_RESOLUTION_CHOICES
 RESOLUTION_LABELS = tuple(f"{value:g}\u00d7" for value in RESOLUTION_CHOICES)
 RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RESOLUTION_CHOICES)}
 
+BACKSPACE_KEY = None
+if dpg is not None:
+    BACKSPACE_KEY = getattr(dpg, "mvKey_Backspace", None)
+    if BACKSPACE_KEY is None:
+        BACKSPACE_KEY = getattr(dpg, "mvKey_Back", None)
+
 
 def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
     """Test whether canvas coordinate lands inside conductor mask."""
@@ -144,6 +150,7 @@ class FlowColApp:
     drag_last_pos: Tuple[float, float] = (0.0, 0.0)
     mouse_down_last: bool = False
     render_modal_open: bool = False
+    backspace_down_last: bool = False
 
     def __post_init__(self) -> None:
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
@@ -669,6 +676,25 @@ class FlowColApp:
 
         self.mouse_down_last = mouse_down
 
+    def _process_keyboard_shortcuts(self) -> None:
+        if dpg is None or BACKSPACE_KEY is None:
+            return
+
+        backspace_down = dpg.is_key_down(BACKSPACE_KEY)
+        if backspace_down and not self.backspace_down_last:
+            with self.state_lock:
+                mode = self.state.view_mode
+                idx = self.state.selected_idx
+                conductor_count = len(self.state.project.conductors)
+                can_delete = (mode == "edit" and 0 <= idx < conductor_count)
+            if can_delete:
+                with self.state_lock:
+                    actions.remove_conductor(self.state, idx)
+                    self.conductor_textures.clear()
+                self._mark_canvas_dirty()
+                dpg.set_value("status_text", "Conductor deleted")
+        self.backspace_down_last = backspace_down
+
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:
             if self.state.view_mode != "edit":
@@ -825,6 +851,7 @@ class FlowColApp:
         try:
             while dpg.is_dearpygui_running():
                 self._process_canvas_mouse()
+                self._process_keyboard_shortcuts()
                 self._poll_render_future()
                 if self.canvas_dirty:
                     self._redraw_canvas()
