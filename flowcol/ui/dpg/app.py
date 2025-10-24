@@ -19,6 +19,7 @@ from flowcol.app import actions
 from flowcol.render import array_to_pil
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
+from flowcol import defaults
 
 
 CONDUCTOR_COLORS = [
@@ -29,6 +30,14 @@ CONDUCTOR_COLORS = [
 ]
 
 MAX_PREVIEW_SIZE = 640
+
+SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
+SUPERSAMPLE_LABELS = tuple(f"{value:.1f}\u00d7" for value in SUPERSAMPLE_CHOICES)
+SUPERSAMPLE_LOOKUP = {label: value for label, value in zip(SUPERSAMPLE_LABELS, SUPERSAMPLE_CHOICES)}
+
+RESOLUTION_CHOICES = defaults.RENDER_RESOLUTION_CHOICES
+RESOLUTION_LABELS = tuple(f"{value:g}\u00d7" for value in RESOLUTION_CHOICES)
+RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RESOLUTION_CHOICES)}
 
 
 def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
@@ -59,6 +68,16 @@ def _image_to_texture_data(img) -> Tuple[int, int, np.ndarray]:
     width, height = img.size
     rgba = np.asarray(img, dtype=np.float32) / 255.0
     return width, height, rgba.reshape(-1)
+
+
+def _label_for_supersample(value: float) -> str:
+    idx = min(range(len(SUPERSAMPLE_CHOICES)), key=lambda i: abs(SUPERSAMPLE_CHOICES[i] - value))
+    return SUPERSAMPLE_LABELS[idx]
+
+
+def _label_for_multiplier(value: float) -> str:
+    idx = min(range(len(RESOLUTION_CHOICES)), key=lambda i: abs(RESOLUTION_CHOICES[i] - value))
+    return RESOLUTION_LABELS[idx]
 
 
 def _clone_conductor(conductor: Conductor) -> Conductor:
@@ -100,6 +119,16 @@ class FlowColApp:
     render_texture_id: Optional[int] = None
     render_texture_size: Optional[Tuple[int, int]] = None
     viewport_created: bool = False
+    edit_controls_id: Optional[int] = None
+    render_controls_id: Optional[int] = None
+    render_modal_id: Optional[int] = None
+    render_supersample_radio_id: Optional[int] = None
+    render_multiplier_radio_id: Optional[int] = None
+    render_passes_input_id: Optional[int] = None
+    render_streamlength_input_id: Optional[int] = None
+    render_margin_input_id: Optional[int] = None
+    render_seed_input_id: Optional[int] = None
+    render_sigma_input_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     canvas_dirty: bool = True
@@ -107,6 +136,7 @@ class FlowColApp:
     drag_active: bool = False
     drag_last_pos: Tuple[float, float] = (0.0, 0.0)
     mouse_down_last: bool = False
+    render_modal_open: bool = False
 
     def __post_init__(self) -> None:
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
@@ -129,9 +159,16 @@ class FlowColApp:
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
         self.viewport_created = True
 
-        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10)):
-            dpg.add_text("Render Controls")
-            dpg.add_button(label="Render Field", callback=self._on_render_clicked)
+        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
+            with dpg.group(tag="edit_controls_group") as edit_group:
+                self.edit_controls_id = edit_group
+                dpg.add_text("Render Controls")
+                dpg.add_button(label="Render Field", callback=self._open_render_modal)
+
+            with dpg.group(tag="render_controls_group") as render_group:
+                self.render_controls_id = render_group
+                dpg.add_text("Render View")
+                dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked)
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
             dpg.add_text("", tag="status_text")
@@ -142,6 +179,7 @@ class FlowColApp:
                 self.canvas_id = canvas
 
         self._refresh_render_texture()
+        self._update_control_visibility()
 
     # ------------------------------------------------------------------
     # Canvas drawing
@@ -229,6 +267,170 @@ class FlowColApp:
         else:
             dpg.set_value(self.render_texture_id, data)
 
+    def _ensure_render_modal(self) -> None:
+        if dpg is None or self.render_modal_id is not None:
+            return
+
+        with dpg.window(
+            label="Render Settings",
+            modal=True,
+            show=False,
+            tag="render_modal",
+            no_move=False,
+            no_close=True,
+            no_collapse=True,
+            width=420,
+            height=520,
+        ) as modal:
+            self.render_modal_id = modal
+
+            dpg.add_text("Supersample Factor")
+            self.render_supersample_radio_id = dpg.add_radio_button(
+                SUPERSAMPLE_LABELS,
+                horizontal=True,
+            )
+            dpg.add_spacer(height=10)
+
+            dpg.add_text("Render Resolution")
+            self.render_multiplier_radio_id = dpg.add_radio_button(
+                RESOLUTION_LABELS,
+                horizontal=True,
+            )
+            dpg.add_spacer(height=12)
+
+            dpg.add_separator()
+            dpg.add_spacer(height=12)
+
+            self.render_passes_input_id = dpg.add_input_int(
+                label="LIC Passes",
+                min_value=1,
+                step=1,
+                min_clamped=True,
+                width=160,
+            )
+
+            self.render_streamlength_input_id = dpg.add_input_float(
+                label="Streamlength Factor",
+                format="%.4f",
+                min_value=1e-6,
+                min_clamped=True,
+                step=0.0,
+                width=200,
+            )
+
+            self.render_margin_input_id = dpg.add_input_float(
+                label="Padding Margin",
+                format="%.3f",
+                min_value=0.0,
+                min_clamped=True,
+                step=0.0,
+                width=200,
+            )
+
+            self.render_seed_input_id = dpg.add_input_int(
+                label="Noise Seed",
+                step=1,
+                min_clamped=False,
+                width=160,
+            )
+
+            self.render_sigma_input_id = dpg.add_input_float(
+                label="Noise Low-pass Sigma",
+                format="%.2f",
+                min_value=0.0,
+                min_clamped=True,
+                step=0.0,
+                width=200,
+            )
+
+            dpg.add_spacer(height=20)
+            with dpg.group(horizontal=True):
+                dpg.add_button(label="Render", width=140, callback=self._apply_render_modal)
+                dpg.add_button(label="Cancel", width=140, callback=self._cancel_render_modal)
+
+    def _open_render_modal(self, sender, app_data):
+        if dpg is None:
+            return
+        if self.render_future is not None and not self.render_future.done():
+            dpg.set_value("status_text", "Render already in progress...")
+            return
+        self._ensure_render_modal()
+        self._update_render_modal_values()
+        if self.render_modal_id is not None:
+            dpg.configure_item(self.render_modal_id, show=True)
+            self.render_modal_open = True
+
+    def _close_render_modal(self) -> None:
+        if dpg is None or self.render_modal_id is None:
+            return
+        dpg.configure_item(self.render_modal_id, show=False)
+        self.render_modal_open = False
+
+    def _update_render_modal_values(self) -> None:
+        if dpg is None:
+            return
+        with self.state_lock:
+            settings = replace(self.state.render_settings)
+            streamlength = self.state.project.streamlength_factor
+
+        if self.render_supersample_radio_id is not None:
+            dpg.set_value(self.render_supersample_radio_id, _label_for_supersample(settings.supersample))
+
+        if self.render_multiplier_radio_id is not None:
+            dpg.set_value(self.render_multiplier_radio_id, _label_for_multiplier(settings.multiplier))
+
+        if self.render_passes_input_id is not None:
+            dpg.set_value(self.render_passes_input_id, int(settings.num_passes))
+
+        if self.render_streamlength_input_id is not None:
+            dpg.set_value(self.render_streamlength_input_id, float(streamlength))
+
+        if self.render_margin_input_id is not None:
+            dpg.set_value(self.render_margin_input_id, float(settings.margin))
+
+        if self.render_seed_input_id is not None:
+            dpg.set_value(self.render_seed_input_id, int(settings.noise_seed))
+
+        if self.render_sigma_input_id is not None:
+            dpg.set_value(self.render_sigma_input_id, float(settings.noise_sigma))
+
+    def _cancel_render_modal(self, sender=None, app_data=None) -> None:
+        self._close_render_modal()
+
+    def _apply_render_modal(self, sender=None, app_data=None) -> None:
+        if dpg is None:
+            return
+
+        supersample_label = dpg.get_value(self.render_supersample_radio_id) if self.render_supersample_radio_id else SUPERSAMPLE_LABELS[0]
+        multiplier_label = dpg.get_value(self.render_multiplier_radio_id) if self.render_multiplier_radio_id else RESOLUTION_LABELS[0]
+
+        supersample = SUPERSAMPLE_LOOKUP.get(supersample_label, SUPERSAMPLE_CHOICES[0])
+        multiplier = RESOLUTION_LOOKUP.get(multiplier_label, RESOLUTION_CHOICES[0])
+
+        passes = int(dpg.get_value(self.render_passes_input_id)) if self.render_passes_input_id is not None else defaults.DEFAULT_RENDER_PASSES
+        streamlength = float(dpg.get_value(self.render_streamlength_input_id)) if self.render_streamlength_input_id is not None else defaults.DEFAULT_STREAMLENGTH_FACTOR
+        margin = float(dpg.get_value(self.render_margin_input_id)) if self.render_margin_input_id is not None else defaults.DEFAULT_PADDING_MARGIN
+        noise_seed = int(dpg.get_value(self.render_seed_input_id)) if self.render_seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
+        noise_sigma = float(dpg.get_value(self.render_sigma_input_id)) if self.render_sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
+
+        # Clamp to valid ranges similar to pygame UI
+        passes = max(passes, 1)
+        streamlength = max(streamlength, 1e-6)
+        margin = max(margin, 0.0)
+        noise_sigma = max(noise_sigma, 0.0)
+
+        with self.state_lock:
+            actions.set_supersample(self.state, supersample)
+            actions.set_render_multiplier(self.state, multiplier)
+            actions.set_num_passes(self.state, passes)
+            actions.set_margin(self.state, margin)
+            actions.set_noise_seed(self.state, noise_seed)
+            actions.set_noise_sigma(self.state, noise_sigma)
+            actions.set_streamlength_factor(self.state, streamlength)
+
+        self._close_render_modal()
+        self._start_render_job()
+
     # ------------------------------------------------------------------
     # Canvas input processing
     # ------------------------------------------------------------------
@@ -239,6 +441,23 @@ class FlowColApp:
         mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
         pressed = mouse_down and not self.mouse_down_last
         released = (not mouse_down) and self.mouse_down_last
+
+        with self.state_lock:
+            mode = self.state.view_mode
+
+        if mode != "edit":
+            if pressed and self._is_mouse_over_canvas():
+                x, y = self._get_canvas_mouse_pos()
+                with self.state_lock:
+                    project = self.state.project
+                    hit_idx = -1
+                    for idx in reversed(range(len(project.conductors))):
+                        if _point_in_conductor(project.conductors[idx], x, y):
+                            hit_idx = idx
+                            break
+                    self.state.set_selected(hit_idx)
+            self.mouse_down_last = mouse_down
+            return
 
         if pressed and self._is_mouse_over_canvas():
             x, y = self._get_canvas_mouse_pos()
@@ -275,6 +494,15 @@ class FlowColApp:
 
         self.mouse_down_last = mouse_down
 
+    def _on_back_to_edit_clicked(self, sender, app_data):
+        with self.state_lock:
+            if self.state.view_mode != "edit":
+                self.state.view_mode = "edit"
+                self.drag_active = False
+                self._mark_canvas_dirty()
+        self._update_control_visibility()
+        dpg.set_value("status_text", "Edit mode.")
+
     def _redraw_canvas(self) -> None:
         if dpg is None or self.canvas_id is None:
             return
@@ -288,6 +516,7 @@ class FlowColApp:
             canvas_w, canvas_h = project.canvas_resolution
             conductors = list(project.conductors)
             render_cache = self.state.render_cache
+            view_mode = self.state.view_mode
 
         dpg.delete_item(self.canvas_id, children_only=True)
 
@@ -295,7 +524,7 @@ class FlowColApp:
 
         dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.canvas_id)
 
-        if render_cache and self.render_texture_id is not None and self.render_texture_size:
+        if view_mode == "render" and render_cache and self.render_texture_id is not None and self.render_texture_size:
             tex_w, tex_h = self.render_texture_size
             if tex_w > 0 and tex_h > 0:
                 scale_x = canvas_w / tex_w
@@ -310,27 +539,28 @@ class FlowColApp:
                     parent=self.canvas_id,
                 )
 
-        for idx, conductor in enumerate(conductors):
-            tex_id = self._ensure_conductor_texture(idx, conductor.mask)
-            x0, y0 = conductor.position
-            width = conductor.mask.shape[1]
-            height = conductor.mask.shape[0]
-            dpg.draw_image(
-                tex_id,
-                pmin=(x0, y0),
-                pmax=(x0 + width, y0 + height),
-                uv_min=(0.0, 0.0),
-                uv_max=(1.0, 1.0),
-                parent=self.canvas_id,
-            )
-            if idx == selected_idx:
-                dpg.draw_rectangle(
-                    (x0, y0),
-                    (x0 + width, y0 + height),
-                    color=(255, 255, 100, 200),
-                    thickness=2.0,
+        if view_mode == "edit" or render_cache is None:
+            for idx, conductor in enumerate(conductors):
+                tex_id = self._ensure_conductor_texture(idx, conductor.mask)
+                x0, y0 = conductor.position
+                width = conductor.mask.shape[1]
+                height = conductor.mask.shape[0]
+                dpg.draw_image(
+                    tex_id,
+                    pmin=(x0, y0),
+                    pmax=(x0 + width, y0 + height),
+                    uv_min=(0.0, 0.0),
+                    uv_max=(1.0, 1.0),
                     parent=self.canvas_id,
                 )
+                if idx == selected_idx:
+                    dpg.draw_rectangle(
+                        (x0, y0),
+                        (x0 + width, y0 + height),
+                        color=(255, 255, 100, 200),
+                        thickness=2.0,
+                        parent=self.canvas_id,
+                    )
 
     # ------------------------------------------------------------------
     # Canvas input processing
@@ -338,7 +568,7 @@ class FlowColApp:
     # ------------------------------------------------------------------
     # Rendering
     # ------------------------------------------------------------------
-    def _on_render_clicked(self, sender, app_data):
+    def _start_render_job(self) -> None:
         if self.render_future is not None and not self.render_future.done():
             return
 
@@ -396,6 +626,10 @@ class FlowColApp:
         if success:
             self._mark_canvas_dirty()
             self._refresh_render_texture()
+            self.drag_active = False
+            with self.state_lock:
+                self.state.view_mode = "render"
+            self._update_control_visibility()
             dpg.set_value("status_text", "Render complete.")
         else:
             msg = self.render_error or "Render failed (possibly due to excessive resolution)."
@@ -424,6 +658,16 @@ class FlowColApp:
             self.executor.shutdown(wait=False)
             dpg.destroy_context()
 
+
+    def _update_control_visibility(self) -> None:
+        if dpg is None:
+            return
+        with self.state_lock:
+            mode = self.state.view_mode
+        if self.edit_controls_id is not None:
+            dpg.configure_item(self.edit_controls_id, show=(mode == "edit"))
+        if self.render_controls_id is not None:
+            dpg.configure_item(self.render_controls_id, show=(mode == "render"))
 
 def run() -> None:
     """Launch FlowCol Dear PyGui application."""
