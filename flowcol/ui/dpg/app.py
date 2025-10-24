@@ -134,6 +134,8 @@ class FlowColApp:
     render_seed_input_id: Optional[int] = None
     render_sigma_input_id: Optional[int] = None
     conductor_file_dialog_id: Optional[str] = None
+    conductor_controls_container_id: Optional[int] = None
+    conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     canvas_dirty: bool = True
@@ -170,6 +172,15 @@ class FlowColApp:
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self._open_conductor_dialog)
                 dpg.add_button(label="Render Field", callback=self._open_render_modal)
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
+                dpg.add_text("Conductor Voltages")
+                self.conductor_controls_container_id = dpg.add_child_window(
+                    autosize_x=True,
+                    height=240,
+                    border=False,
+                    tag="conductor_controls_child",
+                )
 
             with dpg.group(tag="render_controls_group") as render_group:
                 self.render_controls_id = render_group
@@ -187,6 +198,7 @@ class FlowColApp:
         self._refresh_render_texture()
         self._update_control_visibility()
         self._ensure_conductor_file_dialog()
+        self._rebuild_conductor_controls()
 
     # ------------------------------------------------------------------
     # Canvas drawing
@@ -273,6 +285,69 @@ class FlowColApp:
             self.render_texture_size = (width, height)
         else:
             dpg.set_value(self.render_texture_id, data)
+
+    def _rebuild_conductor_controls(self) -> None:
+        if dpg is None or self.conductor_controls_container_id is None:
+            return
+
+        dpg.delete_item(self.conductor_controls_container_id, children_only=True)
+        self.conductor_slider_ids.clear()
+
+        with self.state_lock:
+            conductors = list(self.state.project.conductors)
+            selected_idx = self.state.selected_idx
+
+        if not conductors:
+            dpg.add_text("No conductors loaded.", parent=self.conductor_controls_container_id)
+            return
+
+        for idx, conductor in enumerate(conductors):
+            label = f"C{idx + 1}"
+            if idx == selected_idx:
+                label += " (selected)"
+            slider_id = dpg.add_slider_float(
+                label=label,
+                default_value=float(conductor.voltage),
+                min_value=-1.0,
+                max_value=1.0,
+                format="%.3f",
+                callback=self._on_conductor_voltage_slider,
+                user_data=idx,
+                parent=self.conductor_controls_container_id,
+            )
+            self.conductor_slider_ids[idx] = slider_id
+
+    def _update_conductor_slider_labels(self, skip_idx: Optional[int] = None) -> None:
+        if dpg is None or not self.conductor_slider_ids:
+            return
+
+        with self.state_lock:
+            conductors = list(self.state.project.conductors)
+            selected_idx = self.state.selected_idx
+
+        for idx, slider_id in list(self.conductor_slider_ids.items()):
+            if slider_id is None or not dpg.does_item_exist(slider_id):
+                continue
+            if idx >= len(conductors):
+                continue
+            label = f"C{idx + 1}"
+            if idx == selected_idx:
+                label += " (selected)"
+            dpg.configure_item(slider_id, label=label)
+            if skip_idx is not None and idx == skip_idx:
+                continue
+            dpg.set_value(slider_id, float(conductors[idx].voltage))
+
+    def _on_conductor_voltage_slider(self, sender, app_data, user_data):
+        if dpg is None:
+            return
+        idx = int(user_data)
+        value = float(app_data)
+        with self.state_lock:
+            actions.set_conductor_voltage(self.state, idx, value)
+        self._mark_canvas_dirty()
+        dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
+        self._update_conductor_slider_labels(skip_idx=idx)
 
     def _ensure_render_modal(self) -> None:
         if dpg is None or self.render_modal_id is not None:
@@ -459,6 +534,8 @@ class FlowColApp:
 
         self._mark_canvas_dirty()
         self._update_control_visibility()
+        self._rebuild_conductor_controls()
+        self._update_conductor_slider_labels()
         dpg.set_value("status_text", f"Loaded conductor '{Path(path_str).name}'")
 
 
@@ -552,6 +629,7 @@ class FlowColApp:
                             hit_idx = idx
                             break
                     self.state.set_selected(hit_idx)
+                self._update_conductor_slider_labels()
             self.mouse_down_last = mouse_down
             return
 
@@ -571,6 +649,7 @@ class FlowColApp:
                     self.drag_last_pos = (x, y)
                 else:
                     self.drag_active = False
+            self._update_conductor_slider_labels()
             self._mark_canvas_dirty()
 
         if self.drag_active and mouse_down:
@@ -764,6 +843,7 @@ class FlowColApp:
             dpg.configure_item(self.edit_controls_id, show=(mode == "edit"))
         if self.render_controls_id is not None:
             dpg.configure_item(self.render_controls_id, show=(mode == "render"))
+        self._update_conductor_slider_labels()
 
 def run() -> None:
     """Launch FlowCol Dear PyGui application."""
