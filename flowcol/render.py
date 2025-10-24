@@ -58,6 +58,25 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
         ],
         dtype=np.float32,
     ),
+    "Twilight Magenta": np.array(
+        [
+            (0.18, 0.07, 0.22),  # Dark purple
+            (0.26, 0.11, 0.35),  # Deep purple
+            (0.33, 0.17, 0.48),  # Purple
+            (0.40, 0.30, 0.60),  # Medium purple
+            (0.50, 0.45, 0.70),  # Light purple
+            (0.65, 0.60, 0.80),  # Lavender
+            (0.80, 0.75, 0.88),  # Very light lavender
+            (0.92, 0.88, 0.94),  # Near white
+            (0.95, 0.90, 0.85),  # Peachy white
+            (0.88, 0.70, 0.55),  # Peach/gold
+            (0.75, 0.50, 0.40),  # Orange-brown
+            (0.50, 0.25, 0.35),  # Purple-brown
+            (0.35, 0.15, 0.30),  # Dark purple-red
+            (0.18, 0.08, 0.21),  # Dark purple (wrap)
+        ],
+        dtype=np.float32,
+    ),
 }
 
 DEFAULT_COLOR_PALETTE_NAME = "Ink & Gold"
