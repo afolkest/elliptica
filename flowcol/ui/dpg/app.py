@@ -139,6 +139,8 @@ class FlowColApp:
     render_margin_input_id: Optional[int] = None
     render_seed_input_id: Optional[int] = None
     render_sigma_input_id: Optional[int] = None
+    canvas_width_input_id: Optional[int] = None
+    canvas_height_input_id: Optional[int] = None
     conductor_file_dialog_id: Optional[str] = None
     conductor_controls_container_id: Optional[int] = None
     conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
@@ -181,6 +183,29 @@ class FlowColApp:
                 dpg.add_button(label="Render Field", callback=self._open_render_modal)
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
+                dpg.add_text("Canvas Size")
+                with dpg.group(horizontal=True):
+                    self.canvas_width_input_id = dpg.add_input_int(
+                        label="Width",
+                        min_value=1,
+                        min_clamped=True,
+                        max_value=32768,
+                        max_clamped=True,
+                        step=0,
+                        width=120,
+                    )
+                    self.canvas_height_input_id = dpg.add_input_int(
+                        label="Height",
+                        min_value=1,
+                        min_clamped=True,
+                        max_value=32768,
+                        max_clamped=True,
+                        step=0,
+                        width=120,
+                    )
+                dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size)
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
                 dpg.add_text("Conductor Voltages")
                 self.conductor_controls_container_id = dpg.add_child_window(
                     autosize_x=True,
@@ -205,6 +230,7 @@ class FlowColApp:
         self._refresh_render_texture()
         self._update_control_visibility()
         self._ensure_conductor_file_dialog()
+        self._update_canvas_inputs()
         self._rebuild_conductor_controls()
 
     # ------------------------------------------------------------------
@@ -292,6 +318,16 @@ class FlowColApp:
             self.render_texture_size = (width, height)
         else:
             dpg.set_value(self.render_texture_id, data)
+
+    def _update_canvas_inputs(self) -> None:
+        if dpg is None:
+            return
+        with self.state_lock:
+            width, height = self.state.project.canvas_resolution
+        if self.canvas_width_input_id is not None:
+            dpg.set_value(self.canvas_width_input_id, int(width))
+        if self.canvas_height_input_id is not None:
+            dpg.set_value(self.canvas_height_input_id, int(height))
 
     def _rebuild_conductor_controls(self) -> None:
         if dpg is None or self.conductor_controls_container_id is None:
@@ -694,6 +730,25 @@ class FlowColApp:
                 self._mark_canvas_dirty()
                 dpg.set_value("status_text", "Conductor deleted")
         self.backspace_down_last = backspace_down
+
+    def _apply_canvas_size(self, sender=None, app_data=None) -> None:
+        if dpg is None:
+            return
+
+        width = int(dpg.get_value(self.canvas_width_input_id)) if self.canvas_width_input_id is not None else self.state.project.canvas_resolution[0]
+        height = int(dpg.get_value(self.canvas_height_input_id)) if self.canvas_height_input_id is not None else self.state.project.canvas_resolution[1]
+
+        width = max(1, min(width, 32768))
+        height = max(1, min(height, 32768))
+
+        with self.state_lock:
+            current_size = self.state.project.canvas_resolution
+            if current_size == (width, height):
+                return
+            actions.set_canvas_resolution(self.state, width, height)
+        self._update_canvas_inputs()
+        self._mark_canvas_dirty()
+        dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:
