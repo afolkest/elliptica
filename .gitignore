@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 
 *.png
+DearPyGui
 
 LineIntegralConvolutions
 CLAUDE.md
