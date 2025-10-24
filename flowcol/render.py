@@ -232,6 +232,38 @@ def colorize_array(
     return (rgb * 255.0).astype(np.uint8)
 
 
+def _apply_display_transforms(
+    arr: np.ndarray,
+    contrast: float = 1.0,
+    gamma: float = 1.0,
+    clip_percent: float = 0.5,
+) -> np.ndarray:
+    """Apply clip/contrast/gamma transforms to normalize array to [0,1]."""
+    arr = arr.astype(np.float32, copy=False)
+
+    # Percentile-based normalization (clipping)
+    if clip_percent > 0.0:
+        vmin = float(np.percentile(arr, clip_percent))
+        vmax = float(np.percentile(arr, 100.0 - clip_percent))
+        if vmax > vmin:
+            norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+        else:
+            norm = _normalize_unit(arr)
+    else:
+        norm = _normalize_unit(arr)
+
+    # Contrast adjustment
+    if not np.isclose(contrast, 1.0):
+        norm = np.clip((norm - 0.5) * contrast + 0.5, 0.0, 1.0)
+
+    # Gamma correction
+    gamma = max(float(gamma), 1e-3)
+    if not np.isclose(gamma, 1.0):
+        norm = np.power(norm, gamma, dtype=np.float32)
+
+    return np.clip(norm, 0.0, 1.0)
+
+
 def array_to_pil(
     arr: np.ndarray,
     *,
@@ -251,7 +283,8 @@ def array_to_pil(
         rgb = colorize_array(arr, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
         return Image.fromarray(rgb, mode='RGB')
     else:
-        norm = _normalize_unit(arr)
+        # Apply display transforms even in grayscale mode
+        norm = _apply_display_transforms(arr, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
         img = (norm * 255.0).astype(np.uint8)
         return Image.fromarray(img, mode='L').convert('RGB')
 
@@ -363,11 +396,15 @@ def downsample_lic(
     sigma: float,
 ) -> np.ndarray:
     """Gaussian blur + bilinear resize from supersampled grid to target resolution."""
-    if arr.shape == target_shape:
-        return arr.copy()
-
     sigma = max(sigma, 0.0)
+
+    # Apply blur even if no resize needed
     filtered = gaussian_filter(arr, sigma=sigma) if sigma > 0 else arr
+
+    # Skip resize if shapes already match
+    if arr.shape == target_shape:
+        return filtered.copy() if filtered is arr else filtered
+
     scale_y = target_shape[0] / filtered.shape[0]
     scale_x = target_shape[1] / filtered.shape[1]
     return zoom(filtered, (scale_y, scale_x), order=1)

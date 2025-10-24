@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from concurrent.futures import ThreadPoolExecutor, Future
+import math
 import threading
 from typing import Optional, Dict, Tuple
 
@@ -95,11 +96,20 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
     interior = None
     if conductor.interior_mask is not None:
         interior = conductor.interior_mask.copy()
+    original = None
+    if conductor.original_mask is not None:
+        original = conductor.original_mask.copy()
+    original_interior = None
+    if conductor.original_interior_mask is not None:
+        original_interior = conductor.original_interior_mask.copy()
     return Conductor(
         mask=conductor.mask.copy(),
         voltage=conductor.voltage,
         position=conductor.position,
         interior_mask=interior,
+        original_mask=original,
+        original_interior_mask=original_interior,
+        scale_factor=conductor.scale_factor,
     )
 
 
@@ -144,8 +154,13 @@ class FlowColApp:
     conductor_file_dialog_id: Optional[str] = None
     conductor_controls_container_id: Optional[int] = None
     conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
+    postprocess_downsample_slider_id: Optional[int] = None
+    postprocess_clip_slider_id: Optional[int] = None
+    postprocess_contrast_slider_id: Optional[int] = None
+    postprocess_gamma_slider_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
+    conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
     canvas_dirty: bool = True
 
     drag_active: bool = False
@@ -153,11 +168,17 @@ class FlowColApp:
     mouse_down_last: bool = False
     render_modal_open: bool = False
     backspace_down_last: bool = False
+    mouse_wheel_delta: float = 0.0
+    mouse_handler_registry_id: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
             self._add_demo_conductor()
+
+    def _on_mouse_wheel(self, sender, app_data) -> None:
+        """Capture mouse wheel delta from handler."""
+        self.mouse_wheel_delta = float(app_data)
 
     def require_backend(self) -> None:
         if dpg is None:
@@ -174,6 +195,10 @@ class FlowColApp:
 
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
         self.viewport_created = True
+
+        with dpg.handler_registry() as handler_reg:
+            self.mouse_handler_registry_id = handler_reg
+            dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
 
         with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
             with dpg.group(tag="edit_controls_group") as edit_group:
@@ -218,11 +243,56 @@ class FlowColApp:
                 self.render_controls_id = render_group
                 dpg.add_text("Render View")
                 dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked)
+                dpg.add_spacer(height=15)
+                dpg.add_separator()
+                dpg.add_spacer(height=10)
+                dpg.add_text("Post-processing")
+                dpg.add_spacer(height=10)
+
+                self.postprocess_downsample_slider_id = dpg.add_slider_float(
+                    label="Downsampling Blur",
+                    default_value=self.state.postprocess_settings.downsample_sigma,
+                    min_value=0.1,
+                    max_value=2.0,
+                    format="%.2f",
+                    callback=self._on_downsample_slider,
+                    width=200,
+                )
+
+                self.postprocess_clip_slider_id = dpg.add_slider_float(
+                    label="Clip %",
+                    default_value=self.state.postprocess_settings.clip_percent,
+                    min_value=0.0,
+                    max_value=defaults.MAX_CLIP_PERCENT,
+                    format="%.2f%%",
+                    callback=self._on_clip_slider,
+                    width=200,
+                )
+
+                self.postprocess_contrast_slider_id = dpg.add_slider_float(
+                    label="Contrast",
+                    default_value=self.state.postprocess_settings.contrast,
+                    min_value=0.5,
+                    max_value=2.0,
+                    format="%.2f",
+                    callback=self._on_contrast_slider,
+                    width=200,
+                )
+
+                self.postprocess_gamma_slider_id = dpg.add_slider_float(
+                    label="Gamma",
+                    default_value=self.state.postprocess_settings.gamma,
+                    min_value=0.3,
+                    max_value=3.0,
+                    format="%.2f",
+                    callback=self._on_gamma_slider,
+                    width=200,
+                )
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
             dpg.add_text("", tag="status_text")
 
-        with dpg.window(label="Canvas", pos=(380, 10)):
+        with dpg.window(label="Canvas", pos=(380, 10), no_scrollbar=True, no_scroll_with_mouse=True):
             canvas_w, canvas_h = self.state.project.canvas_resolution
             with dpg.drawlist(width=canvas_w, height=canvas_h) as canvas:
                 self.canvas_id = canvas
@@ -257,18 +327,36 @@ class FlowColApp:
         rect_min = dpg.get_item_rect_min(self.canvas_id)
         return mouse_x - rect_min[0], mouse_y - rect_min[1]
 
+    def _find_hit_conductor(self, x: float, y: float) -> int:
+        with self.state_lock:
+            conductors = self.state.project.conductors
+            for idx in reversed(range(len(conductors))):
+                if _point_in_conductor(conductors[idx], x, y):
+                    return idx
+        return -1
+
     def _ensure_conductor_texture(self, idx: int, mask: np.ndarray) -> int:
         assert dpg is not None and self.texture_registry_id is not None
         tex_id = self.conductor_textures.get(idx)
-        rgba_flat = _mask_to_rgba(mask, CONDUCTOR_COLORS[idx % len(CONDUCTOR_COLORS)])
         width = mask.shape[1]
         height = mask.shape[0]
+        existing_shape = self.conductor_texture_shapes.get(idx)
+        if tex_id is not None:
+            exists = dpg.does_item_exist(tex_id)
+            if not exists or existing_shape != (height, width):
+                if exists:
+                    dpg.delete_item(tex_id)
+                tex_id = None
+                self.conductor_textures.pop(idx, None)
+
+        rgba_flat = _mask_to_rgba(mask, CONDUCTOR_COLORS[idx % len(CONDUCTOR_COLORS)])
 
         if tex_id is None:
             tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
             self.conductor_textures[idx] = tex_id
         else:
             dpg.set_value(tex_id, rgba_flat)
+        self.conductor_texture_shapes[idx] = (height, width)
         return tex_id
 
     def _ensure_render_texture(self, width: int, height: int) -> int:
@@ -295,17 +383,60 @@ class FlowColApp:
         self.state.field_dirty = True
         self.state.render_dirty = True
 
+    def _apply_postprocessing(self) -> None:
+        """Apply postprocessing settings to cached render and update display."""
+        from flowcol.render import downsample_lic
+
+        with self.state_lock:
+            cache = self.state.render_cache
+            if cache is None:
+                return
+
+            settings = self.state.postprocess_settings
+            result = cache.result
+
+            # Apply downsampling with blur
+            target_shape = self.state.project.canvas_resolution
+            downsampled = downsample_lic(
+                result.array,
+                target_shape,
+                cache.supersample,
+                settings.downsample_sigma,
+            )
+
+            # Store postprocessed result in display_array
+            cache.display_array = downsampled
+
+        # Update texture with new postprocessed display
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
     def _refresh_render_texture(self) -> None:
         if dpg is None or self.texture_registry_id is None:
             return
 
         with self.state_lock:
             cache = self.state.render_cache
+            settings = self.state.postprocess_settings
+
             if cache is None:
                 arr = np.zeros((32, 32), dtype=np.float32)
+                clip = 0.0
+                contrast = 1.0
+                gamma = 1.0
             else:
                 arr = cache.display_array if cache.display_array is not None else cache.result.array
-            pil_img = array_to_pil(arr, use_color=False, clip_percent=0.0)
+                clip = settings.clip_percent
+                contrast = settings.contrast
+                gamma = settings.gamma
+
+            pil_img = array_to_pil(
+                arr,
+                use_color=False,
+                clip_percent=clip,
+                contrast=contrast,
+                gamma=gamma,
+            )
             if max(pil_img.size) > MAX_PREVIEW_SIZE:
                 pil_img.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
 
@@ -391,6 +522,25 @@ class FlowColApp:
         self._mark_canvas_dirty()
         dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
         self._update_conductor_slider_labels(skip_idx=idx)
+
+    def _scale_conductor(self, idx: int, factor: float) -> bool:
+        if dpg is None:
+            return False
+        factor = max(float(factor), 0.05)
+        with self.state_lock:
+            self.state.set_selected(idx)
+            changed = actions.scale_conductor(self.state, idx, factor)
+            if changed:
+                self.conductor_textures.pop(idx, None)
+                self.conductor_texture_shapes.pop(idx, None)
+        if not changed:
+            dpg.set_value("status_text", "Scaling limit reached.")
+            return False
+
+        self._mark_canvas_dirty()
+        self._update_conductor_slider_labels()
+        dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
+        return True
 
     def _ensure_render_modal(self) -> None:
         if dpg is None or self.render_modal_id is not None:
@@ -661,6 +811,21 @@ class FlowColApp:
         with self.state_lock:
             mode = self.state.view_mode
 
+        wheel_delta = self.mouse_wheel_delta
+        self.mouse_wheel_delta = 0.0
+        over_canvas = self._is_mouse_over_canvas()
+
+        if mode == "edit" and over_canvas and abs(wheel_delta) > 1e-5:
+            with self.state_lock:
+                selected_idx = self.state.selected_idx
+            # Only scale if a conductor is selected
+            if selected_idx >= 0:
+                scale_factor = math.exp(wheel_delta * 0.12)
+                scale_factor = max(0.05, min(scale_factor, 20.0))
+                if self._scale_conductor(selected_idx, scale_factor):
+                    x, y = self._get_canvas_mouse_pos()
+                    self.drag_last_pos = (x, y)
+
         if mode != "edit":
             if pressed and self._is_mouse_over_canvas():
                 x, y = self._get_canvas_mouse_pos()
@@ -727,7 +892,9 @@ class FlowColApp:
                 with self.state_lock:
                     actions.remove_conductor(self.state, idx)
                     self.conductor_textures.clear()
+                    self.conductor_texture_shapes.clear()
                 self._mark_canvas_dirty()
+                self._rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")
         self.backspace_down_last = backspace_down
 
@@ -758,6 +925,40 @@ class FlowColApp:
                 self._mark_canvas_dirty()
         self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
+
+    def _on_downsample_slider(self, sender, app_data):
+        """Handle downsampling blur sigma slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.postprocess_settings.downsample_sigma = value
+        self._apply_postprocessing()
+
+    def _on_clip_slider(self, sender, app_data):
+        """Handle clip percent slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.postprocess_settings.clip_percent = value
+        # Clip is display-only, just refresh texture
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_contrast_slider(self, sender, app_data):
+        """Handle contrast slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.postprocess_settings.contrast = value
+        # Contrast is display-only, just refresh texture
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_gamma_slider(self, sender, app_data):
+        """Handle gamma slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.postprocess_settings.gamma = value
+        # Gamma is display-only, just refresh texture
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
 
     def _redraw_canvas(self) -> None:
         if dpg is None or self.canvas_id is None:
@@ -848,11 +1049,23 @@ class FlowColApp:
             if result is None:
                 return False
 
+            # Apply initial postprocessing to create display array
+            from flowcol.render import downsample_lic
+            with self.state_lock:
+                postprocess = self.state.postprocess_settings
+                target_shape = project_snapshot.canvas_resolution
+                display_array = downsample_lic(
+                    result.array,
+                    target_shape,
+                    settings_snapshot.supersample,
+                    postprocess.downsample_sigma,
+                )
+
             cache = RenderCache(
                 result=result,
                 multiplier=settings_snapshot.multiplier,
                 supersample=settings_snapshot.supersample,
-                display_array=result.array.copy(),
+                display_array=display_array,
             )
 
             with self.state_lock:

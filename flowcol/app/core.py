@@ -25,6 +25,16 @@ class RenderSettings:
 
 
 @dataclass
+class PostprocessSettings:
+    """Display postprocessing parameters applied to cached render."""
+
+    downsample_sigma: float = defaults.DEFAULT_DOWNSAMPLE_SIGMA
+    clip_percent: float = defaults.DEFAULT_CLIP_PERCENT
+    contrast: float = defaults.DEFAULT_CONTRAST
+    gamma: float = defaults.DEFAULT_GAMMA
+
+
+@dataclass
 class RenderCache:
     """Latest render output retained for display/export."""
 
@@ -40,6 +50,7 @@ class AppState:
 
     project: Project = field(default_factory=Project)
     render_settings: RenderSettings = field(default_factory=RenderSettings)
+    postprocess_settings: PostprocessSettings = field(default_factory=PostprocessSettings)
 
     # Interaction state
     selected_idx: int = -1
