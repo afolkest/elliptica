@@ -252,7 +252,7 @@ class FlowColApp:
                 self.postprocess_downsample_slider_id = dpg.add_slider_float(
                     label="Downsampling Blur",
                     default_value=self.state.postprocess_settings.downsample_sigma,
-                    min_value=0.1,
+                    min_value=0.0,
                     max_value=2.0,
                     format="%.2f",
                     callback=self._on_downsample_slider,
