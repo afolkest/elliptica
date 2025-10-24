@@ -15,11 +15,14 @@ except ImportError:  # pragma: no cover - Dear PyGui is optional for unit tests
     dpg = None
 
 from flowcol.app.core import AppState, RenderCache, RenderSettings
+from pathlib import Path
+
 from flowcol.app import actions
 from flowcol.render import array_to_pil
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
+from flowcol.mask_utils import load_conductor_masks
 
 
 CONDUCTOR_COLORS = [
@@ -30,6 +33,7 @@ CONDUCTOR_COLORS = [
 ]
 
 MAX_PREVIEW_SIZE = 640
+MAX_CANVAS_DIM = 8192
 
 SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
 SUPERSAMPLE_LABELS = tuple(f"{value:.1f}\u00d7" for value in SUPERSAMPLE_CHOICES)
@@ -129,6 +133,7 @@ class FlowColApp:
     render_margin_input_id: Optional[int] = None
     render_seed_input_id: Optional[int] = None
     render_sigma_input_id: Optional[int] = None
+    conductor_file_dialog_id: Optional[str] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     canvas_dirty: bool = True
@@ -163,6 +168,7 @@ class FlowColApp:
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
                 dpg.add_text("Render Controls")
+                dpg.add_button(label="Load Conductor...", callback=self._open_conductor_dialog)
                 dpg.add_button(label="Render Field", callback=self._open_render_modal)
 
             with dpg.group(tag="render_controls_group") as render_group:
@@ -180,6 +186,7 @@ class FlowColApp:
 
         self._refresh_render_texture()
         self._update_control_visibility()
+        self._ensure_conductor_file_dialog()
 
     # ------------------------------------------------------------------
     # Canvas drawing
@@ -348,6 +355,25 @@ class FlowColApp:
                 dpg.add_button(label="Render", width=140, callback=self._apply_render_modal)
                 dpg.add_button(label="Cancel", width=140, callback=self._cancel_render_modal)
 
+    def _ensure_conductor_file_dialog(self) -> None:
+        if dpg is None or self.conductor_file_dialog_id is not None:
+            return
+
+        with dpg.file_dialog(
+            directory_selector=False,
+            show=False,
+            modal=True,
+            default_path=str(Path.cwd()),
+            callback=self._on_conductor_file_selected,
+            cancel_callback=self._on_conductor_file_cancelled,
+            width=640,
+            height=420,
+            tag="conductor_file_dialog",
+        ) as dialog:
+            self.conductor_file_dialog_id = dialog
+            dpg.add_file_extension(".png", color=(150, 180, 255, 255))
+            dpg.add_file_extension(".*")
+
     def _open_render_modal(self, sender, app_data):
         if dpg is None:
             return
@@ -365,6 +391,76 @@ class FlowColApp:
             return
         dpg.configure_item(self.render_modal_id, show=False)
         self.render_modal_open = False
+
+    def _open_conductor_dialog(self, sender, app_data):
+        if dpg is None:
+            return
+        with self.state_lock:
+            if self.state.view_mode != "edit":
+                dpg.set_value("status_text", "Switch to edit mode to add conductors.")
+                return
+
+        self._ensure_conductor_file_dialog()
+        if self.conductor_file_dialog_id is not None:
+            dpg.show_item(self.conductor_file_dialog_id)
+
+    def _on_conductor_file_cancelled(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+        dpg.set_value("status_text", "Load conductor cancelled.")
+
+    def _on_conductor_file_selected(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+
+        path_str: Optional[str] = None
+        if isinstance(app_data, dict):
+            # Preferred key exposed by Dear PyGui >=1.11
+            path_str = app_data.get("file_path_name")
+            if not path_str:
+                selections = app_data.get("selections", {})
+                if selections:
+                    # selections is dict[label] -> path
+                    path_str = next(iter(selections.values()))
+
+        if not path_str:
+            dpg.set_value("status_text", "No file selected.")
+            return
+
+        try:
+            mask, interior = load_conductor_masks(path_str)
+        except Exception as exc:  # pragma: no cover - PIL errors etc.
+            dpg.set_value("status_text", f"Failed to load conductor: {exc}")
+            return
+
+        mask_h, mask_w = mask.shape
+        if mask_w > MAX_CANVAS_DIM or mask_h > MAX_CANVAS_DIM:
+            dpg.set_value("status_text", f"Mask exceeds max dimension {MAX_CANVAS_DIM}px.")
+            return
+
+        with self.state_lock:
+            project = self.state.project
+            if len(project.conductors) == 0:
+                canvas_w, canvas_h = project.canvas_resolution
+                new_w = max(canvas_w, mask_w)
+                new_h = max(canvas_h, mask_h)
+                if (new_w, new_h) != project.canvas_resolution:
+                    actions.set_canvas_resolution(self.state, new_w, new_h)
+
+            canvas_w, canvas_h = self.state.project.canvas_resolution
+            pos = ((canvas_w - mask_w) / 2.0, (canvas_h - mask_h) / 2.0)
+            conductor = Conductor(mask=mask, voltage=0.5, position=pos, interior_mask=interior)
+            actions.add_conductor(self.state, conductor)
+            self.state.view_mode = "edit"
+
+        self._mark_canvas_dirty()
+        self._update_control_visibility()
+        dpg.set_value("status_text", f"Loaded conductor '{Path(path_str).name}'")
+
 
     def _update_render_modal_values(self) -> None:
         if dpg is None:
