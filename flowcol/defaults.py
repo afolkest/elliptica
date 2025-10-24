@@ -22,3 +22,9 @@ DEFAULT_CLAHE_STRENGTH: float = 1.0
 
 # Downsampling defaults
 DEFAULT_DOWNSAMPLE_SIGMA: float = 0.6
+
+# Display postprocessing defaults
+DEFAULT_CLIP_PERCENT: float = 0.5
+MAX_CLIP_PERCENT: float = 1.5
+DEFAULT_CONTRAST: float = 1.0
+DEFAULT_GAMMA: float = 1.0

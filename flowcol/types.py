@@ -12,6 +12,9 @@ class Conductor:
     voltage: float
     position: tuple[float, float] = (0.0, 0.0)
     interior_mask: Optional[np.ndarray] = None
+    original_mask: Optional[np.ndarray] = None
+    original_interior_mask: Optional[np.ndarray] = None
+    scale_factor: float = 1.0  # Current scale relative to original
 
 
 @dataclass
