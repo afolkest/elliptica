@@ -408,3 +408,93 @@ def downsample_lic(
     scale_y = target_shape[0] / filtered.shape[0]
     scale_x = target_shape[1] / filtered.shape[1]
     return zoom(filtered, (scale_y, scale_x), order=1)
+
+
+def apply_conductor_smear(
+    rgb: np.ndarray,
+    lic_gray: np.ndarray,
+    project,
+    palette_name: str | None,
+    render_shape: tuple[int, int],
+) -> np.ndarray:
+    """Apply smear effect to texture inside conductor masks.
+
+    This is a post-processing effect that blurs the RGB image inside conductor regions
+    with feathering from edge to center.
+
+    Args:
+        rgb: Current RGB image (H, W, 3) uint8
+        lic_gray: Original LIC grayscale (H, W) float32 (unused, kept for compatibility)
+        project: Project containing conductors
+        palette_name: Color palette (unused, kept for compatibility)
+        render_shape: (height, width) of render resolution
+
+    Returns:
+        Modified RGB image with smear applied
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    # Convert to float for blending
+    out = rgb.astype(np.float32) / 255.0
+
+    render_h, render_w = render_shape
+    canvas_w, canvas_h = project.canvas_resolution
+    scale_x = render_w / canvas_w
+    scale_y = render_h / canvas_h
+
+    # Process each conductor with smear enabled
+    for conductor in project.conductors:
+        if not conductor.smear_enabled:
+            continue
+
+        # Build conductor mask at render resolution
+        x = conductor.position[0] * scale_x
+        y = conductor.position[1] * scale_y
+
+        # Scale mask to render resolution
+        if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
+            scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=1)
+        else:
+            scaled_mask = conductor.mask.copy()
+
+        mask_h, mask_w = scaled_mask.shape
+
+        # Place mask in render coordinates
+        ix, iy = int(round(x)), int(round(y))
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(ix + mask_w, render_w), min(iy + mask_h, render_h)
+
+        mx0, my0 = max(0, -ix), max(0, -iy)
+        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+
+        if x1 <= x0 or y1 <= y0:
+            continue
+
+        mask_slice = scaled_mask[my0:my1, mx0:mx1]
+
+        # Create full mask for this conductor
+        full_mask = np.zeros((render_h, render_w), dtype=np.float32)
+        full_mask[y0:y1, x0:x1] = mask_slice
+        mask_bool = full_mask > 0.5
+
+        if not np.any(mask_bool):
+            continue
+
+        # Blur the RGB image directly (preserves color/grayscale state)
+        sigma_px = max(conductor.smear_sigma, 0.1)
+        rgb_blur = np.stack([
+            gaussian_filter(out[..., i], sigma=sigma_px)
+            for i in range(3)
+        ], axis=-1)
+
+        # Create feathered blend weight using distance from conductor edge
+        feather_px = max(conductor.smear_feather, 1e-3)
+        din = distance_transform_edt(mask_bool)
+        weight = np.clip(din / feather_px, 0.0, 1.0)
+        weight = weight * full_mask  # Only inside mask
+
+        # Blend: original → blurred from edge to center
+        weight_3d = weight[..., None]
+        out = out * (1.0 - weight_3d) + rgb_blur * weight_3d
+
+    return np.clip(out * 255.0, 0, 255).astype(np.uint8)
