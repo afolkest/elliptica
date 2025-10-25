@@ -24,6 +24,8 @@ class RenderResult:
     compute_resolution: tuple[int, int]
     canvas_scaled_shape: tuple[int, int]
     margin: float
+    offset_x: int = 0  # Crop offset for mask alignment
+    offset_y: int = 0  # Crop offset for mask alignment
 
 
 @dataclass
@@ -166,4 +168,6 @@ def perform_render(
         compute_resolution=(compute_h, compute_w),
         canvas_scaled_shape=lic_cropped.shape,
         margin=margin_physical,
+        offset_x=crop_x0,
+        offset_y=crop_y0,
     )

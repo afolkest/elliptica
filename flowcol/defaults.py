@@ -28,3 +28,7 @@ DEFAULT_CLIP_PERCENT: float = 0.5
 MAX_CLIP_PERCENT: float = 1.5
 DEFAULT_CONTRAST: float = 1.0
 DEFAULT_GAMMA: float = 1.0
+
+# Colorization defaults
+DEFAULT_COLOR_ENABLED: bool = False
+DEFAULT_COLOR_PALETTE: str = "Ink & Gold"
