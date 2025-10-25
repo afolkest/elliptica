@@ -416,18 +416,21 @@ def apply_conductor_smear(
     project,
     palette_name: str | None,
     render_shape: tuple[int, int],
+    color_enabled: bool = True,
 ) -> np.ndarray:
     """Apply smear effect to texture inside conductor masks.
 
-    This is a post-processing effect that blurs the RGB image inside conductor regions
-    with feathering from edge to center.
+    Blurs the LIC grayscale, re-normalizes it to create smooth gradients,
+    then applies color (if enabled) or grayscale. This creates the characteristic
+    "melted blob" appearance.
 
     Args:
         rgb: Current RGB image (H, W, 3) uint8
-        lic_gray: Original LIC grayscale (H, W) float32 (unused, kept for compatibility)
+        lic_gray: Original LIC grayscale (H, W) float32
         project: Project containing conductors
-        palette_name: Color palette (unused, kept for compatibility)
+        palette_name: Color palette to use if color_enabled is True
         render_shape: (height, width) of render resolution
+        color_enabled: Whether to apply color palette or use grayscale
 
     Returns:
         Modified RGB image with smear applied
@@ -480,12 +483,24 @@ def apply_conductor_smear(
         if not np.any(mask_bool):
             continue
 
-        # Blur the RGB image directly (preserves color/grayscale state)
+        # Blur LIC grayscale globally (to avoid boundary artifacts)
         sigma_px = max(conductor.smear_sigma, 0.1)
-        rgb_blur = np.stack([
-            gaussian_filter(out[..., i], sigma=sigma_px)
-            for i in range(3)
-        ], axis=-1)
+        lic_blur = gaussian_filter(lic_gray.astype(np.float32), sigma=sigma_px)
+
+        # Re-normalize and colorize (creates "melted blob" effect)
+        # This uses the same logic as colorize_array but respects color_enabled
+        if color_enabled and palette_name:
+            rgb_blur = colorize_array(lic_blur, palette=palette_name).astype(np.float32) / 255.0
+        else:
+            # Grayscale: normalize to [0, 1] and broadcast to RGB
+            arr = lic_blur.astype(np.float32)
+            vmin = float(np.percentile(arr, 0.5))
+            vmax = float(np.percentile(arr, 99.5))
+            if vmax > vmin:
+                norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+            else:
+                norm = np.clip((arr - arr.min()) / (arr.max() - arr.min() + 1e-10), 0.0, 1.0)
+            rgb_blur = np.stack([norm, norm, norm], axis=-1)
 
         # Create feathered blend weight using distance from conductor edge
         feather_px = max(conductor.smear_feather, 1e-3)

@@ -704,6 +704,7 @@ class FlowColApp:
                         self.state.project,
                         self.state.display_settings.palette,
                         cache.display_array.shape,  # (height, width)
+                        color_enabled=self.state.display_settings.color_enabled,
                     )
 
                 # Apply per-region overlays
