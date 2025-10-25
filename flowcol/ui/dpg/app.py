@@ -19,7 +19,7 @@ from flowcol.app.core import AppState, RenderCache, RenderSettings
 from pathlib import Path
 
 from flowcol.app import actions
-from flowcol.render import array_to_pil
+from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
@@ -135,7 +135,10 @@ class FlowColApp:
     render_error: Optional[str] = None
 
     canvas_id: Optional[int] = None
+    canvas_window_id: Optional[int] = None
     texture_registry_id: Optional[int] = None
+    colormap_registry_id: Optional[int] = None
+    palette_colormaps: Dict[str, int] = field(default_factory=dict)  # palette_name -> colormap_tag
     render_texture_id: Optional[int] = None
     render_texture_size: Optional[Tuple[int, int]] = None
     viewport_created: bool = False
@@ -159,7 +162,6 @@ class FlowColApp:
     postprocess_contrast_slider_id: Optional[int] = None
     postprocess_gamma_slider_id: Optional[int] = None
     color_enabled_checkbox_id: Optional[int] = None
-    palette_combo_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
@@ -198,12 +200,24 @@ class FlowColApp:
         dpg.create_context()
         self.texture_registry_id = dpg.add_texture_registry()
 
+        # Create colormap registry and convert our palettes to DPG colormaps
+        self.colormap_registry_id = dpg.add_colormap_registry()
+        for palette_name, colors_normalized in COLOR_PALETTES.items():
+            # DPG expects colors as [R, G, B, A] with values 0-255
+            colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
+            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
+            dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
+            self.palette_colormaps[palette_name] = tag
+
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
         self.viewport_created = True
 
         with dpg.handler_registry() as handler_reg:
             self.mouse_handler_registry_id = handler_reg
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
+
+        # Set viewport resize callback
+        dpg.set_viewport_resize_callback(self._on_viewport_resize)
 
         with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
             with dpg.group(tag="edit_controls_group") as edit_group:
@@ -307,13 +321,35 @@ class FlowColApp:
 
                 from flowcol.render import list_color_palettes
                 palette_names = list(list_color_palettes())
-                self.palette_combo_id = dpg.add_combo(
-                    label="Palette",
-                    items=palette_names,
-                    default_value=self.state.display_settings.palette,
-                    callback=self._on_palette_changed,
+
+                # Global palette selection with popup menu
+                dpg.add_text("Global Palette")
+                global_palette_button = dpg.add_button(
+                    label="Choose Palette...",
                     width=200,
+                    tag="global_palette_button",
                 )
+                dpg.add_text(
+                    f"Current: {self.state.display_settings.palette}",
+                    tag="global_palette_current_text"
+                )
+
+                # Popup menu for global palette selection
+                with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
+                    dpg.add_text("Select a palette:")
+                    dpg.add_separator()
+                    with dpg.child_window(width=380, height=300):
+                        for palette_name in palette_names:
+                            colormap_tag = self.palette_colormaps[palette_name]
+                            btn = dpg.add_colormap_button(
+                                label=palette_name,
+                                width=350,
+                                height=25,
+                                callback=self._on_global_palette_button,
+                                user_data=palette_name,
+                                tag=f"global_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                            )
+                            dpg.bind_colormap(btn, colormap_tag)
 
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
@@ -329,54 +365,69 @@ class FlowColApp:
                         callback=self._on_surface_enabled,
                         tag="surface_enabled_checkbox",
                     )
-                    self.surface_palette_combo_id = dpg.add_combo(
-                        label="Palette",
-                        items=palette_names,
-                        callback=self._on_surface_palette,
+                    # Surface palette popup
+                    surface_palette_button = dpg.add_button(
+                        label="Choose Surface Palette...",
                         width=200,
-                        tag="surface_palette_combo",
+                        tag="surface_palette_button",
                     )
+                    dpg.add_text("Current: None", tag="surface_palette_current_text")
+
+                    with dpg.popup(surface_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="surface_palette_popup"):
+                        dpg.add_text("Select surface palette:")
+                        dpg.add_separator()
+                        with dpg.child_window(width=380, height=250):
+                            for palette_name in palette_names:
+                                colormap_tag = self.palette_colormaps[palette_name]
+                                btn = dpg.add_colormap_button(
+                                    label=palette_name,
+                                    width=350,
+                                    height=25,
+                                    callback=self._on_surface_palette_button,
+                                    user_data=palette_name,
+                                    tag=f"surface_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                                )
+                                dpg.bind_colormap(btn, colormap_tag)
 
                     dpg.add_spacer(height=10)
                     dpg.add_text("Interior (Hollow Region)", tag="interior_label")
                     self.interior_enabled_checkbox_id = dpg.add_checkbox(
-                        label="Enable Custom Color",
+                        label="Enable Custom Palette",
                         callback=self._on_interior_enabled,
                         tag="interior_enabled_checkbox",
                     )
-                    self.interior_r_slider_id = dpg.add_slider_float(
-                        label="Red",
-                        default_value=0.5,
-                        min_value=0.0,
-                        max_value=1.0,
-                        callback=self._on_interior_color_changed,
+                    # Interior palette popup
+                    interior_palette_button = dpg.add_button(
+                        label="Choose Interior Palette...",
                         width=200,
-                        tag="interior_r_slider",
+                        tag="interior_palette_button",
                     )
-                    self.interior_g_slider_id = dpg.add_slider_float(
-                        label="Green",
-                        default_value=0.5,
-                        min_value=0.0,
-                        max_value=1.0,
-                        callback=self._on_interior_color_changed,
-                        width=200,
-                        tag="interior_g_slider",
-                    )
-                    self.interior_b_slider_id = dpg.add_slider_float(
-                        label="Blue",
-                        default_value=0.5,
-                        min_value=0.0,
-                        max_value=1.0,
-                        callback=self._on_interior_color_changed,
-                        width=200,
-                        tag="interior_b_slider",
-                    )
+                    dpg.add_text("Current: None", tag="interior_palette_current_text")
+
+                    with dpg.popup(interior_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="interior_palette_popup"):
+                        dpg.add_text("Select interior palette:")
+                        dpg.add_separator()
+                        with dpg.child_window(width=380, height=250):
+                            for palette_name in palette_names:
+                                colormap_tag = self.palette_colormaps[palette_name]
+                                btn = dpg.add_colormap_button(
+                                    label=palette_name,
+                                    width=350,
+                                    height=25,
+                                    callback=self._on_interior_palette_button,
+                                    user_data=palette_name,
+                                    tag=f"interior_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                                )
+                                dpg.bind_colormap(btn, colormap_tag)
 
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
             dpg.add_text("", tag="status_text")
 
-        with dpg.window(label="Canvas", pos=(380, 10), no_scrollbar=True, no_scroll_with_mouse=True):
+        # Canvas window with initial size (will be resized after viewport is shown)
+        # Setting width/height prevents auto-expansion to fit drawlist
+        with dpg.window(label="Canvas", pos=(380, 10), width=880, height=800, tag="canvas_window") as canvas_window:
+            self.canvas_window_id = canvas_window
             canvas_w, canvas_h = self.state.project.canvas_resolution
             with dpg.drawlist(width=canvas_w, height=canvas_h) as canvas:
                 self.canvas_id = canvas
@@ -386,6 +437,35 @@ class FlowColApp:
         self._ensure_conductor_file_dialog()
         self._update_canvas_inputs()
         self._rebuild_conductor_controls()
+
+    # ------------------------------------------------------------------
+    # Canvas window layout
+    # ------------------------------------------------------------------
+    def _resize_canvas_window(self) -> None:
+        """Resize canvas window to fill available viewport space."""
+        if dpg is None or self.canvas_window_id is None:
+            return
+
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+
+        # Controls window is at x=10, width=360, so it takes up 370px
+        # Canvas window starts at x=380 with 10px margin
+        # Leave 20px margin on right side
+        canvas_window_x = 380
+        canvas_window_y = 10
+        canvas_window_width = max(400, viewport_width - canvas_window_x - 20)
+        canvas_window_height = max(300, viewport_height - canvas_window_y - 20)
+
+        dpg.configure_item(
+            self.canvas_window_id,
+            width=canvas_window_width,
+            height=canvas_window_height,
+        )
+
+    def _on_viewport_resize(self) -> None:
+        """Handle viewport resize events."""
+        self._resize_canvas_window()
 
     # ------------------------------------------------------------------
     # Canvas drawing
@@ -636,16 +716,9 @@ class FlowColApp:
             if selected and selected.id is not None:
                 settings = self.state.conductor_color_settings.get(selected.id)
                 if settings:
-                    # Update surface controls
+                    # Update checkboxes only (colormap buttons are always visible)
                     dpg.set_value("surface_enabled_checkbox", settings.surface.enabled)
-                    dpg.set_value("surface_palette_combo", settings.surface.palette)
-
-                    # Update interior controls
                     dpg.set_value("interior_enabled_checkbox", settings.interior.enabled)
-                    r, g, b = settings.interior.solid_color
-                    dpg.set_value("interior_r_slider", r)
-                    dpg.set_value("interior_g_slider", g)
-                    dpg.set_value("interior_b_slider", b)
 
     def _on_conductor_voltage_slider(self, sender, app_data, user_data):
         if dpg is None:
@@ -1086,8 +1159,14 @@ class FlowColApp:
             if current_size == (width, height):
                 return
             actions.set_canvas_resolution(self.state, width, height)
+
+        # Resize the actual drawlist widget to match new canvas resolution
+        if self.canvas_id is not None:
+            dpg.configure_item(self.canvas_id, width=width, height=height)
+
         self._update_canvas_inputs()
         self._mark_canvas_dirty()
+        self._resize_canvas_window()  # Ensure window stays within viewport bounds
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
@@ -1152,6 +1231,19 @@ class FlowColApp:
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
+    def _on_global_palette_button(self, sender, app_data, user_data):
+        """Handle global colormap button click."""
+        from flowcol.app.actions import set_palette
+        palette_name = user_data
+        with self.state_lock:
+            set_palette(self.state, palette_name)
+        # Update current palette display
+        if dpg is not None:
+            dpg.set_value("global_palette_current_text", f"Current: {palette_name}")
+            dpg.configure_item("global_palette_popup", show=False)
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
     def _on_surface_enabled(self, sender, app_data):
         """Handle surface custom palette checkbox."""
         from flowcol.app.actions import set_region_style_enabled
@@ -1162,13 +1254,18 @@ class FlowColApp:
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
-    def _on_surface_palette(self, sender, app_data):
-        """Handle surface palette dropdown change."""
+    def _on_surface_palette_button(self, sender, app_data, user_data):
+        """Handle surface colormap button click."""
         from flowcol.app.actions import set_region_palette
+        palette_name = user_data
         with self.state_lock:
             selected = self.state.get_selected()
             if selected and selected.id is not None:
-                set_region_palette(self.state, selected.id, "surface", app_data)
+                set_region_palette(self.state, selected.id, "surface", palette_name)
+        # Update current palette display
+        if dpg is not None:
+            dpg.set_value("surface_palette_current_text", f"Current: {palette_name}")
+            dpg.configure_item("surface_palette_popup", show=False)
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
@@ -1182,17 +1279,18 @@ class FlowColApp:
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
-    def _on_interior_color_changed(self, sender, app_data):
-        """Handle interior RGB slider change."""
-        from flowcol.app.actions import set_region_solid_color
+    def _on_interior_palette_button(self, sender, app_data, user_data):
+        """Handle interior colormap button click."""
+        from flowcol.app.actions import set_region_palette
+        palette_name = user_data
         with self.state_lock:
             selected = self.state.get_selected()
             if selected and selected.id is not None:
-                # Read all three sliders
-                r = dpg.get_value(self.interior_r_slider_id)
-                g = dpg.get_value(self.interior_g_slider_id)
-                b = dpg.get_value(self.interior_b_slider_id)
-                set_region_solid_color(self.state, selected.id, "interior", (r, g, b))
+                set_region_palette(self.state, selected.id, "interior", palette_name)
+        # Update current palette display
+        if dpg is not None:
+            dpg.set_value("interior_palette_current_text", f"Current: {palette_name}")
+            dpg.configure_item("interior_palette_popup", show=False)
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
@@ -1387,6 +1485,9 @@ class FlowColApp:
 
         dpg.setup_dearpygui()
         dpg.show_viewport()
+
+        # Resize canvas window after viewport is shown and has valid dimensions
+        self._resize_canvas_window()
 
         try:
             while dpg.is_dearpygui_running():

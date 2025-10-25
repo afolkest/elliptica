@@ -1,5 +1,4 @@
--add ability to control random seed for texture
--at render, add support for how many rounds we do 
--noise oversampling
--real blue noise
+- fix bug where if you scroll in conductor file picker your shrink conductors
 -fix pathological canvas sizes 
+-noise oversampling?
+-real blue noise?

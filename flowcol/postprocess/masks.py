@@ -6,42 +6,41 @@ from typing import Optional
 
 
 def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.ndarray]:
-    """Derive interior from shell mask using distance transform.
+    """Derive interior from hollow conductor mask using morphological hole filling.
+
+    For hollow conductors (rings), detects the empty region inside.
+    For solid conductors (disks), returns None.
+
+    Uses standard morphological operation: binary_fill_holes identifies regions
+    surrounded by the mask but not part of it.
 
     Args:
         mask: Binary/grayscale conductor mask
-        thickness: Shell thickness as fraction of mask size (0.0-1.0)
+        thickness: Unused, kept for API compatibility
 
     Returns:
-        Interior mask as float32 array, or None if interior would be empty
+        Interior mask as float32 array, or None if no hollow interior exists
     """
-    thickness = float(np.clip(thickness, 0.0, 1.0))
+    from scipy.ndimage import binary_fill_holes
 
     # Convert to binary
-    binary = (mask > 0.5).astype(np.uint8)
+    binary = (mask > 0.5).astype(bool)
 
     # Early exit if mask is empty
     if not np.any(binary):
         return None
 
-    # Distance transform from edges
-    dist = distance_transform_edt(binary)
+    # Fill holes: identifies interior regions surrounded by conductor
+    filled = binary_fill_holes(binary)
 
-    # Threshold based on thickness
-    max_dist = float(dist.max())
-    if max_dist < 1.0:  # Too thin to have interior
+    # Interior is the difference between filled and original
+    interior = filled & ~binary
+
+    # If no interior exists (solid shape), return None
+    if not np.any(interior):
         return None
 
-    threshold = max_dist * (1.0 - thickness)
-    interior = (dist > threshold).astype(np.float32)
-
-    # Guard: only return if interior has reasonable area (>1% of mask)
-    interior_area = float(np.sum(interior))
-    mask_area = float(np.sum(binary))
-    if interior_area < 0.01 * mask_area:
-        return None
-
-    return interior
+    return interior.astype(np.float32)
 
 
 def rasterize_conductor_masks(
