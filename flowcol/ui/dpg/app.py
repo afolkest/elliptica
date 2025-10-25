@@ -125,6 +125,10 @@ def _snapshot_project(project: Project) -> Project:
         canvas_resolution=project.canvas_resolution,
         streamlength_factor=project.streamlength_factor,
         renders=list(project.renders),
+        boundary_top=project.boundary_top,
+        boundary_bottom=project.boundary_bottom,
+        boundary_left=project.boundary_left,
+        boundary_right=project.boundary_right,
     )
 
 
@@ -159,6 +163,10 @@ class FlowColApp:
     render_margin_input_id: Optional[int] = None
     render_seed_input_id: Optional[int] = None
     render_sigma_input_id: Optional[int] = None
+    boundary_top_checkbox_id: Optional[int] = None
+    boundary_bottom_checkbox_id: Optional[int] = None
+    boundary_left_checkbox_id: Optional[int] = None
+    boundary_right_checkbox_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
     conductor_file_dialog_id: Optional[str] = None
@@ -1030,6 +1038,37 @@ class FlowColApp:
                 width=200,
             )
 
+            dpg.add_spacer(height=15)
+            dpg.add_separator()
+            dpg.add_spacer(height=10)
+            dpg.add_text("Boundary Conditions")
+            dpg.add_spacer(height=5)
+
+            # Cross-shaped layout for boundary controls
+            with dpg.table(header_row=False, borders_innerH=False, borders_innerV=False,
+                          borders_outerH=False, borders_outerV=False):
+                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
+                dpg.add_table_column(width_fixed=True, init_width_or_weight=120)
+                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
+
+                # Row 0: Top boundary centered
+                with dpg.table_row():
+                    dpg.add_text("")
+                    self.boundary_top_checkbox_id = dpg.add_checkbox(label="Top Neumann")
+                    dpg.add_text("")
+
+                # Row 1: Left and Right boundaries
+                with dpg.table_row():
+                    self.boundary_left_checkbox_id = dpg.add_checkbox(label="Left Neumann")
+                    dpg.add_text("(Insulating)", indent=30)
+                    self.boundary_right_checkbox_id = dpg.add_checkbox(label="Right Neumann")
+
+                # Row 2: Bottom boundary centered
+                with dpg.table_row():
+                    dpg.add_text("")
+                    self.boundary_bottom_checkbox_id = dpg.add_checkbox(label="Bottom Neumann")
+                    dpg.add_text("")
+
             dpg.add_spacer(height=20)
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Render", width=140, callback=self._apply_render_modal)
@@ -1150,6 +1189,7 @@ class FlowColApp:
         with self.state_lock:
             settings = replace(self.state.render_settings)
             streamlength = self.state.project.streamlength_factor
+            project = self.state.project
 
         if self.render_supersample_radio_id is not None:
             dpg.set_value(self.render_supersample_radio_id, _label_for_supersample(settings.supersample))
@@ -1172,6 +1212,17 @@ class FlowColApp:
         if self.render_sigma_input_id is not None:
             dpg.set_value(self.render_sigma_input_id, float(settings.noise_sigma))
 
+        # Update boundary condition checkboxes
+        from flowcol.poisson import NEUMANN
+        if self.boundary_top_checkbox_id is not None:
+            dpg.set_value(self.boundary_top_checkbox_id, project.boundary_top == NEUMANN)
+        if self.boundary_bottom_checkbox_id is not None:
+            dpg.set_value(self.boundary_bottom_checkbox_id, project.boundary_bottom == NEUMANN)
+        if self.boundary_left_checkbox_id is not None:
+            dpg.set_value(self.boundary_left_checkbox_id, project.boundary_left == NEUMANN)
+        if self.boundary_right_checkbox_id is not None:
+            dpg.set_value(self.boundary_right_checkbox_id, project.boundary_right == NEUMANN)
+
     def _cancel_render_modal(self, sender=None, app_data=None) -> None:
         self._close_render_modal()
 
@@ -1191,6 +1242,13 @@ class FlowColApp:
         noise_seed = int(dpg.get_value(self.render_seed_input_id)) if self.render_seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
         noise_sigma = float(dpg.get_value(self.render_sigma_input_id)) if self.render_sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
 
+        # Read boundary condition checkboxes
+        from flowcol.poisson import DIRICHLET, NEUMANN
+        boundary_top = NEUMANN if (self.boundary_top_checkbox_id and dpg.get_value(self.boundary_top_checkbox_id)) else DIRICHLET
+        boundary_bottom = NEUMANN if (self.boundary_bottom_checkbox_id and dpg.get_value(self.boundary_bottom_checkbox_id)) else DIRICHLET
+        boundary_left = NEUMANN if (self.boundary_left_checkbox_id and dpg.get_value(self.boundary_left_checkbox_id)) else DIRICHLET
+        boundary_right = NEUMANN if (self.boundary_right_checkbox_id and dpg.get_value(self.boundary_right_checkbox_id)) else DIRICHLET
+
         # Clamp to valid ranges similar to pygame UI
         passes = max(passes, 1)
         streamlength = max(streamlength, 1e-6)
@@ -1205,6 +1263,11 @@ class FlowColApp:
             actions.set_noise_seed(self.state, noise_seed)
             actions.set_noise_sigma(self.state, noise_sigma)
             actions.set_streamlength_factor(self.state, streamlength)
+            # Update boundary conditions
+            self.state.project.boundary_top = boundary_top
+            self.state.project.boundary_bottom = boundary_bottom
+            self.state.project.boundary_left = boundary_left
+            self.state.project.boundary_right = boundary_right
 
         self._close_render_modal()
         self._start_render_job()

@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import numpy as np
 from typing import Optional
 from flowcol import defaults
+from flowcol.poisson import DIRICHLET
 
 
 @dataclass
@@ -37,3 +38,8 @@ class Project:
     streamlength_factor: float = defaults.DEFAULT_STREAMLENGTH_FACTOR
     renders: list[RenderInfo] = field(default_factory=list)
     next_conductor_id: int = 0  # Incremental counter for conductor IDs
+    # Boundary conditions for Poisson solver (DIRICHLET=0 or NEUMANN=1)
+    boundary_top: int = DIRICHLET
+    boundary_bottom: int = DIRICHLET
+    boundary_left: int = DIRICHLET
+    boundary_right: int = DIRICHLET
