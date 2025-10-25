@@ -77,6 +77,72 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
         ],
         dtype=np.float32,
     ),
+    "Fire & Ice": np.array(
+        [
+            (0.10, 0.10, 0.50),
+            (0.20, 0.20, 0.70),
+            (0.40, 0.40, 0.90),
+            (0.70, 0.70, 1.00),
+            (1.00, 1.00, 1.00),
+            (1.00, 0.90, 0.70),
+            (1.00, 0.70, 0.40),
+            (0.90, 0.40, 0.20),
+            (0.70, 0.20, 0.10),
+        ],
+        dtype=np.float32,
+    ),
+    "Stark B&W": np.array(
+        [
+            (0.00, 0.00, 0.00),  # pure black
+            (0.00, 0.00, 0.00),  # black
+            (0.15, 0.15, 0.15),  # dark gray
+            (1.00, 1.00, 1.00),  # white
+            (1.00, 1.00, 1.00),  # white
+            (0.15, 0.15, 0.15),  # dark gray
+            (0.00, 0.00, 0.00),  # black
+        ],
+        dtype=np.float32,
+    ),
+    "Ink Wash": np.array(
+        [
+            (0.00, 0.00, 0.00),  # pure black
+            (0.00, 0.00, 0.00),  # pure black
+            (0.03, 0.03, 0.03),  # very dark
+            (0.08, 0.08, 0.08),  # dark
+            (0.90, 0.90, 0.90),  # light
+            (0.96, 0.96, 0.96),  # near white
+            (1.00, 1.00, 1.00),  # pure white
+        ],
+        dtype=np.float32,
+    ),
+    "PuOr": np.array(
+        [
+            (0.498, 0.231, 0.031),  # Dark orange
+            (0.702, 0.345, 0.024),  # Orange
+            (0.878, 0.510, 0.078),  # Light orange
+            (0.992, 0.722, 0.388),  # Pale orange
+            (0.969, 0.969, 0.969),  # White
+            (0.847, 0.855, 0.922),  # Pale purple
+            (0.698, 0.671, 0.824),  # Light purple
+            (0.502, 0.451, 0.675),  # Purple
+            (0.329, 0.153, 0.533),  # Dark purple
+        ],
+        dtype=np.float32,
+    ),
+    "Coolwarm": np.array(
+        [
+            (0.231, 0.298, 0.753),  # Cool blue
+            (0.404, 0.475, 0.859),  # Light blue
+            (0.608, 0.667, 0.925),  # Pale blue
+            (0.780, 0.839, 0.965),  # Very pale blue
+            (0.933, 0.933, 0.933),  # White/gray
+            (0.969, 0.792, 0.729),  # Pale red
+            (0.933, 0.573, 0.490),  # Light red
+            (0.843, 0.329, 0.333),  # Red
+            (0.706, 0.016, 0.149),  # Dark red
+        ],
+        dtype=np.float32,
+    ),
 }
 
 DEFAULT_COLOR_PALETTE_NAME = "Ink & Gold"
