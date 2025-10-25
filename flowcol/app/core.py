@@ -13,6 +13,22 @@ from flowcol.types import Project, Conductor
 
 
 @dataclass
+class RegionStyle:
+    """Color settings for a spatial region."""
+    enabled: bool = False
+    use_palette: bool = True  # True = palette colorization, False = solid color
+    palette: str = defaults.DEFAULT_COLOR_PALETTE
+    solid_color: tuple[float, float, float] = (0.5, 0.5, 0.5)  # RGB [0,1]
+
+
+@dataclass
+class ConductorColorSettings:
+    """Color settings for a conductor's two regions."""
+    surface: RegionStyle = field(default_factory=RegionStyle)
+    interior: RegionStyle = field(default_factory=RegionStyle)
+
+
+@dataclass
 class RenderSettings:
     """User-configurable render parameters."""
 
@@ -70,8 +86,8 @@ class AppState:
     # Cached outputs
     render_cache: Optional[RenderCache] = None
 
-    # Per-conductor style settings (keyed by conductor.id)
-    conductor_styles: dict[int, dict] = field(default_factory=dict)
+    # Per-conductor color settings (keyed by conductor.id)
+    conductor_color_settings: dict[int, ConductorColorSettings] = field(default_factory=dict)
 
     def set_selected(self, idx: int) -> None:
         """Select conductor at index or clear selection."""

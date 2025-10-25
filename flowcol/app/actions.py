@@ -15,6 +15,7 @@ MAX_CONDUCTOR_DIM = 32768
 def add_conductor(state: AppState, conductor: Conductor) -> None:
     """Insert a new conductor and mark field/render dirty."""
     from flowcol.postprocess.masks import derive_interior
+    from flowcol.app.core import ConductorColorSettings
 
     # Assign unique ID
     conductor.id = state.project.next_conductor_id
@@ -29,8 +30,8 @@ def add_conductor(state: AppState, conductor: Conductor) -> None:
     state.project.conductors.append(conductor)
     state.selected_idx = len(state.project.conductors) - 1
 
-    # Initialize style entry (empty dict for now, future phases will populate)
-    state.conductor_styles[conductor.id] = {}
+    # Initialize color settings
+    state.conductor_color_settings[conductor.id] = ConductorColorSettings()
 
     state.field_dirty = True
     state.render_dirty = True
@@ -41,9 +42,9 @@ def remove_conductor(state: AppState, idx: int) -> None:
     if 0 <= idx < len(state.project.conductors):
         conductor = state.project.conductors[idx]
 
-        # Clean up style entry
+        # Clean up color settings
         if conductor.id is not None:
-            state.conductor_styles.pop(conductor.id, None)
+            state.conductor_color_settings.pop(conductor.id, None)
 
         del state.project.conductors[idx]
         if state.selected_idx >= len(state.project.conductors):
@@ -283,3 +284,61 @@ def ensure_base_rgb(state: AppState) -> bool:
         )
 
     return True
+
+
+def set_region_style_enabled(state: AppState, conductor_id: int, region: str, enabled: bool) -> None:
+    """Toggle custom colorization for a region.
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        enabled: Enable/disable custom colorization
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.enabled = enabled
+    elif region == "interior":
+        settings.interior.enabled = enabled
+
+
+def set_region_palette(state: AppState, conductor_id: int, region: str, palette: str) -> None:
+    """Set palette for region (implies use_palette=True).
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        palette: Palette name
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.use_palette = True
+        settings.surface.palette = palette
+    elif region == "interior":
+        settings.interior.use_palette = True
+        settings.interior.palette = palette
+
+
+def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb: tuple[float, float, float]) -> None:
+    """Set solid color for region (implies use_palette=False).
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        rgb: RGB tuple in [0, 1]
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.use_palette = False
+        settings.surface.solid_color = rgb
+    elif region == "interior":
+        settings.interior.use_palette = False
+        settings.interior.solid_color = rgb

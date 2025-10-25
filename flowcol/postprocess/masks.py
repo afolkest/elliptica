@@ -49,6 +49,8 @@ def rasterize_conductor_masks(
     shape: tuple[int, int],
     margin: float,
     scale: float,
+    offset_x: int = 0,
+    offset_y: int = 0,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Rasterize conductor masks onto display grid.
 
@@ -57,6 +59,8 @@ def rasterize_conductor_masks(
         shape: Target (height, width) for rasterized masks
         margin: Physical margin used in render (pre-scale)
         scale: multiplier * supersample used for render
+        offset_x: Crop offset in x direction (to align with cropped result.array)
+        offset_y: Crop offset in y direction (to align with cropped result.array)
 
     Returns:
         (surface_masks, interior_masks) - lists of binary masks at display resolution
@@ -73,6 +77,8 @@ def rasterize_conductor_masks(
             (height, width),
             margin,
             scale,
+            offset_x,
+            offset_y,
         )
         surface_masks.append(surface)
 
@@ -84,6 +90,8 @@ def rasterize_conductor_masks(
                 (height, width),
                 margin,
                 scale,
+                offset_x,
+                offset_y,
             )
             interior_masks.append(interior)
         else:
@@ -99,6 +107,8 @@ def _rasterize_single_mask(
     target_shape: tuple[int, int],
     margin: float,
     scale: float,
+    offset_x: int = 0,
+    offset_y: int = 0,
 ) -> np.ndarray:
     """Rasterize a single mask onto target grid with proper alignment.
 
@@ -108,6 +118,8 @@ def _rasterize_single_mask(
         target_shape: (height, width) of output
         margin: Physical margin (pre-scale)
         scale: Scaling factor applied to canvas
+        offset_x: Crop offset in x direction (to align with cropped array)
+        offset_y: Crop offset in y direction (to align with cropped array)
 
     Returns:
         Rasterized mask at target_shape resolution
@@ -115,9 +127,9 @@ def _rasterize_single_mask(
     target_h, target_w = target_shape
     pos_x, pos_y = position
 
-    # Apply margin offset and scaling to position
-    grid_x = (pos_x + margin) * scale
-    grid_y = (pos_y + margin) * scale
+    # Apply margin offset and scaling, then subtract crop offset to align with cropped result
+    grid_x = (pos_x + margin) * scale - offset_x
+    grid_y = (pos_y + margin) * scale - offset_y
 
     # Scale mask dimensions
     mask_h, mask_w = mask.shape
