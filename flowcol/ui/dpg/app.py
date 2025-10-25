@@ -110,6 +110,11 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
         original_mask=original,
         original_interior_mask=original_interior,
         scale_factor=conductor.scale_factor,
+        blur_sigma=conductor.blur_sigma,
+        blur_is_fractional=conductor.blur_is_fractional,
+        smear_enabled=conductor.smear_enabled,
+        smear_sigma=conductor.smear_sigma,
+        smear_feather=conductor.smear_feather,
     )
 
 
@@ -135,7 +140,9 @@ class FlowColApp:
     render_error: Optional[str] = None
 
     canvas_id: Optional[int] = None
+    canvas_layer_id: Optional[int] = None
     canvas_window_id: Optional[int] = None
+    display_scale: float = 1.0
     texture_registry_id: Optional[int] = None
     colormap_registry_id: Optional[int] = None
     palette_colormaps: Dict[str, int] = field(default_factory=dict)  # palette_name -> colormap_tag
@@ -219,7 +226,8 @@ class FlowColApp:
         # Set viewport resize callback
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
 
-        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
+        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window",
+                       no_scroll_with_mouse=True):
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
                 dpg.add_text("Render Controls")
@@ -253,9 +261,10 @@ class FlowColApp:
                 dpg.add_text("Conductor Voltages")
                 self.conductor_controls_container_id = dpg.add_child_window(
                     autosize_x=True,
-                    height=240,
+                    height=400,
                     border=False,
                     tag="conductor_controls_child",
+                    no_scroll_with_mouse=False,
                 )
 
             with dpg.group(tag="render_controls_group") as render_group:
@@ -420,17 +429,49 @@ class FlowColApp:
                                 )
                                 dpg.bind_colormap(btn, colormap_tag)
 
+                    dpg.add_spacer(height=10)
+                    dpg.add_separator()
+                    dpg.add_text("Interior Smear")
+                    self.smear_enabled_checkbox_id = dpg.add_checkbox(
+                        label="Enable Interior Smear",
+                        callback=self._on_smear_enabled,
+                        tag="smear_enabled_checkbox",
+                    )
+                    self.smear_sigma_slider_id = dpg.add_slider_float(
+                        label="Blur Sigma",
+                        min_value=0.1,
+                        max_value=10.0,
+                        format="%.1f px",
+                        callback=self._on_smear_sigma,
+                        tag="smear_sigma_slider",
+                        width=200,
+                    )
+                    self.smear_feather_slider_id = dpg.add_slider_float(
+                        label="Feather",
+                        min_value=0.5,
+                        max_value=20.0,
+                        format="%.1f px",
+                        callback=self._on_smear_feather,
+                        tag="smear_feather_slider",
+                        width=200,
+                    )
+
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
             dpg.add_text("", tag="status_text")
 
         # Canvas window with initial size (will be resized after viewport is shown)
         # Setting width/height prevents auto-expansion to fit drawlist
-        with dpg.window(label="Canvas", pos=(380, 10), width=880, height=800, tag="canvas_window") as canvas_window:
+        # no_scrollbar and no_scroll_with_mouse prevent scrolling behavior
+        with dpg.window(label="Canvas", pos=(380, 10), width=880, height=800, tag="canvas_window",
+                       no_scrollbar=True, no_scroll_with_mouse=True) as canvas_window:
             self.canvas_window_id = canvas_window
             canvas_w, canvas_h = self.state.project.canvas_resolution
             with dpg.drawlist(width=canvas_w, height=canvas_h) as canvas:
                 self.canvas_id = canvas
+                # Create a draw_node for applying scale transforms
+                with dpg.draw_node() as node:
+                    self.canvas_layer_id = node
 
         self._refresh_render_texture()
         self._update_control_visibility()
@@ -466,6 +507,38 @@ class FlowColApp:
     def _on_viewport_resize(self) -> None:
         """Handle viewport resize events."""
         self._resize_canvas_window()
+        self._update_canvas_scale()
+
+    def _update_canvas_scale(self) -> None:
+        """Calculate and apply display scale transform to canvas layer."""
+        if dpg is None or self.canvas_layer_id is None or self.canvas_window_id is None:
+            return
+
+        # Get window client area size (excluding titlebar, borders, scrollbars)
+        window_rect = dpg.get_item_rect_size(self.canvas_window_id)
+        if not window_rect:
+            return
+        window_w, window_h = window_rect
+        if window_w <= 0 or window_h <= 0:
+            return
+
+        # Get canvas resolution
+        with self.state_lock:
+            canvas_w, canvas_h = self.state.project.canvas_resolution
+
+        if canvas_w <= 0 or canvas_h <= 0:
+            return
+
+        # Calculate scale to fit canvas in window (never scale up, only down)
+        scale_w = window_w / canvas_w
+        scale_h = window_h / canvas_h
+        scale = min(scale_w, scale_h, 1.0)
+
+        self.display_scale = scale
+
+        # Apply scale transform to layer
+        transform = dpg.create_scale_matrix([scale, scale, 1.0])
+        dpg.apply_transform(self.canvas_layer_id, transform)
 
     # ------------------------------------------------------------------
     # Canvas drawing
@@ -490,7 +563,13 @@ class FlowColApp:
         assert dpg is not None and self.canvas_id is not None
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         rect_min = dpg.get_item_rect_min(self.canvas_id)
-        return mouse_x - rect_min[0], mouse_y - rect_min[1]
+        # Get screen-space coordinates relative to canvas
+        screen_x = mouse_x - rect_min[0]
+        screen_y = mouse_y - rect_min[1]
+        # Apply inverse scale to get canvas-space coordinates
+        canvas_x = screen_x / self.display_scale if self.display_scale > 0 else screen_x
+        canvas_y = screen_y / self.display_scale if self.display_scale > 0 else screen_y
+        return canvas_x, canvas_y
 
     def _find_hit_conductor(self, x: float, y: float) -> int:
         with self.state_lock:
@@ -616,6 +695,17 @@ class FlowColApp:
                 cache = self.state.render_cache
                 base_rgb = cache.base_rgb.copy()
 
+                # Apply conductor smear effect (post-processing on RGB)
+                from flowcol.render import apply_conductor_smear
+                if any(c.smear_enabled for c in self.state.project.conductors):
+                    base_rgb = apply_conductor_smear(
+                        base_rgb,
+                        cache.display_array,  # LIC grayscale for re-blurring
+                        self.state.project,
+                        self.state.display_settings.palette,
+                        cache.display_array.shape,  # (height, width)
+                    )
+
                 # Apply per-region overlays
                 if cache.conductor_masks and cache.interior_masks:
                     final_rgb = apply_region_overlays(
@@ -685,6 +775,34 @@ class FlowColApp:
             )
             self.conductor_slider_ids[idx] = slider_id
 
+            # Add blur slider with fractional toggle
+            with dpg.group(horizontal=True, parent=self.conductor_controls_container_id):
+                if conductor.blur_is_fractional:
+                    max_val = 0.1
+                    fmt = "%.3f"
+                else:
+                    max_val = 20.0
+                    fmt = "%.1f px"
+                dpg.add_slider_float(
+                    label=f"  Blur {idx + 1}",
+                    default_value=float(conductor.blur_sigma),
+                    min_value=0.0,
+                    max_value=max_val,
+                    format=fmt,
+                    callback=self._on_conductor_blur_slider,
+                    user_data=idx,
+                    width=200,
+                    tag=f"blur_slider_{idx}",
+                )
+                dpg.add_checkbox(
+                    label="Frac",
+                    default_value=conductor.blur_is_fractional,
+                    callback=self._on_blur_fractional_toggle,
+                    user_data=idx,
+                    tag=f"blur_frac_checkbox_{idx}",
+                )
+
+
     def _update_conductor_slider_labels(self, skip_idx: Optional[int] = None) -> None:
         if dpg is None or not self.conductor_slider_ids:
             return
@@ -720,6 +838,14 @@ class FlowColApp:
                     dpg.set_value("surface_enabled_checkbox", settings.surface.enabled)
                     dpg.set_value("interior_enabled_checkbox", settings.interior.enabled)
 
+                # Update smear controls
+                dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
+                dpg.set_value("smear_sigma_slider", selected.smear_sigma)
+                dpg.set_value("smear_feather_slider", selected.smear_feather)
+                # Show/hide sliders based on smear enabled
+                dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
+                dpg.configure_item("smear_feather_slider", show=selected.smear_enabled)
+
     def _on_conductor_voltage_slider(self, sender, app_data, user_data):
         if dpg is None:
             return
@@ -730,6 +856,82 @@ class FlowColApp:
         self._mark_canvas_dirty()
         dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
         self._update_conductor_slider_labels(skip_idx=idx)
+
+    def _on_conductor_blur_slider(self, sender, app_data, user_data):
+        if dpg is None:
+            return
+        idx = int(user_data)
+        value = float(app_data)
+        with self.state_lock:
+            if idx < len(self.state.project.conductors):
+                self.state.project.conductors[idx].blur_sigma = value
+                self.state.field_cache = None
+                is_frac = self.state.project.conductors[idx].blur_is_fractional
+        self._mark_canvas_dirty()
+        if is_frac:
+            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.3f} (fraction)")
+        else:
+            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.1f} px")
+
+    def _on_blur_fractional_toggle(self, sender, app_data, user_data):
+        if dpg is None:
+            return
+        idx = int(user_data)
+        is_fractional = bool(app_data)
+        with self.state_lock:
+            if idx < len(self.state.project.conductors):
+                conductor = self.state.project.conductors[idx]
+                conductor.blur_is_fractional = is_fractional
+                # Convert value when switching modes
+                if is_fractional:
+                    # Convert from pixels to fraction (assume ~1000px reference)
+                    conductor.blur_sigma = min(conductor.blur_sigma / 1000.0, 0.1)
+                else:
+                    # Convert from fraction to pixels
+                    conductor.blur_sigma = conductor.blur_sigma * 1000.0
+                self.state.field_cache = None
+        # Update slider range and format
+        slider_id = f"blur_slider_{idx}"
+        if dpg.does_item_exist(slider_id):
+            if is_fractional:
+                dpg.configure_item(slider_id, max_value=0.1, format="%.3f")
+            else:
+                dpg.configure_item(slider_id, max_value=20.0, format="%.1f px")
+            with self.state_lock:
+                if idx < len(self.state.project.conductors):
+                    dpg.set_value(slider_id, self.state.project.conductors[idx].blur_sigma)
+        self._mark_canvas_dirty()
+
+    def _on_smear_enabled(self, sender, app_data):
+        """Toggle interior smear for selected conductor region."""
+        if dpg is None:
+            return
+        with self.state_lock:
+            idx, region = self.state.selected_idx, self.selected_region
+            if idx >= 0 and idx < len(self.state.project.conductors):
+                self.state.project.conductors[idx].smear_enabled = bool(app_data)
+        self._update_region_properties_panel()
+        self._mark_canvas_dirty()
+
+    def _on_smear_sigma(self, sender, app_data):
+        """Adjust smear blur sigma for selected conductor."""
+        if dpg is None:
+            return
+        with self.state_lock:
+            idx = self.state.selected_idx
+            if idx >= 0 and idx < len(self.state.project.conductors):
+                self.state.project.conductors[idx].smear_sigma = float(app_data)
+        self._mark_canvas_dirty()
+
+    def _on_smear_feather(self, sender, app_data):
+        """Adjust smear feather distance for selected conductor."""
+        if dpg is None:
+            return
+        with self.state_lock:
+            idx = self.state.selected_idx
+            if idx >= 0 and idx < len(self.state.project.conductors):
+                self.state.project.conductors[idx].smear_feather = float(app_data)
+        self._mark_canvas_dirty()
 
     def _scale_conductor(self, idx: int, factor: float) -> bool:
         if dpg is None:
@@ -1167,6 +1369,7 @@ class FlowColApp:
         self._update_canvas_inputs()
         self._mark_canvas_dirty()
         self._resize_canvas_window()  # Ensure window stays within viewport bounds
+        self._update_canvas_scale()  # Recalculate display scale for new canvas size
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
@@ -1295,7 +1498,7 @@ class FlowColApp:
         self._mark_canvas_dirty()
 
     def _redraw_canvas(self) -> None:
-        if dpg is None or self.canvas_id is None:
+        if dpg is None or self.canvas_layer_id is None:
             return
         self.canvas_dirty = False
 
@@ -1309,11 +1512,11 @@ class FlowColApp:
             render_cache = self.state.render_cache
             view_mode = self.state.view_mode
 
-        dpg.delete_item(self.canvas_id, children_only=True)
+        # Clear the layer (transform persists on layer)
+        dpg.delete_item(self.canvas_layer_id, children_only=True)
 
-        dpg.configure_item(self.canvas_id, width=canvas_w, height=canvas_h)
-
-        dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.canvas_id)
+        # Draw background
+        dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.canvas_layer_id)
 
         if view_mode == "render" and render_cache and self.render_texture_id is not None and self.render_texture_size:
             tex_w, tex_h = self.render_texture_size
@@ -1327,7 +1530,7 @@ class FlowColApp:
                     pmax,
                     uv_min=(0.0, 0.0),
                     uv_max=(1.0, 1.0),
-                    parent=self.canvas_id,
+                    parent=self.canvas_layer_id,
                 )
 
         if view_mode == "edit" or render_cache is None:
@@ -1342,7 +1545,7 @@ class FlowColApp:
                     pmax=(x0 + width, y0 + height),
                     uv_min=(0.0, 0.0),
                     uv_max=(1.0, 1.0),
-                    parent=self.canvas_id,
+                    parent=self.canvas_layer_id,
                 )
                 if idx == selected_idx:
                     dpg.draw_rectangle(
@@ -1350,7 +1553,7 @@ class FlowColApp:
                         (x0 + width, y0 + height),
                         color=(255, 255, 100, 200),
                         thickness=2.0,
-                        parent=self.canvas_id,
+                        parent=self.canvas_layer_id,
                     )
 
     # ------------------------------------------------------------------
@@ -1486,8 +1689,9 @@ class FlowColApp:
         dpg.setup_dearpygui()
         dpg.show_viewport()
 
-        # Resize canvas window after viewport is shown and has valid dimensions
+        # Resize canvas window and update scale after viewport is shown and has valid dimensions
         self._resize_canvas_window()
+        self._update_canvas_scale()
 
         try:
             while dpg.is_dearpygui_running():

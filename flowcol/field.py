@@ -2,6 +2,7 @@ import numpy as np
 from scipy.ndimage import zoom
 from flowcol.types import Project
 from flowcol.poisson import solve_poisson_system
+from flowcol.mask_utils import blur_mask
 
 
 def compute_field(
@@ -28,10 +29,22 @@ def compute_field(
         x = (conductor.position[0] + margin_x) * scale_x
         y = (conductor.position[1] + margin_y) * scale_y
 
+        # Scale mask first to field resolution
         if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
             scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=1)
         else:
             scaled_mask = conductor.mask
+
+        # Apply blur AFTER scaling at field resolution
+        if conductor.blur_is_fractional:
+            # Fractional: blur_sigma is fraction of field size (resolution-independent)
+            avg_field_size = (field_w + field_h) / 2.0
+            scaled_sigma = conductor.blur_sigma * avg_field_size
+        else:
+            # Pixel-based: scale sigma proportionally to field resolution
+            scale_factor = (scale_x + scale_y) / 2.0
+            scaled_sigma = conductor.blur_sigma * scale_factor
+        scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
         mask_h, mask_w = scaled_mask.shape
 
