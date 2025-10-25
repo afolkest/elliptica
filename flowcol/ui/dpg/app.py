@@ -278,7 +278,9 @@ class FlowColApp:
             with dpg.group(tag="render_controls_group") as render_group:
                 self.render_controls_id = render_group
                 dpg.add_text("Render View")
-                dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked, width=140)
+                    dpg.add_button(label="Save Image", callback=self._on_save_image_clicked, width=140)
                 dpg.add_spacer(height=15)
                 dpg.add_separator()
                 dpg.add_spacer(height=10)
@@ -1078,11 +1080,15 @@ class FlowColApp:
         if dpg is None or self.conductor_file_dialog_id is not None:
             return
 
+        # Default to assets/masks if it exists, otherwise use cwd
+        masks_path = Path.cwd() / "assets" / "masks"
+        default_path = str(masks_path) if masks_path.exists() else str(Path.cwd())
+
         with dpg.file_dialog(
             directory_selector=False,
             show=False,
             modal=True,
-            default_path=str(Path.cwd()),
+            default_path=default_path,
             callback=self._on_conductor_file_selected,
             cancel_callback=self._on_conductor_file_cancelled,
             width=640,
@@ -1444,6 +1450,64 @@ class FlowColApp:
                 self._mark_canvas_dirty()
         self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
+
+    def _on_save_image_clicked(self, sender, app_data):
+        """Save the final rendered image to disk."""
+        if dpg is None:
+            return
+
+        with self.state_lock:
+            cache = self.state.render_cache
+            if cache is None or cache.base_rgb is None:
+                dpg.set_value("status_text", "No render to save.")
+                return
+
+        # Generate final RGB with all post-processing
+        from flowcol.app.actions import ensure_base_rgb
+        from flowcol.postprocess.color import apply_region_overlays
+        from PIL import Image
+        from datetime import datetime
+
+        with self.state_lock:
+            ensure_base_rgb(self.state)
+            cache = self.state.render_cache
+            base_rgb = cache.base_rgb.copy()
+
+            # Apply conductor smear effect
+            from flowcol.render import apply_conductor_smear
+            if any(c.smear_enabled for c in self.state.project.conductors):
+                base_rgb = apply_conductor_smear(
+                    base_rgb,
+                    cache.display_array,
+                    self.state.project,
+                    self.state.display_settings.palette,
+                    cache.display_array.shape,
+                    color_enabled=self.state.display_settings.color_enabled,
+                )
+
+            # Apply per-region overlays
+            if cache.conductor_masks and cache.interior_masks:
+                final_rgb = apply_region_overlays(
+                    base_rgb,
+                    cache.display_array,
+                    cache.conductor_masks,
+                    cache.interior_masks,
+                    self.state.conductor_color_settings,
+                    self.state.project.conductors,
+                    self.state.display_settings,
+                )
+            else:
+                final_rgb = base_rgb
+
+        # Save to outputs directory with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = Path.cwd() / "outputs"
+        output_dir.mkdir(exist_ok=True)
+        output_path = output_dir / f"flowcol_{timestamp}.png"
+
+        pil_img = Image.fromarray(final_rgb, mode='RGB')
+        pil_img.save(output_path)
+        dpg.set_value("status_text", f"Saved to {output_path.name}")
 
     def _on_downsample_slider(self, sender, app_data):
         """Handle downsampling blur sigma slider change."""
