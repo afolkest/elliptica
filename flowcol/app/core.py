@@ -25,13 +25,15 @@ class RenderSettings:
 
 
 @dataclass
-class PostprocessSettings:
-    """Display postprocessing parameters applied to cached render."""
+class DisplaySettings:
+    """Display/postprocessing parameters applied to cached render."""
 
     downsample_sigma: float = defaults.DEFAULT_DOWNSAMPLE_SIGMA
     clip_percent: float = defaults.DEFAULT_CLIP_PERCENT
     contrast: float = defaults.DEFAULT_CONTRAST
     gamma: float = defaults.DEFAULT_GAMMA
+    color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
+    palette: str = defaults.DEFAULT_COLOR_PALETTE
 
 
 @dataclass
@@ -42,6 +44,11 @@ class RenderCache:
     multiplier: float
     supersample: float
     display_array: Optional[np.ndarray] = None
+    # Cached intermediate for fast colorization updates
+    base_rgb: Optional[np.ndarray] = None
+    # Segmentation masks at display resolution
+    conductor_masks: Optional[list[np.ndarray]] = None
+    interior_masks: Optional[list[np.ndarray]] = None
 
 
 @dataclass
@@ -50,7 +57,7 @@ class AppState:
 
     project: Project = field(default_factory=Project)
     render_settings: RenderSettings = field(default_factory=RenderSettings)
-    postprocess_settings: PostprocessSettings = field(default_factory=PostprocessSettings)
+    display_settings: DisplaySettings = field(default_factory=DisplaySettings)
 
     # Interaction state
     selected_idx: int = -1
@@ -62,6 +69,9 @@ class AppState:
 
     # Cached outputs
     render_cache: Optional[RenderCache] = None
+
+    # Per-conductor style settings (keyed by conductor.id)
+    conductor_styles: dict[int, dict] = field(default_factory=dict)
 
     def set_selected(self, idx: int) -> None:
         """Select conductor at index or clear selection."""
@@ -80,3 +90,8 @@ class AppState:
         """Invalidate cached render output."""
         self.render_cache = None
         self.render_dirty = True
+
+    def invalidate_base_rgb(self) -> None:
+        """Clear cached base RGB, forcing recompute on next display."""
+        if self.render_cache:
+            self.render_cache.base_rgb = None

@@ -1,0 +1,160 @@
+"""Mask rasterization and interior detection for conductor colorization."""
+
+import numpy as np
+from scipy.ndimage import distance_transform_edt
+from typing import Optional
+
+
+def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.ndarray]:
+    """Derive interior from shell mask using distance transform.
+
+    Args:
+        mask: Binary/grayscale conductor mask
+        thickness: Shell thickness as fraction of mask size (0.0-1.0)
+
+    Returns:
+        Interior mask as float32 array, or None if interior would be empty
+    """
+    thickness = float(np.clip(thickness, 0.0, 1.0))
+
+    # Convert to binary
+    binary = (mask > 0.5).astype(np.uint8)
+
+    # Early exit if mask is empty
+    if not np.any(binary):
+        return None
+
+    # Distance transform from edges
+    dist = distance_transform_edt(binary)
+
+    # Threshold based on thickness
+    max_dist = float(dist.max())
+    if max_dist < 1.0:  # Too thin to have interior
+        return None
+
+    threshold = max_dist * (1.0 - thickness)
+    interior = (dist > threshold).astype(np.float32)
+
+    # Guard: only return if interior has reasonable area (>1% of mask)
+    interior_area = float(np.sum(interior))
+    mask_area = float(np.sum(binary))
+    if interior_area < 0.01 * mask_area:
+        return None
+
+    return interior
+
+
+def rasterize_conductor_masks(
+    conductors,
+    shape: tuple[int, int],
+    margin: float,
+    scale: float,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """Rasterize conductor masks onto display grid.
+
+    Args:
+        conductors: List of Conductor objects
+        shape: Target (height, width) for rasterized masks
+        margin: Physical margin used in render (pre-scale)
+        scale: multiplier * supersample used for render
+
+    Returns:
+        (surface_masks, interior_masks) - lists of binary masks at display resolution
+    """
+    height, width = shape
+    surface_masks = []
+    interior_masks = []
+
+    for conductor in conductors:
+        # Rasterize surface mask
+        surface = _rasterize_single_mask(
+            conductor.mask,
+            conductor.position,
+            (height, width),
+            margin,
+            scale,
+        )
+        surface_masks.append(surface)
+
+        # Rasterize interior mask if present
+        if conductor.interior_mask is not None:
+            interior = _rasterize_single_mask(
+                conductor.interior_mask,
+                conductor.position,
+                (height, width),
+                margin,
+                scale,
+            )
+            interior_masks.append(interior)
+        else:
+            # Empty interior mask
+            interior_masks.append(np.zeros((height, width), dtype=np.float32))
+
+    return surface_masks, interior_masks
+
+
+def _rasterize_single_mask(
+    mask: np.ndarray,
+    position: tuple[float, float],
+    target_shape: tuple[int, int],
+    margin: float,
+    scale: float,
+) -> np.ndarray:
+    """Rasterize a single mask onto target grid with proper alignment.
+
+    Args:
+        mask: Source mask array
+        position: (x, y) position on canvas (pre-margin, pre-scale)
+        target_shape: (height, width) of output
+        margin: Physical margin (pre-scale)
+        scale: Scaling factor applied to canvas
+
+    Returns:
+        Rasterized mask at target_shape resolution
+    """
+    target_h, target_w = target_shape
+    pos_x, pos_y = position
+
+    # Apply margin offset and scaling to position
+    grid_x = (pos_x + margin) * scale
+    grid_y = (pos_y + margin) * scale
+
+    # Scale mask dimensions
+    mask_h, mask_w = mask.shape
+    scaled_h = mask_h * scale
+    scaled_w = mask_w * scale
+
+    # Compute integer bounds on target grid
+    x0 = int(np.floor(grid_x))
+    y0 = int(np.floor(grid_y))
+    x1 = int(np.ceil(grid_x + scaled_w))
+    y1 = int(np.ceil(grid_y + scaled_h))
+
+    # Clip to target bounds
+    x0_clip = max(0, x0)
+    y0_clip = max(0, y0)
+    x1_clip = min(target_w, x1)
+    y1_clip = min(target_h, y1)
+
+    # Check if mask is completely outside target
+    if x0_clip >= x1_clip or y0_clip >= y1_clip:
+        return np.zeros(target_shape, dtype=np.float32)
+
+    # Create output mask
+    output = np.zeros(target_shape, dtype=np.float32)
+
+    # Simple nearest-neighbor sampling (good enough for binary masks)
+    for out_y in range(y0_clip, y1_clip):
+        for out_x in range(x0_clip, x1_clip):
+            # Map output pixel back to source mask coordinates
+            src_x = (out_x - grid_x) / scale
+            src_y = (out_y - grid_y) / scale
+
+            # Nearest neighbor
+            src_x_idx = int(np.round(src_x))
+            src_y_idx = int(np.round(src_y))
+
+            if 0 <= src_x_idx < mask_w and 0 <= src_y_idx < mask_h:
+                output[out_y, out_x] = mask[src_y_idx, src_x_idx]
+
+    return output

@@ -14,8 +14,24 @@ MAX_CONDUCTOR_DIM = 32768
 
 def add_conductor(state: AppState, conductor: Conductor) -> None:
     """Insert a new conductor and mark field/render dirty."""
+    from flowcol.postprocess.masks import derive_interior
+
+    # Assign unique ID
+    conductor.id = state.project.next_conductor_id
+    state.project.next_conductor_id += 1
+
+    # Auto-detect interior if not provided
+    if conductor.interior_mask is None:
+        interior = derive_interior(conductor.mask, thickness=0.1)
+        if interior is not None:
+            conductor.interior_mask = interior
+
     state.project.conductors.append(conductor)
     state.selected_idx = len(state.project.conductors) - 1
+
+    # Initialize style entry (empty dict for now, future phases will populate)
+    state.conductor_styles[conductor.id] = {}
+
     state.field_dirty = True
     state.render_dirty = True
 
@@ -23,6 +39,12 @@ def add_conductor(state: AppState, conductor: Conductor) -> None:
 def remove_conductor(state: AppState, idx: int) -> None:
     """Remove conductor by index."""
     if 0 <= idx < len(state.project.conductors):
+        conductor = state.project.conductors[idx]
+
+        # Clean up style entry
+        if conductor.id is not None:
+            state.conductor_styles.pop(conductor.id, None)
+
         del state.project.conductors[idx]
         if state.selected_idx >= len(state.project.conductors):
             state.selected_idx = len(state.project.conductors) - 1
@@ -200,13 +222,64 @@ def ensure_render(state: AppState) -> bool:
     if result is None:
         return False
 
+    # Generate conductor segmentation masks at display resolution
+    from flowcol.postprocess.masks import rasterize_conductor_masks
+
+    conductor_masks = None
+    interior_masks = None
+    if state.project.conductors:
+        scale = settings.multiplier * settings.supersample
+        conductor_masks, interior_masks = rasterize_conductor_masks(
+            state.project.conductors,
+            result.canvas_scaled_shape,
+            result.margin,
+            scale,
+        )
+
     state.render_cache = RenderCache(
         result=result,
         multiplier=settings.multiplier,
         supersample=settings.supersample,
         display_array=result.array.copy(),
+        base_rgb=None,  # Will be built on-demand
+        conductor_masks=conductor_masks,
+        interior_masks=interior_masks,
     )
     state.field_dirty = False
     state.render_dirty = False
     state.view_mode = "render"
+    return True
+
+
+def set_color_enabled(state: AppState, enabled: bool) -> None:
+    """Toggle colorization on/off."""
+    if state.display_settings.color_enabled != enabled:
+        state.display_settings.color_enabled = enabled
+        state.invalidate_base_rgb()
+
+
+def set_palette(state: AppState, palette: str) -> None:
+    """Change color palette."""
+    if state.display_settings.palette != palette:
+        state.display_settings.palette = palette
+        state.invalidate_base_rgb()
+
+
+def ensure_base_rgb(state: AppState) -> bool:
+    """Build base_rgb from display_array if needed.
+
+    Returns True on success, False if no render available.
+    """
+    from flowcol.postprocess.color import build_base_rgb
+
+    cache = state.render_cache
+    if cache is None or cache.display_array is None:
+        return False
+
+    if cache.base_rgb is None:
+        cache.base_rgb = build_base_rgb(
+            cache.display_array,
+            state.display_settings,
+        )
+
     return True

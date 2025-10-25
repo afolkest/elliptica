@@ -158,6 +158,8 @@ class FlowColApp:
     postprocess_clip_slider_id: Optional[int] = None
     postprocess_contrast_slider_id: Optional[int] = None
     postprocess_gamma_slider_id: Optional[int] = None
+    color_enabled_checkbox_id: Optional[int] = None
+    palette_combo_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
@@ -251,7 +253,7 @@ class FlowColApp:
 
                 self.postprocess_downsample_slider_id = dpg.add_slider_float(
                     label="Downsampling Blur",
-                    default_value=self.state.postprocess_settings.downsample_sigma,
+                    default_value=self.state.display_settings.downsample_sigma,
                     min_value=0.0,
                     max_value=2.0,
                     format="%.2f",
@@ -261,7 +263,7 @@ class FlowColApp:
 
                 self.postprocess_clip_slider_id = dpg.add_slider_float(
                     label="Clip %",
-                    default_value=self.state.postprocess_settings.clip_percent,
+                    default_value=self.state.display_settings.clip_percent,
                     min_value=0.0,
                     max_value=defaults.MAX_CLIP_PERCENT,
                     format="%.2f%%",
@@ -271,7 +273,7 @@ class FlowColApp:
 
                 self.postprocess_contrast_slider_id = dpg.add_slider_float(
                     label="Contrast",
-                    default_value=self.state.postprocess_settings.contrast,
+                    default_value=self.state.display_settings.contrast,
                     min_value=0.5,
                     max_value=2.0,
                     format="%.2f",
@@ -281,11 +283,32 @@ class FlowColApp:
 
                 self.postprocess_gamma_slider_id = dpg.add_slider_float(
                     label="Gamma",
-                    default_value=self.state.postprocess_settings.gamma,
+                    default_value=self.state.display_settings.gamma,
                     min_value=0.3,
                     max_value=3.0,
                     format="%.2f",
                     callback=self._on_gamma_slider,
+                    width=200,
+                )
+
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
+                dpg.add_text("Colorization")
+                dpg.add_spacer(height=10)
+
+                self.color_enabled_checkbox_id = dpg.add_checkbox(
+                    label="Enable Color",
+                    default_value=self.state.display_settings.color_enabled,
+                    callback=self._on_color_enabled,
+                )
+
+                from flowcol.render import list_color_palettes
+                palette_names = list(list_color_palettes())
+                self.palette_combo_id = dpg.add_combo(
+                    label="Palette",
+                    items=palette_names,
+                    default_value=self.state.display_settings.palette,
+                    callback=self._on_palette_changed,
                     width=200,
                 )
             dpg.add_spacer(height=10)
@@ -370,6 +393,8 @@ class FlowColApp:
 
     def _add_demo_conductor(self) -> None:
         """Populate state with a simple circular conductor for quick manual testing."""
+        from flowcol.app.actions import add_conductor
+
         canvas_w, canvas_h = self.state.project.canvas_resolution
         size = min(canvas_w, canvas_h) // 4 or 128
         y, x = np.ogrid[:size, :size]
@@ -378,10 +403,7 @@ class FlowColApp:
         mask = ((x - cx) ** 2 + (y - cy) ** 2) <= radius**2
         mask = mask.astype(np.float32)
         conductor = Conductor(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
-        self.state.project.conductors.append(conductor)
-        self.state.selected_idx = len(self.state.project.conductors) - 1
-        self.state.field_dirty = True
-        self.state.render_dirty = True
+        add_conductor(self.state, conductor)
 
     def _apply_postprocessing(self) -> None:
         """Apply postprocessing settings to cached render and update display."""
@@ -392,7 +414,7 @@ class FlowColApp:
             if cache is None:
                 return
 
-            settings = self.state.postprocess_settings
+            settings = self.state.display_settings
             result = cache.result
 
             # Apply downsampling with blur
@@ -406,37 +428,30 @@ class FlowColApp:
 
             # Store postprocessed result in display_array
             cache.display_array = downsampled
+            # Changing display_array invalidates base_rgb
+            cache.base_rgb = None
 
         # Update texture with new postprocessed display
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
     def _refresh_render_texture(self) -> None:
+        from flowcol.app.actions import ensure_base_rgb
+        from PIL import Image
+
         if dpg is None or self.texture_registry_id is None:
             return
 
         with self.state_lock:
-            cache = self.state.render_cache
-            settings = self.state.postprocess_settings
-
-            if cache is None:
+            # Build base_rgb if needed
+            if not ensure_base_rgb(self.state):
+                # Fallback to grayscale if no render
                 arr = np.zeros((32, 32), dtype=np.float32)
-                clip = 0.0
-                contrast = 1.0
-                gamma = 1.0
+                pil_img = array_to_pil(arr, use_color=False)
             else:
-                arr = cache.display_array if cache.display_array is not None else cache.result.array
-                clip = settings.clip_percent
-                contrast = settings.contrast
-                gamma = settings.gamma
-
-            pil_img = array_to_pil(
-                arr,
-                use_color=False,
-                clip_percent=clip,
-                contrast=contrast,
-                gamma=gamma,
-            )
+                # Use cached base_rgb (already RGB uint8)
+                base_rgb = self.state.render_cache.base_rgb
+                pil_img = Image.fromarray(base_rgb, mode='RGB')
             if max(pil_img.size) > MAX_PREVIEW_SIZE:
                 pil_img.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
 
@@ -930,14 +945,15 @@ class FlowColApp:
         """Handle downsampling blur sigma slider change."""
         value = float(app_data)
         with self.state_lock:
-            self.state.postprocess_settings.downsample_sigma = value
+            self.state.display_settings.downsample_sigma = value
         self._apply_postprocessing()
 
     def _on_clip_slider(self, sender, app_data):
         """Handle clip percent slider change."""
         value = float(app_data)
         with self.state_lock:
-            self.state.postprocess_settings.clip_percent = value
+            self.state.display_settings.clip_percent = value
+            self.state.invalidate_base_rgb()
         # Clip is display-only, just refresh texture
         self._refresh_render_texture()
         self._mark_canvas_dirty()
@@ -946,7 +962,8 @@ class FlowColApp:
         """Handle contrast slider change."""
         value = float(app_data)
         with self.state_lock:
-            self.state.postprocess_settings.contrast = value
+            self.state.display_settings.contrast = value
+            self.state.invalidate_base_rgb()
         # Contrast is display-only, just refresh texture
         self._refresh_render_texture()
         self._mark_canvas_dirty()
@@ -955,8 +972,25 @@ class FlowColApp:
         """Handle gamma slider change."""
         value = float(app_data)
         with self.state_lock:
-            self.state.postprocess_settings.gamma = value
+            self.state.display_settings.gamma = value
+            self.state.invalidate_base_rgb()
         # Gamma is display-only, just refresh texture
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_color_enabled(self, sender, app_data):
+        """Handle color enabled checkbox change."""
+        from flowcol.app.actions import set_color_enabled
+        with self.state_lock:
+            set_color_enabled(self.state, app_data)
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_palette_changed(self, sender, app_data):
+        """Handle palette dropdown change."""
+        from flowcol.app.actions import set_palette
+        with self.state_lock:
+            set_palette(self.state, app_data)
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
@@ -1051,8 +1085,10 @@ class FlowColApp:
 
             # Apply initial postprocessing to create display array
             from flowcol.render import downsample_lic
+            from flowcol.postprocess.masks import rasterize_conductor_masks
+
             with self.state_lock:
-                postprocess = self.state.postprocess_settings
+                postprocess = self.state.display_settings
                 target_shape = project_snapshot.canvas_resolution
                 display_array = downsample_lic(
                     result.array,
@@ -1061,11 +1097,26 @@ class FlowColApp:
                     postprocess.downsample_sigma,
                 )
 
+            # Generate conductor segmentation masks at display resolution
+            conductor_masks = None
+            interior_masks = None
+            if project_snapshot.conductors:
+                scale = settings_snapshot.multiplier * settings_snapshot.supersample
+                conductor_masks, interior_masks = rasterize_conductor_masks(
+                    project_snapshot.conductors,
+                    result.canvas_scaled_shape,
+                    result.margin,
+                    scale,
+                )
+
             cache = RenderCache(
                 result=result,
                 multiplier=settings_snapshot.multiplier,
                 supersample=settings_snapshot.supersample,
                 display_array=display_array,
+                base_rgb=None,  # Will be built on-demand
+                conductor_masks=conductor_masks,
+                interior_masks=interior_masks,
             )
 
             with self.state_lock:
