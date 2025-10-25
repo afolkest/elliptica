@@ -12,12 +12,15 @@ SOLVER_TOL = 1e-5
 
 @numba.jit(nopython=True, cache=True)
 def _build_poisson_system(
-    height, 
-    width, 
+    height,
+    width,
     dirichlet_mask,
     dirichlet_voltage,
-    charge_density, 
-    boundary_type=DIRICHLET
+    charge_density,
+    boundary_top=DIRICHLET,
+    boundary_bottom=DIRICHLET,
+    boundary_left=DIRICHLET,
+    boundary_right=DIRICHLET
     ):
     """ 
 
@@ -61,19 +64,28 @@ def _build_poisson_system(
 
                 #off-diagonal entries
                 for di, dj in [(-1,0), (1, 0), (0, -1), (0, 1)]:
-                    ii, jj = i + di, j + dj 
-                    kk = jj + ii * width 
+                    ii, jj = i + di, j + dj
+                    kk = jj + ii * width
 
                     if 0 <= ii < height and 0 <= jj < width:
                         if dirichlet_mask[ii, jj]:
                             rhs[k] -= dirichlet_voltage[ii, jj]
-                        else: 
-                            row_index[n_nonzero] = k 
+                        else:
+                            row_index[n_nonzero] = k
                             col_index[n_nonzero] = kk
-                            almost_laplacian[n_nonzero] = 1.0 
+                            almost_laplacian[n_nonzero] = 1.0
                             n_nonzero += 1
-                    elif boundary_type == NEUMANN:
-                        diagonal += 1
+                    else:
+                        # Out of bounds - determine which boundary and apply its condition
+                        if di == -1 and boundary_top == NEUMANN:  # top edge
+                            diagonal += 1
+                        elif di == 1 and boundary_bottom == NEUMANN:  # bottom edge
+                            diagonal += 1
+                        elif dj == -1 and boundary_left == NEUMANN:  # left edge
+                            diagonal += 1
+                        elif dj == 1 and boundary_right == NEUMANN:  # right edge
+                            diagonal += 1
+                        # DIRICHLET is implicit (φ=0 at boundary) - no change needed
 
                 row_index[n_nonzero] = k
                 col_index[n_nonzero] = k
@@ -88,7 +100,10 @@ def solve_poisson_system(
     dirichlet_values,
     tol = SOLVER_TOL,
     maxiter = 2000,
-    boundary_type=DIRICHLET,
+    boundary_top=DIRICHLET,
+    boundary_bottom=DIRICHLET,
+    boundary_left=DIRICHLET,
+    boundary_right=DIRICHLET,
     charge_density=None
 ):
 
@@ -101,12 +116,15 @@ def solve_poisson_system(
     dirichlet_values = dirichlet_values.astype(PRECISION)
 
     row_index, col_index, almost_laplacian, rhs = _build_poisson_system(
-        height, 
+        height,
         width,
         dirichlet_mask,
         dirichlet_values,
         charge_density,
-        boundary_type 
+        boundary_top,
+        boundary_bottom,
+        boundary_left,
+        boundary_right
     )
 
     N = height * width

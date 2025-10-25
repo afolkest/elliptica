@@ -138,7 +138,16 @@ def perform_render(
     if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return None
 
-    ex, ey = compute_field(project, multiplier, supersample_factor, margin_tuple)
+    ex, ey = compute_field(
+        project,
+        multiplier,
+        supersample_factor,
+        margin_tuple,
+        boundary_top=project.boundary_top,
+        boundary_bottom=project.boundary_bottom,
+        boundary_left=project.boundary_left,
+        boundary_right=project.boundary_right,
+    )
     num_passes = max(1, num_passes)
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)

@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.ndimage import zoom
 from flowcol.types import Project
-from flowcol.poisson import solve_poisson_system
+from flowcol.poisson import solve_poisson_system, DIRICHLET
 from flowcol.mask_utils import blur_mask
 
 
@@ -10,6 +10,10 @@ def compute_field(
     multiplier: float = 1.0,
     supersample: float = 1.0,
     margin: tuple[float, float] = (0.0, 0.0),
+    boundary_top: int = DIRICHLET,
+    boundary_bottom: int = DIRICHLET,
+    boundary_left: int = DIRICHLET,
+    boundary_right: int = DIRICHLET,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute electric field from conductors on a supersampled, padded grid."""
     canvas_w, canvas_h = project.canvas_resolution
@@ -61,6 +65,13 @@ def compute_field(
         dirichlet_mask[y0:y1, x0:x1] |= mask_bool
         dirichlet_values[y0:y1, x0:x1] = np.where(mask_bool, conductor.voltage, dirichlet_values[y0:y1, x0:x1])
 
-    phi = solve_poisson_system(dirichlet_mask, dirichlet_values)
+    phi = solve_poisson_system(
+        dirichlet_mask,
+        dirichlet_values,
+        boundary_top=boundary_top,
+        boundary_bottom=boundary_bottom,
+        boundary_left=boundary_left,
+        boundary_right=boundary_right,
+    )
     grad_y, grad_x = np.gradient(phi)
     return -grad_x, -grad_y
