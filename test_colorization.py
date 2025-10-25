@@ -15,7 +15,7 @@ def test_conductor_ids():
     add_conductor(state, c1)
 
     assert c1.id == 0, f"Expected ID 0, got {c1.id}"
-    assert 0 in state.conductor_styles, "Style entry not created"
+    assert 0 in state.conductor_color_settings, "Color settings entry not created"
     assert state.project.next_conductor_id == 1, "Counter not incremented"
 
     # Add second conductor
@@ -24,14 +24,14 @@ def test_conductor_ids():
     add_conductor(state, c2)
 
     assert c2.id == 1, f"Expected ID 1, got {c2.id}"
-    assert 1 in state.conductor_styles, "Style entry not created for second conductor"
+    assert 1 in state.conductor_color_settings, "Color settings entry not created for second conductor"
     assert state.project.next_conductor_id == 2, "Counter not incremented correctly"
 
     # Test removal
     from flowcol.app.actions import remove_conductor
     remove_conductor(state, 0)
 
-    assert 0 not in state.conductor_styles, "Style entry not removed"
+    assert 0 not in state.conductor_color_settings, "Color settings entry not removed"
     assert len(state.project.conductors) == 1, "Conductor not removed from list"
 
     print("✓ Conductor ID system working correctly")

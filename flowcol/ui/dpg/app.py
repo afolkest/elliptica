@@ -173,6 +173,9 @@ class FlowColApp:
     mouse_wheel_delta: float = 0.0
     mouse_handler_registry_id: Optional[int] = None
 
+    # Region selection for colorization
+    selected_region: Optional[str] = None  # "surface" or "interior"
+
     def __post_init__(self) -> None:
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -311,6 +314,64 @@ class FlowColApp:
                     callback=self._on_palette_changed,
                     width=200,
                 )
+
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
+
+                # Region properties (shown when conductor selected in render mode)
+                with dpg.collapsing_header(label="Region Properties", default_open=True, tag="region_properties_header") as region_header:
+                    dpg.add_text("Select a conductor region to customize", tag="region_hint_text")
+
+                    dpg.add_spacer(height=5)
+                    dpg.add_text("Surface (Field Lines)", tag="surface_label")
+                    self.surface_enabled_checkbox_id = dpg.add_checkbox(
+                        label="Enable Custom Palette",
+                        callback=self._on_surface_enabled,
+                        tag="surface_enabled_checkbox",
+                    )
+                    self.surface_palette_combo_id = dpg.add_combo(
+                        label="Palette",
+                        items=palette_names,
+                        callback=self._on_surface_palette,
+                        width=200,
+                        tag="surface_palette_combo",
+                    )
+
+                    dpg.add_spacer(height=10)
+                    dpg.add_text("Interior (Hollow Region)", tag="interior_label")
+                    self.interior_enabled_checkbox_id = dpg.add_checkbox(
+                        label="Enable Custom Color",
+                        callback=self._on_interior_enabled,
+                        tag="interior_enabled_checkbox",
+                    )
+                    self.interior_r_slider_id = dpg.add_slider_float(
+                        label="Red",
+                        default_value=0.5,
+                        min_value=0.0,
+                        max_value=1.0,
+                        callback=self._on_interior_color_changed,
+                        width=200,
+                        tag="interior_r_slider",
+                    )
+                    self.interior_g_slider_id = dpg.add_slider_float(
+                        label="Green",
+                        default_value=0.5,
+                        min_value=0.0,
+                        max_value=1.0,
+                        callback=self._on_interior_color_changed,
+                        width=200,
+                        tag="interior_g_slider",
+                    )
+                    self.interior_b_slider_id = dpg.add_slider_float(
+                        label="Blue",
+                        default_value=0.5,
+                        min_value=0.0,
+                        max_value=1.0,
+                        callback=self._on_interior_color_changed,
+                        width=200,
+                        tag="interior_b_slider",
+                    )
+
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
             dpg.add_text("", tag="status_text")
@@ -337,6 +398,7 @@ class FlowColApp:
         if dpg is None or self.canvas_id is None:
             return False
 
+        # Use absolute coordinates for hit testing
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         rect_min = dpg.get_item_rect_min(self.canvas_id)
         rect_max = dpg.get_item_rect_max(self.canvas_id)
@@ -408,6 +470,7 @@ class FlowColApp:
     def _apply_postprocessing(self) -> None:
         """Apply postprocessing settings to cached render and update display."""
         from flowcol.render import downsample_lic
+        from scipy.ndimage import zoom
 
         with self.state_lock:
             cache = self.state.render_cache
@@ -418,7 +481,9 @@ class FlowColApp:
             result = cache.result
 
             # Apply downsampling with blur
-            target_shape = self.state.project.canvas_resolution
+            # canvas_resolution is (width, height), but downsample_lic expects (height, width)
+            canvas_w, canvas_h = self.state.project.canvas_resolution
+            target_shape = (canvas_h, canvas_w)
             downsampled = downsample_lic(
                 result.array,
                 target_shape,
@@ -428,6 +493,23 @@ class FlowColApp:
 
             # Store postprocessed result in display_array
             cache.display_array = downsampled
+
+            # Downsample masks to match display_array resolution if needed
+            if cache.conductor_masks:
+                # Check if masks need downsampling by comparing mask shape to target
+                first_mask = next((m for m in cache.conductor_masks if m is not None), None)
+                if first_mask is not None and first_mask.shape != target_shape:
+                    scale_y = target_shape[0] / first_mask.shape[0]
+                    scale_x = target_shape[1] / first_mask.shape[1]
+                    cache.conductor_masks = [
+                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
+                        for mask in cache.conductor_masks
+                    ]
+                    cache.interior_masks = [
+                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
+                        for mask in cache.interior_masks
+                    ]
+
             # Changing display_array invalidates base_rgb
             cache.base_rgb = None
 
@@ -437,6 +519,7 @@ class FlowColApp:
 
     def _refresh_render_texture(self) -> None:
         from flowcol.app.actions import ensure_base_rgb
+        from flowcol.postprocess.color import apply_region_overlays
         from PIL import Image
 
         if dpg is None or self.texture_registry_id is None:
@@ -449,9 +532,25 @@ class FlowColApp:
                 arr = np.zeros((32, 32), dtype=np.float32)
                 pil_img = array_to_pil(arr, use_color=False)
             else:
-                # Use cached base_rgb (already RGB uint8)
-                base_rgb = self.state.render_cache.base_rgb
-                pil_img = Image.fromarray(base_rgb, mode='RGB')
+                # Use cached base_rgb
+                cache = self.state.render_cache
+                base_rgb = cache.base_rgb.copy()
+
+                # Apply per-region overlays
+                if cache.conductor_masks and cache.interior_masks:
+                    final_rgb = apply_region_overlays(
+                        base_rgb,
+                        cache.display_array,
+                        cache.conductor_masks,
+                        cache.interior_masks,
+                        self.state.conductor_color_settings,
+                        self.state.project.conductors,
+                        self.state.display_settings,
+                    )
+                else:
+                    final_rgb = base_rgb
+
+                pil_img = Image.fromarray(final_rgb, mode='RGB')
             if max(pil_img.size) > MAX_PREVIEW_SIZE:
                 pil_img.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
 
@@ -527,6 +626,27 @@ class FlowColApp:
                 continue
             dpg.set_value(slider_id, float(conductors[idx].voltage))
 
+    def _update_region_properties_panel(self) -> None:
+        """Update region properties panel based on current selection."""
+        if dpg is None:
+            return
+
+        with self.state_lock:
+            selected = self.state.get_selected()
+            if selected and selected.id is not None:
+                settings = self.state.conductor_color_settings.get(selected.id)
+                if settings:
+                    # Update surface controls
+                    dpg.set_value("surface_enabled_checkbox", settings.surface.enabled)
+                    dpg.set_value("surface_palette_combo", settings.surface.palette)
+
+                    # Update interior controls
+                    dpg.set_value("interior_enabled_checkbox", settings.interior.enabled)
+                    r, g, b = settings.interior.solid_color
+                    dpg.set_value("interior_r_slider", r)
+                    dpg.set_value("interior_g_slider", g)
+                    dpg.set_value("interior_b_slider", b)
+
     def _on_conductor_voltage_slider(self, sender, app_data, user_data):
         if dpg is None:
             return
@@ -554,6 +674,7 @@ class FlowColApp:
 
         self._mark_canvas_dirty()
         self._update_conductor_slider_labels()
+        self._update_region_properties_panel()
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
         return True
 
@@ -815,6 +936,43 @@ class FlowColApp:
     # ------------------------------------------------------------------
     # Canvas input processing
     # ------------------------------------------------------------------
+    def _detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
+        """Detect which conductor region is at canvas point.
+
+        Returns (conductor_idx, region) where region is "surface" or "interior" or None.
+        """
+        cache = self.state.render_cache
+        if cache is None or cache.conductor_masks is None or cache.interior_masks is None:
+            return -1, None
+
+        # Masks are at canvas_resolution (same as canvas), so coordinates map directly
+        # The render texture may be thumbnailed for display, but masks are full resolution
+        mask_x = int(canvas_x)
+        mask_y = int(canvas_y)
+
+        # Check each conductor in reverse order (top to bottom)
+        for idx in reversed(range(len(self.state.project.conductors))):
+            if idx >= len(cache.interior_masks) or idx >= len(cache.conductor_masks):
+                continue
+
+            # Check interior first (it's inside, so higher priority)
+            interior_mask = cache.interior_masks[idx]
+            if interior_mask is not None:
+                h, w = interior_mask.shape
+                if 0 <= mask_y < h and 0 <= mask_x < w:
+                    if interior_mask[mask_y, mask_x] > 0.5:
+                        return idx, "interior"
+
+            # Check surface
+            surface_mask = cache.conductor_masks[idx]
+            if surface_mask is not None:
+                h, w = surface_mask.shape
+                if 0 <= mask_y < h and 0 <= mask_x < w:
+                    if surface_mask[mask_y, mask_x] > 0.5:
+                        return idx, "surface"
+
+        return -1, None
+
     def _process_canvas_mouse(self) -> None:
         if dpg is None or self.canvas_id is None:
             return
@@ -845,14 +1003,12 @@ class FlowColApp:
             if pressed and self._is_mouse_over_canvas():
                 x, y = self._get_canvas_mouse_pos()
                 with self.state_lock:
-                    project = self.state.project
-                    hit_idx = -1
-                    for idx in reversed(range(len(project.conductors))):
-                        if _point_in_conductor(project.conductors[idx], x, y):
-                            hit_idx = idx
-                            break
+                    # Use region detection in render mode for colorization
+                    hit_idx, hit_region = self._detect_region_at_point(x, y)
                     self.state.set_selected(hit_idx)
+                    self.selected_region = hit_region
                 self._update_conductor_slider_labels()
+                self._update_region_properties_panel()
             self.mouse_down_last = mouse_down
             return
 
@@ -867,12 +1023,14 @@ class FlowColApp:
                         break
 
                 self.state.set_selected(hit_idx)
+                self.selected_region = None  # Region detection only in render mode
                 if hit_idx >= 0:
                     self.drag_active = True
                     self.drag_last_pos = (x, y)
                 else:
                     self.drag_active = False
             self._update_conductor_slider_labels()
+            self._update_region_properties_panel()
             self._mark_canvas_dirty()
 
         if self.drag_active and mouse_down:
@@ -994,6 +1152,50 @@ class FlowColApp:
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
+    def _on_surface_enabled(self, sender, app_data):
+        """Handle surface custom palette checkbox."""
+        from flowcol.app.actions import set_region_style_enabled
+        with self.state_lock:
+            selected = self.state.get_selected()
+            if selected and selected.id is not None:
+                set_region_style_enabled(self.state, selected.id, "surface", app_data)
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_surface_palette(self, sender, app_data):
+        """Handle surface palette dropdown change."""
+        from flowcol.app.actions import set_region_palette
+        with self.state_lock:
+            selected = self.state.get_selected()
+            if selected and selected.id is not None:
+                set_region_palette(self.state, selected.id, "surface", app_data)
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_interior_enabled(self, sender, app_data):
+        """Handle interior custom color checkbox."""
+        from flowcol.app.actions import set_region_style_enabled
+        with self.state_lock:
+            selected = self.state.get_selected()
+            if selected and selected.id is not None:
+                set_region_style_enabled(self.state, selected.id, "interior", app_data)
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_interior_color_changed(self, sender, app_data):
+        """Handle interior RGB slider change."""
+        from flowcol.app.actions import set_region_solid_color
+        with self.state_lock:
+            selected = self.state.get_selected()
+            if selected and selected.id is not None:
+                # Read all three sliders
+                r = dpg.get_value(self.interior_r_slider_id)
+                g = dpg.get_value(self.interior_g_slider_id)
+                b = dpg.get_value(self.interior_b_slider_id)
+                set_region_solid_color(self.state, selected.id, "interior", (r, g, b))
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
     def _redraw_canvas(self) -> None:
         if dpg is None or self.canvas_id is None:
             return
@@ -1089,7 +1291,9 @@ class FlowColApp:
 
             with self.state_lock:
                 postprocess = self.state.display_settings
-                target_shape = project_snapshot.canvas_resolution
+                # canvas_resolution is (width, height), but downsample_lic expects (height, width)
+                canvas_w, canvas_h = project_snapshot.canvas_resolution
+                target_shape = (canvas_h, canvas_w)
                 display_array = downsample_lic(
                     result.array,
                     target_shape,
@@ -1097,17 +1301,34 @@ class FlowColApp:
                     postprocess.downsample_sigma,
                 )
 
-            # Generate conductor segmentation masks at display resolution
+            # Generate conductor segmentation masks at full resolution, then downsample
             conductor_masks = None
             interior_masks = None
             if project_snapshot.conductors:
+                from scipy.ndimage import zoom
+
                 scale = settings_snapshot.multiplier * settings_snapshot.supersample
                 conductor_masks, interior_masks = rasterize_conductor_masks(
                     project_snapshot.conductors,
                     result.canvas_scaled_shape,
                     result.margin,
                     scale,
+                    result.offset_x,
+                    result.offset_y,
                 )
+
+                # Downsample masks to match display_array resolution
+                if result.array.shape != display_array.shape:
+                    scale_y = display_array.shape[0] / result.array.shape[0]
+                    scale_x = display_array.shape[1] / result.array.shape[1]
+                    conductor_masks = [
+                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
+                        for mask in conductor_masks
+                    ]
+                    interior_masks = [
+                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
+                        for mask in interior_masks
+                    ]
 
             cache = RenderCache(
                 result=result,
