@@ -362,3 +362,209 @@ def _load_mask_from_zip(zf: zipfile.ZipFile, filename: str) -> np.ndarray:
     mask_float32 = (mask_uint16 / 65535.0).astype(np.float32)
 
     return mask_float32
+
+
+# ============================================================================
+# Project Fingerprinting
+# ============================================================================
+
+def compute_project_fingerprint(project: Project) -> str:
+    """Compute hash of all properties that affect rendering.
+
+    This fingerprint changes whenever conductors are moved, voltages change,
+    canvas is resized, or any other render-affecting property changes.
+
+    Returns:
+        32-character MD5 hex string
+    """
+    import hashlib
+
+    parts = [
+        # Canvas and global settings
+        f"canvas:{project.canvas_resolution[0]}x{project.canvas_resolution[1]}",
+        f"streamlen:{project.streamlength_factor}",
+        f"bounds:{project.boundary_top},{project.boundary_bottom},{project.boundary_left},{project.boundary_right}",
+    ]
+
+    # Per-conductor state (order matters!)
+    for i, c in enumerate(project.conductors):
+        # Scalar properties
+        parts.append(f"c{i}:v={c.voltage}")
+        parts.append(f"c{i}:pos={c.position[0]:.2f},{c.position[1]:.2f}")
+        parts.append(f"c{i}:scale={c.scale_factor}")
+        parts.append(f"c{i}:blur={c.blur_sigma},{c.blur_is_fractional}")
+
+        # Mask data hash (expensive but necessary)
+        mask_hash = hashlib.md5(c.mask.tobytes()).hexdigest()[:8]
+        parts.append(f"c{i}:mask={mask_hash}")
+
+    # Combine and hash
+    combined = "|".join(parts)
+    return hashlib.md5(combined.encode()).hexdigest()
+
+
+# ============================================================================
+# Render Cache Serialization
+# ============================================================================
+
+def save_render_cache(
+    cache: 'RenderCache',
+    project: Project,
+    filepath: str,
+) -> None:
+    """Save render cache to .flowcol.cache file.
+
+    Args:
+        cache: RenderCache to save
+        project: Current project (for fingerprinting)
+        filepath: Output path (should end with .flowcol.cache)
+    """
+    from flowcol.app.core import RenderCache
+
+    filepath = Path(filepath)
+
+    # Compute current fingerprint
+    fingerprint = compute_project_fingerprint(project)
+
+    # Build metadata
+    metadata = {
+        'project_fingerprint': fingerprint,
+        'multiplier': cache.multiplier,
+        'supersample': cache.supersample,
+        'compute_resolution': list(cache.result.compute_resolution),
+        'canvas_scaled_shape': list(cache.result.canvas_scaled_shape),
+        'margin': cache.result.margin,
+        'offset_x': cache.result.offset_x,
+        'offset_y': cache.result.offset_y,
+        'created_at': datetime.now().isoformat(),
+    }
+
+    # Create ZIP archive
+    with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
+        # Save metadata
+        zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+
+        # Save LIC result (unsigned, already in [0, 1])
+        _save_mask_to_zip(zf, cache.result.array, 'lic_result.png')
+
+        # Save E-fields (signed floats, need special handling)
+        if cache.result.ex is not None:
+            _save_signed_float_array(zf, cache.result.ex, 'field_ex.png')
+        if cache.result.ey is not None:
+            _save_signed_float_array(zf, cache.result.ey, 'field_ey.png')
+
+
+def load_render_cache(
+    filepath: str,
+    project: Project,
+) -> 'RenderCache | None':
+    """Load render cache from .flowcol.cache file.
+
+    Compares project fingerprint to detect staleness. If fingerprint doesn't match,
+    still loads the cache but marks it as potentially stale.
+
+    Args:
+        filepath: Path to .flowcol.cache file
+        project: Current project (for fingerprint comparison)
+
+    Returns:
+        RenderCache with project_fingerprint set, or None if load fails
+    """
+    from flowcol.app.core import RenderCache
+    from flowcol.pipeline import RenderResult
+
+    filepath = Path(filepath)
+    if not filepath.exists():
+        return None
+
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            # Load metadata
+            metadata = json.loads(zf.read('metadata.json'))
+
+            # Load LIC result
+            lic = _load_mask_from_zip(zf, 'lic_result.png')
+
+            # Load E-fields if present
+            ex = None
+            ey = None
+            if 'field_ex.png' in zf.namelist():
+                ex = _load_signed_float_array(zf, 'field_ex.png')
+            if 'field_ey.png' in zf.namelist():
+                ey = _load_signed_float_array(zf, 'field_ey.png')
+
+            # Reconstruct RenderResult
+            result = RenderResult(
+                array=lic,
+                compute_resolution=tuple(metadata['compute_resolution']),
+                canvas_scaled_shape=tuple(metadata['canvas_scaled_shape']),
+                margin=metadata['margin'],
+                offset_x=metadata['offset_x'],
+                offset_y=metadata['offset_y'],
+                ex=ex,
+                ey=ey,
+            )
+
+            # Create cache with fingerprint
+            cache = RenderCache(
+                result=result,
+                multiplier=metadata['multiplier'],
+                supersample=metadata['supersample'],
+            )
+
+            # Store fingerprint for staleness detection
+            # (Will be added to RenderCache dataclass)
+            cache.project_fingerprint = metadata['project_fingerprint']
+
+            return cache
+
+    except Exception as e:
+        # Corrupt or incompatible cache - ignore silently
+        print(f"Failed to load render cache: {e}")
+        return None
+
+
+def _save_signed_float_array(zf: zipfile.ZipFile, array: np.ndarray, filename: str) -> None:
+    """Save signed float array by normalizing to [0, 1] range.
+
+    Saves the value range as separate JSON so we can denormalize on load.
+    """
+    # Find value range
+    vmin = float(array.min())
+    vmax = float(array.max())
+
+    # Normalize to [0, 1]
+    if vmax - vmin > 1e-10:
+        normalized = (array - vmin) / (vmax - vmin)
+    else:
+        # Constant array
+        normalized = np.zeros_like(array)
+
+    # Save as uint16 PNG
+    _save_mask_to_zip(zf, normalized, filename)
+
+    # Save range metadata
+    range_filename = filename.replace('.png', '_range.json')
+    range_data = {'vmin': vmin, 'vmax': vmax}
+    zf.writestr(range_filename, json.dumps(range_data))
+
+
+def _load_signed_float_array(zf: zipfile.ZipFile, filename: str) -> np.ndarray:
+    """Load signed float array by denormalizing from [0, 1] range."""
+    # Load normalized array
+    normalized = _load_mask_from_zip(zf, filename)
+
+    # Load range metadata
+    range_filename = filename.replace('.png', '_range.json')
+    range_data = json.loads(zf.read(range_filename))
+    vmin = range_data['vmin']
+    vmax = range_data['vmax']
+
+    # Denormalize
+    if vmax - vmin > 1e-10:
+        array = normalized * (vmax - vmin) + vmin
+    else:
+        # Constant array
+        array = np.full_like(normalized, vmin)
+
+    return array.astype(np.float32)
