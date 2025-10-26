@@ -1482,6 +1482,7 @@ class FlowColApp:
 
             # Update UI to reflect loaded state
             self._mark_canvas_dirty()
+            self._update_canvas_scale()  # Recalculate scale for new canvas resolution
             self._update_control_visibility()
             self._rebuild_conductor_controls()
             self._update_conductor_slider_labels()
