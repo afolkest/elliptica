@@ -455,7 +455,7 @@ def array_to_surface(
 def save_render(
     arr: np.ndarray,
     project: Project,
-    multiplier: int,
+    multiplier: float,
     *,
     use_color: bool = False,
     palette: str | None = None,

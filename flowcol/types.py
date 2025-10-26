@@ -26,7 +26,7 @@ class Conductor:
 
 @dataclass
 class RenderInfo:
-    multiplier: int
+    multiplier: float
     filepath: str
     timestamp: str
 

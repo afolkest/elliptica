@@ -1723,6 +1723,33 @@ class FlowColApp:
         # Draw background
         dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.canvas_layer_id)
 
+        # Draw grid in edit mode (based on physical units, not pixels)
+        if view_mode == "edit":
+            # Grid every 0.1 canvas units (10% of canvas dimension)
+            grid_fraction = 0.1
+            grid_spacing_x = canvas_w * grid_fraction
+            grid_spacing_y = canvas_h * grid_fraction
+            mid_x = canvas_w / 2.0
+            mid_y = canvas_h / 2.0
+
+            # Vertical grid lines
+            x = 0.0
+            while x <= canvas_w:
+                is_midline = abs(x - mid_x) < 0.5
+                color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
+                thickness = 2.5 if is_midline else 1.0
+                dpg.draw_line((x, 0), (x, canvas_h), color=color, thickness=thickness, parent=self.canvas_layer_id)
+                x += grid_spacing_x
+
+            # Horizontal grid lines
+            y = 0.0
+            while y <= canvas_h:
+                is_midline = abs(y - mid_y) < 0.5
+                color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
+                thickness = 2.5 if is_midline else 1.0
+                dpg.draw_line((0, y), (canvas_w, y), color=color, thickness=thickness, parent=self.canvas_layer_id)
+                y += grid_spacing_y
+
         if view_mode == "render" and render_cache and self.render_texture_id is not None and self.render_texture_size:
             tex_w, tex_h = self.render_texture_size
             if tex_w > 0 and tex_h > 0:
