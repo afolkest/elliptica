@@ -24,6 +24,7 @@ from flowcol.mask_utils import load_conductor_masks
 from flowcol.render import colorize_array, apply_conductor_smear, _apply_display_transforms
 from flowcol.postprocess.color import apply_region_overlays
 from flowcol.postprocess.masks import rasterize_conductor_masks
+from flowcol.serialization import save_project, load_project
 from PIL import Image
 from datetime import datetime
 
@@ -180,6 +181,8 @@ class FlowColApp:
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
     conductor_file_dialog_id: Optional[str] = None
+    save_project_dialog_id: Optional[str] = None
+    load_project_dialog_id: Optional[str] = None
     conductor_controls_container_id: Optional[int] = None
     conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
     postprocess_downsample_slider_id: Optional[int] = None
@@ -256,6 +259,11 @@ class FlowColApp:
                        no_scroll_with_mouse=True):
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
+                dpg.add_text("Project")
+                dpg.add_button(label="Save Project...", callback=self._open_save_project_dialog, width=140)
+                dpg.add_button(label="Load Project...", callback=self._open_load_project_dialog, width=140)
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self._open_conductor_dialog)
                 dpg.add_button(label="Render Field", callback=self._open_render_modal)
@@ -1279,6 +1287,193 @@ class FlowColApp:
         self._rebuild_conductor_controls()
         self._update_conductor_slider_labels()
         dpg.set_value("status_text", f"Loaded conductor '{Path(path_str).name}'")
+
+    # ------------------------------------------------------------------
+    # Project save/load
+    # ------------------------------------------------------------------
+    def _ensure_save_project_dialog(self) -> None:
+        if dpg is None or self.save_project_dialog_id is not None:
+            return
+
+        default_path = str(Path.cwd())
+
+        with dpg.file_dialog(
+            directory_selector=False,
+            show=False,
+            modal=True,
+            default_path=default_path,
+            callback=self._on_save_project_file_selected,
+            cancel_callback=self._on_save_project_cancelled,
+            width=640,
+            height=420,
+            tag="save_project_dialog",
+            default_filename="project.flowcol",
+        ) as dialog:
+            self.save_project_dialog_id = dialog
+            dpg.add_file_extension(".flowcol", color=(180, 255, 150, 255))
+            dpg.add_file_extension(".*")
+
+    def _ensure_load_project_dialog(self) -> None:
+        if dpg is None or self.load_project_dialog_id is not None:
+            return
+
+        default_path = str(Path.cwd())
+
+        with dpg.file_dialog(
+            directory_selector=False,
+            show=False,
+            modal=True,
+            default_path=default_path,
+            callback=self._on_load_project_file_selected,
+            cancel_callback=self._on_load_project_cancelled,
+            width=640,
+            height=420,
+            tag="load_project_dialog",
+        ) as dialog:
+            self.load_project_dialog_id = dialog
+            dpg.add_file_extension(".flowcol", color=(180, 255, 150, 255))
+            dpg.add_file_extension(".*")
+
+    def _open_save_project_dialog(self, sender, app_data):
+        if dpg is None:
+            return
+        self._ensure_save_project_dialog()
+        if self.save_project_dialog_id is not None:
+            dpg.show_item(self.save_project_dialog_id)
+
+    def _open_load_project_dialog(self, sender, app_data):
+        if dpg is None:
+            return
+        self._ensure_load_project_dialog()
+        if self.load_project_dialog_id is not None:
+            dpg.show_item(self.load_project_dialog_id)
+
+    def _on_save_project_cancelled(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+        dpg.set_value("status_text", "Save project cancelled.")
+
+    def _on_load_project_cancelled(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+        dpg.set_value("status_text", "Load project cancelled.")
+
+    def _on_save_project_file_selected(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+
+        path_str = self._extract_file_path(app_data)
+        if not path_str:
+            dpg.set_value("status_text", "No file selected.")
+            return
+
+        # Ensure .flowcol extension
+        path_obj = Path(path_str)
+        if path_obj.suffix != '.flowcol':
+            path_obj = path_obj.with_suffix('.flowcol')
+
+        try:
+            with self.state_lock:
+                save_project(self.state, str(path_obj))
+            dpg.set_value("status_text", f"Saved project: {path_obj.name}")
+        except Exception as exc:
+            dpg.set_value("status_text", f"Failed to save project: {exc}")
+
+    def _on_load_project_file_selected(self, sender, app_data):
+        if dpg is None:
+            return
+        if sender is not None:
+            dpg.configure_item(sender, show=False)
+
+        path_str = self._extract_file_path(app_data)
+        if not path_str:
+            dpg.set_value("status_text", "No file selected.")
+            return
+
+        try:
+            new_state = load_project(path_str)
+
+            with self.state_lock:
+                # Replace current state with loaded state
+                self.state.project = new_state.project
+                self.state.render_settings = new_state.render_settings
+                self.state.display_settings = new_state.display_settings
+                self.state.conductor_color_settings = new_state.conductor_color_settings
+                self.state.selected_idx = -1
+                self.state.view_mode = "edit"
+                self.state.field_dirty = True
+                self.state.render_dirty = True
+                self.state.render_cache = None
+
+            # Update UI to reflect loaded state
+            self._mark_canvas_dirty()
+            self._update_control_visibility()
+            self._rebuild_conductor_controls()
+            self._update_conductor_slider_labels()
+            self._sync_ui_from_state()
+
+            dpg.set_value("status_text", f"Loaded project: {Path(path_str).name}")
+        except Exception as exc:
+            dpg.set_value("status_text", f"Failed to load project: {exc}")
+
+    def _extract_file_path(self, app_data) -> Optional[str]:
+        """Extract file path from DPG file dialog callback data."""
+        if not isinstance(app_data, dict):
+            return None
+
+        # Try selections dict first
+        selections = app_data.get("selections", {})
+        if selections:
+            return next(iter(selections.values()))
+
+        # Fallback: file_path_name
+        path_str = app_data.get("file_path_name")
+        if path_str:
+            return path_str
+
+        # Fallback: combine current_path + file_name
+        current_path = app_data.get("current_path", "")
+        file_name = app_data.get("file_name", "")
+        if current_path and file_name:
+            return str(Path(current_path) / file_name)
+
+        return None
+
+    def _sync_ui_from_state(self) -> None:
+        """Sync UI controls to match current state after loading."""
+        if dpg is None:
+            return
+
+        with self.state_lock:
+            # Canvas resolution
+            if self.canvas_width_input_id is not None:
+                dpg.set_value(self.canvas_width_input_id, self.state.project.canvas_resolution[0])
+            if self.canvas_height_input_id is not None:
+                dpg.set_value(self.canvas_height_input_id, self.state.project.canvas_resolution[1])
+
+            # Display settings
+            if self.postprocess_downsample_slider_id is not None:
+                dpg.set_value(self.postprocess_downsample_slider_id, self.state.display_settings.downsample_sigma)
+            if self.postprocess_clip_slider_id is not None:
+                dpg.set_value(self.postprocess_clip_slider_id, self.state.display_settings.clip_percent)
+            if self.postprocess_contrast_slider_id is not None:
+                dpg.set_value(self.postprocess_contrast_slider_id, self.state.display_settings.contrast)
+            if self.postprocess_gamma_slider_id is not None:
+                dpg.set_value(self.postprocess_gamma_slider_id, self.state.display_settings.gamma)
+            if self.edge_blur_sigma_slider_id is not None:
+                dpg.set_value(self.edge_blur_sigma_slider_id, self.state.display_settings.edge_blur_sigma)
+            if self.edge_blur_falloff_slider_id is not None:
+                dpg.set_value(self.edge_blur_falloff_slider_id, self.state.display_settings.edge_blur_falloff)
+            if self.edge_blur_strength_slider_id is not None:
+                dpg.set_value(self.edge_blur_strength_slider_id, self.state.display_settings.edge_blur_strength)
+            if self.color_enabled_checkbox_id is not None:
+                dpg.set_value(self.color_enabled_checkbox_id, self.state.display_settings.color_enabled)
 
 
     def _update_render_modal_values(self) -> None:
