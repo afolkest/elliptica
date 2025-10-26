@@ -10,10 +10,7 @@ from typing import Optional, Dict, Tuple
 
 import numpy as np
 
-try:
-    import dearpygui.dearpygui as dpg  # type: ignore
-except ImportError:  # pragma: no cover - Dear PyGui is optional for unit tests
-    dpg = None
+import dearpygui.dearpygui as dpg  # type: ignore
 
 from flowcol.app.core import AppState, RenderCache, RenderSettings
 from pathlib import Path
@@ -24,6 +21,12 @@ from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
 from flowcol.mask_utils import load_conductor_masks
+from flowcol.render import colorize_array, apply_conductor_smear, _apply_display_transforms
+from flowcol.postprocess.color import apply_region_overlays
+from flowcol.postprocess.masks import rasterize_conductor_masks
+from PIL import Image
+from datetime import datetime
+
 
 
 CONDUCTOR_COLORS = [
@@ -33,7 +36,6 @@ CONDUCTOR_COLORS = [
     (1.0, 0.78, 0.39, 0.7),
 ]
 
-MAX_PREVIEW_SIZE = 640
 MAX_CANVAS_DIM = 8192
 
 SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
@@ -745,8 +747,6 @@ class FlowColApp:
                     final_rgb = base_rgb
 
                 pil_img = Image.fromarray(final_rgb, mode='RGB')
-            if max(pil_img.size) > MAX_PREVIEW_SIZE:
-                pil_img.thumbnail((MAX_PREVIEW_SIZE, MAX_PREVIEW_SIZE))
 
         width, height, data = _image_to_texture_data(pil_img)
 
@@ -1529,62 +1529,97 @@ class FlowColApp:
         dpg.set_value("status_text", "Edit mode.")
 
     def _on_save_image_clicked(self, sender, app_data):
-        """Save the final rendered image to disk."""
+        """Save the final rendered image to disk at full resolution."""
         if dpg is None:
             return
 
         with self.state_lock:
             cache = self.state.render_cache
-            if cache is None or cache.base_rgb is None:
+            if cache is None or cache.result is None:
                 dpg.set_value("status_text", "No render to save.")
                 return
 
-        # Generate final RGB with all post-processing
-        from flowcol.app.actions import ensure_base_rgb
-        from flowcol.postprocess.color import apply_region_overlays
-        from PIL import Image
-        from datetime import datetime
+            # Snapshot everything we need for high-res export
+            result = cache.result
+            project = _snapshot_project(self.state.project)
+            settings = replace(self.state.display_settings)
+            conductor_color_settings = {k: v for k, v in self.state.conductor_color_settings.items()}
+            multiplier = cache.multiplier
+            supersample = cache.supersample
 
-        with self.state_lock:
-            ensure_base_rgb(self.state)
-            cache = self.state.render_cache
-            base_rgb = cache.base_rgb.copy()
+        # Work with high-resolution data
+        # Start with high-res LIC grayscale
+        high_res_array = result.array.astype(np.float32)
 
-            # Apply conductor smear effect
-            from flowcol.render import apply_conductor_smear
-            if any(c.smear_enabled for c in self.state.project.conductors):
-                base_rgb = apply_conductor_smear(
-                    base_rgb,
-                    cache.display_array,
-                    self.state.project,
-                    self.state.display_settings.palette,
-                    cache.display_array.shape,
-                    color_enabled=self.state.display_settings.color_enabled,
-                )
+        # Colorize at high-res with post-processing settings
+        if settings.color_enabled and settings.palette:
+            base_rgb = colorize_array(
+                high_res_array,
+                palette=settings.palette,
+                contrast=settings.contrast,
+                gamma=settings.gamma,
+                clip_percent=settings.clip_percent,
+            )
+        else:
+            # Grayscale: apply same transforms without color
+            normalized = _apply_display_transforms(
+                high_res_array,
+                contrast=settings.contrast,
+                gamma=settings.gamma,
+                clip_percent=settings.clip_percent,
+            )
+            arr_uint8 = (normalized * 255).astype(np.uint8)
+            base_rgb = np.stack([arr_uint8, arr_uint8, arr_uint8], axis=-1)
 
-            # Apply per-region overlays
-            if cache.conductor_masks and cache.interior_masks:
-                final_rgb = apply_region_overlays(
-                    base_rgb,
-                    cache.display_array,
-                    cache.conductor_masks,
-                    cache.interior_masks,
-                    self.state.conductor_color_settings,
-                    self.state.project.conductors,
-                    self.state.display_settings,
-                )
-            else:
-                final_rgb = base_rgb
+        # Generate high-res masks for conductor regions
+        conductor_masks = None
+        interior_masks = None
+        if project.conductors:
+            scale = multiplier * supersample
+            conductor_masks, interior_masks = rasterize_conductor_masks(
+                project.conductors,
+                result.canvas_scaled_shape,
+                result.margin,
+                scale,
+                result.offset_x,
+                result.offset_y,
+            )
 
-        # Save to outputs directory with timestamp
+        # Apply smear at high-res
+        if any(c.smear_enabled for c in project.conductors):
+            base_rgb = apply_conductor_smear(
+                base_rgb,
+                high_res_array,  # Use high-res LIC for smear
+                project,
+                settings.palette,
+                high_res_array.shape,
+                color_enabled=settings.color_enabled,
+            )
+
+        # Apply region overlays at high-res
+        if conductor_masks and interior_masks:
+            final_rgb = apply_region_overlays(
+                base_rgb,
+                high_res_array,
+                conductor_masks,
+                interior_masks,
+                conductor_color_settings,
+                project.conductors,
+                settings,
+            )
+        else:
+            final_rgb = base_rgb
+
+        # Save at full resolution
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path.cwd() / "outputs"
         output_dir.mkdir(exist_ok=True)
-        output_path = output_dir / f"flowcol_{timestamp}.png"
+        h, w = final_rgb.shape[:2]
+        output_path = output_dir / f"flowcol_{w}x{h}_{timestamp}.png"
 
         pil_img = Image.fromarray(final_rgb, mode='RGB')
         pil_img.save(output_path)
-        dpg.set_value("status_text", f"Saved to {output_path.name}")
+        dpg.set_value("status_text", f"Saved full-res to {output_path.name}")
 
     def _on_downsample_slider(self, sender, app_data):
         """Handle downsampling blur sigma slider change."""
