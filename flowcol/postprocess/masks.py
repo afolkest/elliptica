@@ -123,6 +123,8 @@ def _rasterize_single_mask(
     Returns:
         Rasterized mask at target_shape resolution
     """
+    from scipy.ndimage import zoom
+
     target_h, target_w = target_shape
     pos_x, pos_y = position
 
@@ -130,42 +132,40 @@ def _rasterize_single_mask(
     grid_x = (pos_x + margin) * scale - offset_x
     grid_y = (pos_y + margin) * scale - offset_y
 
-    # Scale mask dimensions
+    # Scale mask using zoom (vectorized, no holes)
     mask_h, mask_w = mask.shape
-    scaled_h = mask_h * scale
-    scaled_w = mask_w * scale
+    new_h = max(1, int(round(mask_h * scale)))
+    new_w = max(1, int(round(mask_w * scale)))
 
-    # Compute integer bounds on target grid
-    x0 = int(np.floor(grid_x))
-    y0 = int(np.floor(grid_y))
-    x1 = int(np.ceil(grid_x + scaled_w))
-    y1 = int(np.ceil(grid_y + scaled_h))
+    zoom_y = new_h / mask_h
+    zoom_x = new_w / mask_w
+    scaled_mask = zoom(mask, (zoom_y, zoom_x), order=1)
+    scaled_mask = np.clip(scaled_mask, 0.0, 1.0).astype(np.float32)
 
-    # Clip to target bounds
-    x0_clip = max(0, x0)
-    y0_clip = max(0, y0)
-    x1_clip = min(target_w, x1)
-    y1_clip = min(target_h, y1)
+    # Compute integer placement on target grid
+    x0 = int(round(grid_x))
+    y0 = int(round(grid_y))
+    x1 = x0 + new_w
+    y1 = y0 + new_h
 
-    # Check if mask is completely outside target
-    if x0_clip >= x1_clip or y0_clip >= y1_clip:
+    # Compute valid paste region (intersection with target)
+    paste_x0 = max(0, x0)
+    paste_y0 = max(0, y0)
+    paste_x1 = min(target_w, x1)
+    paste_y1 = min(target_h, y1)
+
+    # Check if completely outside
+    if paste_x0 >= paste_x1 or paste_y0 >= paste_y1:
         return np.zeros(target_shape, dtype=np.float32)
 
-    # Create output mask
+    # Compute source region to copy (handle partial overlap)
+    src_x0 = paste_x0 - x0
+    src_y0 = paste_y0 - y0
+    src_x1 = src_x0 + (paste_x1 - paste_x0)
+    src_y1 = src_y0 + (paste_y1 - paste_y0)
+
+    # Create output and paste
     output = np.zeros(target_shape, dtype=np.float32)
-
-    # Simple nearest-neighbor sampling (good enough for binary masks)
-    for out_y in range(y0_clip, y1_clip):
-        for out_x in range(x0_clip, x1_clip):
-            # Map output pixel back to source mask coordinates
-            src_x = (out_x - grid_x) / scale
-            src_y = (out_y - grid_y) / scale
-
-            # Nearest neighbor
-            src_x_idx = int(np.round(src_x))
-            src_y_idx = int(np.round(src_y))
-
-            if 0 <= src_x_idx < mask_w and 0 <= src_y_idx < mask_h:
-                output[out_y, out_x] = mask[src_y_idx, src_x_idx]
+    output[paste_y0:paste_y1, paste_x0:paste_x1] = scaled_mask[src_y0:src_y1, src_x0:src_x1]
 
     return output

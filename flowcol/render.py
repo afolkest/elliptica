@@ -115,6 +115,18 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
         ],
         dtype=np.float32,
     ),
+    "Inky Washy": np.array(
+        [
+            (0.00, 0.00, 0.00),  # pure black
+            (0.00, 0.00, 0.00),  # pure black
+            (0.03, 0.03, 0.03),  # very dark
+            (0.08, 0.08, 0.08),  # dark
+            (0.99, 0.99, 0.99),  # light
+            (0.00, 0.00, 0.00),  # near white
+            (0.00, 0.00, 0.00),  # pure white
+        ],
+        dtype=np.float32,
+    ),
     "PuOr": np.array(
         [
             (0.498, 0.231, 0.031),  # Dark orange

@@ -1372,7 +1372,7 @@ class FlowColApp:
                 selected_idx = self.state.selected_idx
             # Only scale if a conductor is selected
             if selected_idx >= 0:
-                scale_factor = math.exp(wheel_delta * 0.12)
+                scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
                 scale_factor = max(0.05, min(scale_factor, 20.0))
                 if self._scale_conductor(selected_idx, scale_factor):
                     x, y = self._get_canvas_mouse_pos()
@@ -1431,6 +1431,13 @@ class FlowColApp:
 
     def _process_keyboard_shortcuts(self) -> None:
         if dpg is None or BACKSPACE_KEY is None:
+            return
+
+        # Only process shortcuts when mouse is over canvas (not over UI controls)
+        # This prevents keyboard shortcuts from firing while typing in input fields
+        over_canvas = self._is_mouse_over_canvas()
+        if not over_canvas:
+            self.backspace_down_last = False
             return
 
         # Backspace to delete
@@ -1528,42 +1535,48 @@ class FlowColApp:
         self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
 
-    def _on_save_image_clicked(self, sender, app_data):
-        """Save the final rendered image to disk at full resolution."""
-        if dpg is None:
-            return
+    def _apply_postprocessing_for_save(
+        self,
+        lic_array: np.ndarray,
+        project: Project,
+        settings,
+        conductor_color_settings: dict,
+        canvas_resolution: tuple[int, int],
+        margin_physical: float,
+        scale: float,
+        offset_x: int,
+        offset_y: int,
+    ) -> np.ndarray:
+        """Apply full post-processing pipeline to LIC array at any resolution.
 
-        with self.state_lock:
-            cache = self.state.render_cache
-            if cache is None or cache.result is None:
-                dpg.set_value("status_text", "No render to save.")
-                return
+        Args:
+            lic_array: Grayscale LIC array
+            project: Project snapshot
+            settings: Display settings snapshot
+            conductor_color_settings: Conductor color settings
+            canvas_resolution: Canvas resolution (width, height)
+            margin_physical: Physical margin in canvas units
+            scale: Pixels per canvas unit (multiplier or multiplier*supersample)
+            offset_x: Crop offset X from render result
+            offset_y: Crop offset Y from render result
 
-            # Snapshot everything we need for high-res export
-            result = cache.result
-            project = _snapshot_project(self.state.project)
-            settings = replace(self.state.display_settings)
-            conductor_color_settings = {k: v for k, v in self.state.conductor_color_settings.items()}
-            multiplier = cache.multiplier
-            supersample = cache.supersample
+        Returns:
+            Final RGB array with all post-processing applied
+        """
+        from flowcol.postprocess.masks import rasterize_conductor_masks
 
-        # Work with high-resolution data
-        # Start with high-res LIC grayscale
-        high_res_array = result.array.astype(np.float32)
-
-        # Colorize at high-res with post-processing settings
+        # Colorize
         if settings.color_enabled and settings.palette:
             base_rgb = colorize_array(
-                high_res_array,
+                lic_array,
                 palette=settings.palette,
                 contrast=settings.contrast,
                 gamma=settings.gamma,
                 clip_percent=settings.clip_percent,
             )
         else:
-            # Grayscale: apply same transforms without color
             normalized = _apply_display_transforms(
-                high_res_array,
+                lic_array,
                 contrast=settings.contrast,
                 gamma=settings.gamma,
                 clip_percent=settings.clip_percent,
@@ -1571,36 +1584,35 @@ class FlowColApp:
             arr_uint8 = (normalized * 255).astype(np.uint8)
             base_rgb = np.stack([arr_uint8, arr_uint8, arr_uint8], axis=-1)
 
-        # Generate high-res masks for conductor regions
+        # Generate masks at this resolution
         conductor_masks = None
         interior_masks = None
         if project.conductors:
-            scale = multiplier * supersample
             conductor_masks, interior_masks = rasterize_conductor_masks(
                 project.conductors,
-                result.canvas_scaled_shape,
-                result.margin,
+                lic_array.shape,
+                margin_physical,
                 scale,
-                result.offset_x,
-                result.offset_y,
+                offset_x,
+                offset_y,
             )
 
-        # Apply smear at high-res
+        # Apply smear
         if any(c.smear_enabled for c in project.conductors):
             base_rgb = apply_conductor_smear(
                 base_rgb,
-                high_res_array,  # Use high-res LIC for smear
+                lic_array,
                 project,
                 settings.palette,
-                high_res_array.shape,
+                lic_array.shape,
                 color_enabled=settings.color_enabled,
             )
 
-        # Apply region overlays at high-res
+        # Apply region overlays
         if conductor_masks and interior_masks:
             final_rgb = apply_region_overlays(
                 base_rgb,
-                high_res_array,
+                lic_array,
                 conductor_masks,
                 interior_masks,
                 conductor_color_settings,
@@ -1610,16 +1622,118 @@ class FlowColApp:
         else:
             final_rgb = base_rgb
 
-        # Save at full resolution
+        return final_rgb
+
+    def _on_save_image_clicked(self, sender, app_data):
+        """Save the final rendered image to disk.
+
+        If supersampled: saves two versions (_supersampled and _final).
+        If not supersampled: saves one version.
+        """
+        if dpg is None:
+            return
+
+        with self.state_lock:
+            cache = self.state.render_cache
+            if cache is None or cache.result is None:
+                dpg.set_value("status_text", "No render to save.")
+                return
+
+            # Snapshot everything
+            result = cache.result
+            project = _snapshot_project(self.state.project)
+            settings = replace(self.state.display_settings)
+            conductor_color_settings = {k: v for k, v in self.state.conductor_color_settings.items()}
+            multiplier = cache.multiplier
+            supersample = cache.supersample
+
+        from flowcol.render import downsample_lic
+        from PIL import Image
+        from datetime import datetime
+
+        canvas_w, canvas_h = project.canvas_resolution
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path.cwd() / "outputs"
         output_dir.mkdir(exist_ok=True)
-        h, w = final_rgb.shape[:2]
-        output_path = output_dir / f"flowcol_{w}x{h}_{timestamp}.png"
+        margin_physical = result.margin
 
-        pil_img = Image.fromarray(final_rgb, mode='RGB')
-        pil_img.save(output_path)
-        dpg.set_value("status_text", f"Saved full-res to {output_path.name}")
+        if supersample > 1.0:
+            # Save supersampled version at render resolution
+            render_scale = multiplier * supersample
+            final_rgb_super = self._apply_postprocessing_for_save(
+                result.array,
+                project,
+                settings,
+                conductor_color_settings,
+                (canvas_w, canvas_h),
+                margin_physical,
+                render_scale,
+                result.offset_x,
+                result.offset_y,
+            )
+
+            h_super, w_super = final_rgb_super.shape[:2]
+            output_path_super = output_dir / f"flowcol_{w_super}x{h_super}_supersampled_{timestamp}.png"
+            pil_img_super = Image.fromarray(final_rgb_super, mode='RGB')
+            pil_img_super.save(output_path_super)
+
+            # Downsample LIC to output resolution
+            output_canvas_w = int(round(canvas_w * multiplier))
+            output_canvas_h = int(round(canvas_h * multiplier))
+            output_shape = (output_canvas_h, output_canvas_w)
+
+            downsampled_lic = downsample_lic(
+                result.array,
+                output_shape,
+                supersample,
+                settings.downsample_sigma,
+            )
+
+            # Save final version at output resolution
+            # Scale offsets down by supersample factor
+            output_scale = multiplier
+            output_offset_x = int(round(result.offset_x / supersample))
+            output_offset_y = int(round(result.offset_y / supersample))
+
+            final_rgb_output = self._apply_postprocessing_for_save(
+                downsampled_lic,
+                project,
+                settings,
+                conductor_color_settings,
+                (canvas_w, canvas_h),
+                margin_physical,
+                output_scale,
+                output_offset_x,
+                output_offset_y,
+            )
+
+            h_output, w_output = final_rgb_output.shape[:2]
+            output_path_final = output_dir / f"flowcol_{w_output}x{h_output}_final_{timestamp}.png"
+            pil_img_output = Image.fromarray(final_rgb_output, mode='RGB')
+            pil_img_output.save(output_path_final)
+
+            dpg.set_value("status_text", f"Saved {output_path_super.name} and {output_path_final.name}")
+        else:
+            # No supersampling: save single version
+            render_scale = multiplier
+            final_rgb = self._apply_postprocessing_for_save(
+                result.array,
+                project,
+                settings,
+                conductor_color_settings,
+                (canvas_w, canvas_h),
+                margin_physical,
+                render_scale,
+                result.offset_x,
+                result.offset_y,
+            )
+
+            h, w = final_rgb.shape[:2]
+            output_path = output_dir / f"flowcol_{w}x{h}_{timestamp}.png"
+            pil_img = Image.fromarray(final_rgb, mode='RGB')
+            pil_img.save(output_path)
+
+            dpg.set_value("status_text", f"Saved {output_path.name}")
 
     def _on_downsample_slider(self, sender, app_data):
         """Handle downsampling blur sigma slider change."""
@@ -1919,17 +2033,46 @@ class FlowColApp:
             if render_w >= 2000 or render_h >= 2000:
                 from PIL import Image
                 from datetime import datetime
+                from flowcol.render import downsample_lic
 
-                output_dir = Path.cwd() / "output_renders"
+                output_dir = Path.cwd() / "output_raw"
                 output_dir.mkdir(exist_ok=True)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_path = output_dir / f"render_{render_w}x{render_h}_{timestamp}.png"
 
-                # Save the raw LIC array as grayscale
-                img_data = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
-                pil_img = Image.fromarray(img_data, mode='L')
-                pil_img.save(output_path)
-                print(f"Auto-saved high-res render to: {output_path.name}")
+                if settings_snapshot.supersample > 1.0:
+                    # Save supersampled raw LIC
+                    output_path_super = output_dir / f"render_{render_w}x{render_h}_supersampled_{timestamp}.png"
+                    img_data_super = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
+                    pil_img_super = Image.fromarray(img_data_super, mode='L')
+                    pil_img_super.save(output_path_super)
+                    print(f"Auto-saved supersampled render to: {output_path_super.name}")
+
+                    # Downsample and save final raw LIC
+                    canvas_w, canvas_h = project_snapshot.canvas_resolution
+                    output_canvas_w = int(round(canvas_w * settings_snapshot.multiplier))
+                    output_canvas_h = int(round(canvas_h * settings_snapshot.multiplier))
+                    output_shape = (output_canvas_h, output_canvas_w)
+
+                    downsampled_lic = downsample_lic(
+                        result.array,
+                        output_shape,
+                        settings_snapshot.supersample,
+                        0.6,  # Default sigma
+                    )
+
+                    output_h, output_w = downsampled_lic.shape
+                    output_path_final = output_dir / f"render_{output_w}x{output_h}_final_{timestamp}.png"
+                    img_data_final = (np.clip(downsampled_lic, 0, 1) * 255).astype(np.uint8)
+                    pil_img_final = Image.fromarray(img_data_final, mode='L')
+                    pil_img_final.save(output_path_final)
+                    print(f"Auto-saved final render to: {output_path_final.name}")
+                else:
+                    # Single save
+                    output_path = output_dir / f"render_{render_w}x{render_h}_{timestamp}.png"
+                    img_data = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
+                    pil_img = Image.fromarray(img_data, mode='L')
+                    pil_img.save(output_path)
+                    print(f"Auto-saved high-res render to: {output_path.name}")
 
             return True
 

@@ -32,3 +32,6 @@ DEFAULT_GAMMA: float = 1.0
 # Colorization defaults
 DEFAULT_COLOR_ENABLED: bool = False
 DEFAULT_COLOR_PALETTE: str = "Ink & Gold"
+
+# UI interaction defaults
+SCROLL_SCALE_SENSITIVITY: float = 0.02
