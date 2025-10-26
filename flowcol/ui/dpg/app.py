@@ -471,7 +471,7 @@ class FlowColApp:
                     )
                     self.smear_feather_slider_id = dpg.add_slider_float(
                         label="Feather",
-                        min_value=0.5,
+                        min_value=0.0,
                         max_value=20.0,
                         format="%.1f px",
                         callback=self._on_smear_feather,
@@ -1851,6 +1851,24 @@ class FlowColApp:
                 self.state.field_dirty = False
                 self.state.render_dirty = False
                 self.state.view_mode = "render"
+
+            # Auto-save high-res renders (>2k on any dimension)
+            render_h, render_w = result.array.shape
+            if render_w >= 2000 or render_h >= 2000:
+                from PIL import Image
+                from datetime import datetime
+
+                output_dir = Path.cwd() / "output_renders"
+                output_dir.mkdir(exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                output_path = output_dir / f"render_{render_w}x{render_h}_{timestamp}.png"
+
+                # Save the raw LIC array as grayscale
+                img_data = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
+                pil_img = Image.fromarray(img_data, mode='L')
+                pil_img.save(output_path)
+                print(f"Auto-saved high-res render to: {output_path.name}")
+
             return True
 
         self.render_future = self.executor.submit(job)

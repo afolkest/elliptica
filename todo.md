@@ -1,4 +1,2 @@
-- fix bug where if you scroll in conductor file picker your shrink conductors
--fix pathological canvas sizes 
 -noise oversampling?
 -real blue noise?
