@@ -45,10 +45,18 @@ RESOLUTION_LABELS = tuple(f"{value:g}\u00d7" for value in RESOLUTION_CHOICES)
 RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RESOLUTION_CHOICES)}
 
 BACKSPACE_KEY = None
+CTRL_KEY = None
+C_KEY = None
+V_KEY = None
 if dpg is not None:
     BACKSPACE_KEY = getattr(dpg, "mvKey_Backspace", None)
     if BACKSPACE_KEY is None:
         BACKSPACE_KEY = getattr(dpg, "mvKey_Back", None)
+    CTRL_KEY = getattr(dpg, "mvKey_Control", None)
+    if CTRL_KEY is None:
+        CTRL_KEY = getattr(dpg, "mvKey_LControl", None)
+    C_KEY = getattr(dpg, "mvKey_C", None)
+    V_KEY = getattr(dpg, "mvKey_V", None)
 
 
 def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
@@ -187,11 +195,16 @@ class FlowColApp:
     mouse_down_last: bool = False
     render_modal_open: bool = False
     backspace_down_last: bool = False
+    ctrl_c_down_last: bool = False
+    ctrl_v_down_last: bool = False
     mouse_wheel_delta: float = 0.0
     mouse_handler_registry_id: Optional[int] = None
 
     # Region selection for colorization
     selected_region: Optional[str] = None  # "surface" or "interior"
+
+    # Clipboard for copy/paste
+    clipboard_conductor: Optional[Conductor] = None
 
     def __post_init__(self) -> None:
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
@@ -1420,6 +1433,7 @@ class FlowColApp:
         if dpg is None or BACKSPACE_KEY is None:
             return
 
+        # Backspace to delete
         backspace_down = dpg.is_key_down(BACKSPACE_KEY)
         if backspace_down and not self.backspace_down_last:
             with self.state_lock:
@@ -1436,6 +1450,48 @@ class FlowColApp:
                 self._rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")
         self.backspace_down_last = backspace_down
+
+        # Ctrl+C to copy
+        if CTRL_KEY and C_KEY:
+            ctrl_down = dpg.is_key_down(CTRL_KEY)
+            c_down = dpg.is_key_down(C_KEY)
+            ctrl_c_down = ctrl_down and c_down
+            if ctrl_c_down and not self.ctrl_c_down_last:
+                with self.state_lock:
+                    mode = self.state.view_mode
+                    idx = self.state.selected_idx
+                    conductor_count = len(self.state.project.conductors)
+                    can_copy = (mode == "edit" and 0 <= idx < conductor_count)
+                if can_copy:
+                    with self.state_lock:
+                        self.clipboard_conductor = _clone_conductor(self.state.project.conductors[idx])
+                    dpg.set_value("status_text", f"Copied C{idx + 1}")
+            self.ctrl_c_down_last = ctrl_c_down
+
+        # Ctrl+V to paste
+        if CTRL_KEY and V_KEY:
+            ctrl_down = dpg.is_key_down(CTRL_KEY)
+            v_down = dpg.is_key_down(V_KEY)
+            ctrl_v_down = ctrl_down and v_down
+            if ctrl_v_down and not self.ctrl_v_down_last:
+                with self.state_lock:
+                    mode = self.state.view_mode
+                    can_paste = (mode == "edit" and self.clipboard_conductor is not None)
+                if can_paste:
+                    with self.state_lock:
+                        # Clone the clipboard conductor and offset it
+                        pasted = _clone_conductor(self.clipboard_conductor)
+                        # Offset by 30px down-right so it's visible
+                        px, py = pasted.position
+                        pasted.position = (px + 30.0, py + 30.0)
+                        actions.add_conductor(self.state, pasted)
+                        new_idx = len(self.state.project.conductors) - 1
+                        self.state.set_selected(new_idx)
+                    self._mark_canvas_dirty()
+                    self._rebuild_conductor_controls()
+                    self._update_conductor_slider_labels()
+                    dpg.set_value("status_text", f"Pasted as C{new_idx + 1}")
+            self.ctrl_v_down_last = ctrl_v_down
 
     def _apply_canvas_size(self, sender=None, app_data=None) -> None:
         if dpg is None:
