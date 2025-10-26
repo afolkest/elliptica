@@ -2,6 +2,7 @@
 
 import numpy as np
 from dataclasses import dataclass
+import time
 from flowcol.types import Project
 from flowcol.field import compute_field
 from flowcol.render import (
@@ -125,6 +126,8 @@ def perform_render(
     Pure function - takes parameters, returns rendered array + metadata.
     No state mutation, no pygame dependencies.
     """
+    t_start = time.time()
+
     canvas_w, canvas_h = project.canvas_resolution
 
     margin_physical = margin_factor * float(min(canvas_w, canvas_h))
@@ -138,6 +141,8 @@ def perform_render(
     if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return None
 
+    print(f"Starting Poisson solve ({compute_w}×{compute_h})...")
+    t_poisson_start = time.time()
     ex, ey = compute_field(
         project,
         multiplier,
@@ -148,9 +153,15 @@ def perform_render(
         boundary_left=project.boundary_left,
         boundary_right=project.boundary_right,
     )
+    t_poisson_end = time.time()
+    print(f"  Poisson solve completed in {t_poisson_end - t_poisson_start:.2f}s")
+
     num_passes = max(1, num_passes)
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)
+
+    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels})...")
+    t_lic_start = time.time()
     lic_array = compute_lic(
         ex,
         ey,
@@ -159,6 +170,8 @@ def perform_render(
         seed=noise_seed,
         noise_sigma=noise_sigma,
     )
+    t_lic_end = time.time()
+    print(f"  LIC completed in {t_lic_end - t_lic_start:.2f}s")
 
     canvas_scaled_w = max(1, int(round(canvas_w * scale)))
     canvas_scaled_h = max(1, int(round(canvas_h * scale)))
@@ -171,6 +184,9 @@ def perform_render(
     crop_x1 = min(crop_x0 + canvas_scaled_w, lic_array.shape[1])
     crop_y1 = min(crop_y0 + canvas_scaled_h, lic_array.shape[0])
     lic_cropped = lic_array[crop_y0:crop_y1, crop_x0:crop_x1]
+
+    t_end = time.time()
+    print(f"Total render time: {t_end - t_start:.2f}s")
 
     return RenderResult(
         array=lic_cropped.astype(np.float32, copy=True),
