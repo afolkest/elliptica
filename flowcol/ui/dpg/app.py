@@ -1144,17 +1144,35 @@ class FlowColApp:
 
         path_str: Optional[str] = None
         if isinstance(app_data, dict):
-            # Preferred key exposed by Dear PyGui >=1.11
-            path_str = app_data.get("file_path_name")
+            # Try selections dict FIRST - it's more reliable than file_path_name
+            # (DPG has a bug where file_path_name becomes ".png" on second use)
+            selections = app_data.get("selections", {})
+            if selections:
+                path_str = next(iter(selections.values()))
+
             if not path_str:
-                selections = app_data.get("selections", {})
-                if selections:
-                    # selections is dict[label] -> path
-                    path_str = next(iter(selections.values()))
+                # Fallback: try file_path_name
+                path_str = app_data.get("file_path_name")
+
+            if not path_str:
+                # Fallback: combine current_path + file_name
+                current_path = app_data.get("current_path", "")
+                file_name = app_data.get("file_name", "")
+                if current_path and file_name:
+                    path_str = str(Path(current_path) / file_name)
 
         if not path_str:
             dpg.set_value("status_text", "No file selected.")
             return
+
+        # Convert to absolute path to handle relative paths
+        try:
+            path_obj = Path(path_str)
+            if not path_obj.is_absolute():
+                path_obj = path_obj.resolve()
+            path_str = str(path_obj)
+        except Exception:
+            pass  # If path resolution fails, try with original path_str
 
         try:
             mask, interior = load_conductor_masks(path_str)
@@ -1177,7 +1195,10 @@ class FlowColApp:
                     actions.set_canvas_resolution(self.state, new_w, new_h)
 
             canvas_w, canvas_h = self.state.project.canvas_resolution
-            pos = ((canvas_w - mask_w) / 2.0, (canvas_h - mask_h) / 2.0)
+            # Offset each new conductor by 30px down-right from center so they're all visible
+            num_conductors = len(project.conductors)
+            offset = num_conductors * 30.0
+            pos = ((canvas_w - mask_w) / 2.0 + offset, (canvas_h - mask_h) / 2.0 + offset)
             conductor = Conductor(mask=mask, voltage=0.5, position=pos, interior_mask=interior)
             actions.add_conductor(self.state, conductor)
             self.state.view_mode = "edit"
