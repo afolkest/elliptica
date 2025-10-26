@@ -1,40 +1,88 @@
 """Global colorization functions for display rendering."""
 
 import numpy as np
-from flowcol.render import colorize_array, array_to_pil
+from flowcol.render import colorize_array, array_to_pil, _normalize_unit, _get_palette_lut
+from flowcol.postprocess.fast import apply_contrast_gamma_jit, apply_palette_lut_jit, grayscale_to_rgb_jit
 
 
-def build_base_rgb(scalar_array: np.ndarray, settings) -> np.ndarray:
-    """Apply global colorization to scalar LIC field.
+def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -> np.ndarray:
+    """Apply global colorization to scalar LIC field (GPU or JIT-accelerated).
 
     Args:
         scalar_array: Grayscale LIC array (float32)
         settings: DisplaySettings with color_enabled, palette, gamma, contrast, clip_percent
+        display_array_gpu: Optional GPU tensor to use instead of scalar_array (faster!)
 
     Returns:
         RGB uint8 array ready for display/compositing
     """
-    if not settings.color_enabled:
-        # Grayscale mode with display transforms
-        pil_img = array_to_pil(
-            scalar_array,
-            use_color=False,
-            gamma=settings.gamma,
-            contrast=settings.contrast,
-            clip_percent=settings.clip_percent,
+    # Try GPU-accelerated path if tensor provided
+    use_gpu = False
+    if display_array_gpu is not None:
+        try:
+            from flowcol.gpu import GPUContext
+            from flowcol.gpu.pipeline import build_base_rgb_gpu
+
+            if GPUContext.is_available():
+                use_gpu = True
+        except Exception:
+            pass
+
+    if use_gpu:
+        # GPU path - much faster!
+        import time
+        import torch
+        start = time.time()
+
+        lut_numpy = _get_palette_lut(settings.palette) if settings.color_enabled else None
+        lut_gpu = None
+        if lut_numpy is not None:
+            lut_gpu = GPUContext.to_gpu(lut_numpy)
+
+        rgb_gpu = build_base_rgb_gpu(
+            display_array_gpu,
+            settings.clip_percent,
+            settings.contrast,
+            settings.gamma,
+            settings.color_enabled,
+            lut_gpu,
         )
-        # Convert back to numpy RGB array
-        return np.array(pil_img, dtype=np.uint8)
+
+        # Convert to uint8 and download
+        rgb_uint8_tensor = (rgb_gpu * 255.0).clamp(0, 255).to(torch.uint8)
+        torch.mps.synchronize()  # Wait for GPU work to complete
+        result = GPUContext.to_cpu(rgb_uint8_tensor)
+
+        # Uncomment for performance debugging:
+        # elapsed = time.time() - start
+        # print(f"🎨 GPU colorization: {elapsed*1000:.1f}ms")
+        return result
     else:
-        # Colorized mode
-        rgb = colorize_array(
-            scalar_array,
-            palette=settings.palette,
-            gamma=settings.gamma,
-            contrast=settings.contrast,
-            clip_percent=settings.clip_percent,
-        )
-        return rgb
+        # CPU fallback (original code)
+        arr = scalar_array.astype(np.float32, copy=False)
+
+        # Clip/normalize to [0, 1]
+        clip_percent = settings.clip_percent
+        if clip_percent > 0.0:
+            vmin = float(np.percentile(arr, clip_percent))
+            vmax = float(np.percentile(arr, 100.0 - clip_percent))
+            if vmax > vmin:
+                norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+            else:
+                norm = _normalize_unit(arr)
+        else:
+            norm = _normalize_unit(arr)
+
+        if not settings.color_enabled:
+            # Grayscale mode with JIT-accelerated transforms
+            rgb = grayscale_to_rgb_jit(norm, settings.contrast, settings.gamma)
+            return rgb
+        else:
+            # Color mode: apply contrast/gamma, then LUT
+            norm_adjusted = apply_contrast_gamma_jit(norm, settings.contrast, settings.gamma)
+            lut = _get_palette_lut(settings.palette)
+            rgb = apply_palette_lut_jit(norm_adjusted, lut)
+            return rgb
 
 
 def _blend_region(base: np.ndarray, overlay: np.ndarray, mask: np.ndarray) -> np.ndarray:
