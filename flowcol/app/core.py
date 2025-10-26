@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
+import torch
 
 from flowcol import defaults
 from flowcol.pipeline import RenderResult
@@ -73,6 +74,13 @@ class RenderCache:
     full_res_interior_masks: Optional[list[np.ndarray]] = None
     # Project fingerprint for staleness detection
     project_fingerprint: str = ""
+    # Cached edge-blurred LIC (full resolution, CPU)
+    edge_blurred_array: Optional[np.ndarray] = None
+    # GPU tensor caching (Phase 1 infrastructure, used in Phase 3+)
+    result_gpu: Optional[torch.Tensor] = None  # Full-res LIC on GPU
+    display_array_gpu: Optional[torch.Tensor] = None  # Downsampled LIC on GPU
+    ex_gpu: Optional[torch.Tensor] = None  # Electric field X component on GPU
+    ey_gpu: Optional[torch.Tensor] = None  # Electric field Y component on GPU
 
 
 @dataclass
@@ -111,7 +119,15 @@ class AppState:
         return None
 
     def clear_render_cache(self) -> None:
-        """Invalidate cached render output."""
+        """Invalidate cached render output and free GPU memory."""
+        if self.render_cache:
+            # Clear GPU tensors to free VRAM
+            self.render_cache.result_gpu = None
+            self.render_cache.display_array_gpu = None
+            self.render_cache.ex_gpu = None
+            self.render_cache.ey_gpu = None
+            # Clear CPU cached postprocessing results
+            self.render_cache.edge_blurred_array = None
         self.render_cache = None
         self.render_dirty = True
 
@@ -119,3 +135,4 @@ class AppState:
         """Clear cached base RGB, forcing recompute on next display."""
         if self.render_cache:
             self.render_cache.base_rgb = None
+            # Note: We keep display_array_gpu since it's still valid for recomputing base_rgb

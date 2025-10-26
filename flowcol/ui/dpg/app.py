@@ -216,6 +216,11 @@ class FlowColApp:
     backspace_down_last: bool = False
     ctrl_c_down_last: bool = False
     ctrl_v_down_last: bool = False
+
+    # Debouncing for expensive slider operations
+    downsample_debounce_timer: Optional[threading.Timer] = None
+    postprocess_debounce_timer: Optional[threading.Timer] = None
+    edge_blur_debounce_timer: Optional[threading.Timer] = None  # For very expensive edge blur
     mouse_wheel_delta: float = 0.0
     mouse_handler_registry_id: Optional[int] = None
 
@@ -229,6 +234,12 @@ class FlowColApp:
         # Create projects directory if it doesn't exist
         projects_dir = Path.cwd() / "projects"
         projects_dir.mkdir(exist_ok=True)
+
+        # Warmup GPU for faster first render (~750ms startup delay)
+        from flowcol.gpu import GPUContext
+        GPUContext.warmup()
+        device_name = "MPS" if GPUContext.is_available() else "CPU"
+        print(f"GPU acceleration: {device_name}")
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -740,9 +751,12 @@ class FlowColApp:
         conductor = Conductor(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
         add_conductor(self.state, conductor)
 
-    def _apply_postprocessing(self) -> None:
-        """Apply postprocessing settings to cached render and update display."""
-        from flowcol.render import downsample_lic
+    def _apply_postprocessing(self, recompute_edge_blur: bool = True) -> None:
+        """Apply postprocessing settings to cached render and update display.
+
+        Args:
+            recompute_edge_blur: If False, skip expensive edge blur recomputation
+        """
         from flowcol.postprocess.blur import apply_anisotropic_edge_blur
         from scipy.ndimage import zoom
 
@@ -754,38 +768,129 @@ class FlowColApp:
             settings = self.state.display_settings
             result = cache.result
             canvas_w, canvas_h = self.state.project.canvas_resolution
+            target_shape = (canvas_h, canvas_w)
+
+            # Try GPU-accelerated path
+            use_gpu = False
+            try:
+                from flowcol.gpu import GPUContext
+                from flowcol.gpu.pipeline import downsample_lic_gpu
+
+                if GPUContext.is_available():
+                    use_gpu = True
+            except Exception:
+                pass
 
             # Apply anisotropic edge blur at full resolution (if enabled)
             lic_to_process = result.array
-            if settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
+            lic_to_process_gpu = None
+
+            if recompute_edge_blur and settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
                 # Convert physical units to pixels
                 reference_dim = min(canvas_w, canvas_h)
                 scale = cache.multiplier * cache.supersample
                 sigma_pixels = settings.edge_blur_sigma * reference_dim * scale
                 falloff_pixels = settings.edge_blur_falloff * reference_dim * scale
 
-                lic_to_process = apply_anisotropic_edge_blur(
-                    result.array,
-                    result.ex,
-                    result.ey,
-                    cache.full_res_conductor_masks,  # Use full-res masks for edge blur!
-                    sigma_pixels,
-                    falloff_pixels,
-                    settings.edge_blur_strength,
+                # Try GPU-accelerated edge blur first!
+                print(f"DEBUG edge_blur: use_gpu = {use_gpu}")
+                print(f"DEBUG edge_blur: result_gpu exists = {cache.result_gpu is not None}")
+                print(f"DEBUG edge_blur: ex_gpu exists = {hasattr(cache, 'ex_gpu') and cache.ex_gpu is not None}")
+                print(f"DEBUG edge_blur: ey_gpu exists = {hasattr(cache, 'ey_gpu') and cache.ey_gpu is not None}")
+                if use_gpu and cache.result_gpu is not None and cache.ex_gpu is not None and cache.ey_gpu is not None:
+                    print("🚀 Computing edge blur on GPU...")
+                    import time
+                    import torch
+                    start = time.time()
+
+                    from flowcol.gpu.edge_blur import apply_anisotropic_edge_blur_gpu
+
+                    # Use cached GPU tensors (no upload overhead!)
+                    lic_to_process_gpu = apply_anisotropic_edge_blur_gpu(
+                        cache.result_gpu,
+                        cache.ex_gpu,
+                        cache.ey_gpu,
+                        cache.full_res_conductor_masks,
+                        sigma_pixels,
+                        falloff_pixels,
+                        settings.edge_blur_strength,
+                    )
+
+                    torch.mps.synchronize()
+                    elapsed = time.time() - start
+                    print(f"🚀 GPU edge blur: {elapsed*1000:.0f}ms")
+
+                    # Download for CPU cache
+                    lic_to_process = GPUContext.to_cpu(lic_to_process_gpu)
+                    cache.edge_blurred_array = lic_to_process
+                else:
+                    # CPU fallback
+                    print("🐌 Computing edge blur on CPU (slow)...")
+                    import time
+                    start = time.time()
+
+                    lic_to_process = apply_anisotropic_edge_blur(
+                        result.array,
+                        result.ex,
+                        result.ey,
+                        cache.full_res_conductor_masks,
+                        sigma_pixels,
+                        falloff_pixels,
+                        settings.edge_blur_strength,
+                    )
+
+                    elapsed = time.time() - start
+                    print(f"🐌 CPU edge blur: {elapsed*1000:.0f}ms")
+
+                    # Cache the edge-blurred result
+                    cache.edge_blurred_array = lic_to_process
+
+                    # Upload to GPU if needed
+                    if use_gpu:
+                        lic_to_process_gpu = GPUContext.to_gpu(lic_to_process)
+            elif hasattr(cache, 'edge_blurred_array') and cache.edge_blurred_array is not None:
+                # Reuse cached edge-blurred result
+                lic_to_process = cache.edge_blurred_array
+
+                # Upload to GPU if needed
+                if use_gpu:
+                    lic_to_process_gpu = GPUContext.to_gpu(lic_to_process)
+            else:
+                # No edge blur - use result_gpu if available
+                if use_gpu and cache.result_gpu is not None:
+                    lic_to_process_gpu = cache.result_gpu
+
+            # Apply downsampling with blur (GPU-accelerated)
+            if use_gpu and lic_to_process_gpu is not None:
+                # GPU path - much faster!
+                import time
+                import torch
+                start = time.time()
+                downsampled_gpu = downsample_lic_gpu(
+                    lic_to_process_gpu,
+                    target_shape,
+                    settings.downsample_sigma,
                 )
+                torch.mps.synchronize()  # Wait for GPU work to complete
+                # Uncomment for performance debugging:
+                # elapsed = time.time() - start
+                # print(f"🚀 GPU downsample: {elapsed*1000:.1f}ms")
 
-            # Apply downsampling with blur
-            # canvas_resolution is (width, height), but downsample_lic expects (height, width)
-            target_shape = (canvas_h, canvas_w)
-            downsampled = downsample_lic(
-                lic_to_process,
-                target_shape,
-                cache.supersample,
-                settings.downsample_sigma,
-            )
-
-            # Store postprocessed result in display_array
-            cache.display_array = downsampled
+                # Store GPU tensor for colorization
+                cache.display_array_gpu = downsampled_gpu
+                # Download to CPU for legacy code paths
+                cache.display_array = GPUContext.to_cpu(downsampled_gpu)
+            else:
+                # CPU fallback
+                from flowcol.render import downsample_lic
+                downsampled = downsample_lic(
+                    lic_to_process,
+                    target_shape,
+                    cache.supersample,
+                    settings.downsample_sigma,
+                )
+                cache.display_array = downsampled
+                cache.display_array_gpu = None
 
             # Downsample masks to match display_array resolution if needed
             if cache.conductor_masks:
@@ -2240,32 +2345,61 @@ class FlowColApp:
             dpg.set_value("status_text", f"Saved {output_path.name}")
 
     def _on_edge_blur_sigma_slider(self, sender, app_data):
-        """Handle edge blur sigma slider change."""
+        """Handle edge blur sigma slider change (debounced for smooth dragging)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.edge_blur_sigma = value
-        self._apply_postprocessing()
+
+        # Cancel existing timer if still pending
+        if self.edge_blur_debounce_timer is not None:
+            self.edge_blur_debounce_timer.cancel()
+
+        # Schedule new debounced update (300ms after slider stops moving)
+        self.edge_blur_debounce_timer = threading.Timer(
+            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
+        )
+        self.edge_blur_debounce_timer.start()
 
     def _on_edge_blur_falloff_slider(self, sender, app_data):
-        """Handle edge blur falloff slider change."""
+        """Handle edge blur falloff slider change (debounced for smooth dragging)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.edge_blur_falloff = value
-        self._apply_postprocessing()
+
+        # Cancel existing timer if still pending
+        if self.edge_blur_debounce_timer is not None:
+            self.edge_blur_debounce_timer.cancel()
+
+        # Schedule new debounced update (300ms after slider stops moving)
+        self.edge_blur_debounce_timer = threading.Timer(
+            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
+        )
+        self.edge_blur_debounce_timer.start()
 
     def _on_edge_blur_strength_slider(self, sender, app_data):
-        """Handle edge blur strength slider change."""
+        """Handle edge blur strength slider change (debounced for smooth dragging)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.edge_blur_strength = value
-        self._apply_postprocessing()
+
+        # Cancel existing timer if still pending
+        if self.edge_blur_debounce_timer is not None:
+            self.edge_blur_debounce_timer.cancel()
+
+        # Schedule new debounced update (300ms after slider stops moving)
+        self.edge_blur_debounce_timer = threading.Timer(
+            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
+        )
+        self.edge_blur_debounce_timer.start()
 
     def _on_downsample_slider(self, sender, app_data):
-        """Handle downsampling blur sigma slider change."""
+        """Handle downsampling blur sigma slider change (real-time with GPU acceleration)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.downsample_sigma = value
-        self._apply_postprocessing()
+
+        # GPU is fast enough for real-time updates - no debouncing needed!
+        self._apply_postprocessing(recompute_edge_blur=False)
 
     def _on_clip_slider(self, sender, app_data):
         """Handle clip percent slider change."""
@@ -2278,22 +2412,24 @@ class FlowColApp:
         self._mark_canvas_dirty()
 
     def _on_contrast_slider(self, sender, app_data):
-        """Handle contrast slider change."""
+        """Handle contrast slider change (real-time with GPU acceleration)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.contrast = value
             self.state.invalidate_base_rgb()
-        # Contrast is display-only, just refresh texture
+
+        # GPU is fast enough for real-time updates - no debouncing needed!
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
     def _on_gamma_slider(self, sender, app_data):
-        """Handle gamma slider change."""
+        """Handle gamma slider change (real-time with GPU acceleration)."""
         value = float(app_data)
         with self.state_lock:
             self.state.display_settings.gamma = value
             self.state.invalidate_base_rgb()
-        # Gamma is display-only, just refresh texture
+
+        # GPU is fast enough for real-time updates - no debouncing needed!
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
@@ -2557,6 +2693,23 @@ class FlowColApp:
 
             # Set fingerprint for cache staleness detection
             cache.project_fingerprint = compute_project_fingerprint(project_snapshot)
+
+            # Upload render result to GPU for fast postprocessing
+            try:
+                from flowcol.gpu import GPUContext
+                print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
+                print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
+                print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")
+                if GPUContext.is_available():
+                    cache.result_gpu = GPUContext.to_gpu(result.array)
+                    cache.ex_gpu = GPUContext.to_gpu(result.ex)
+                    cache.ey_gpu = GPUContext.to_gpu(result.ey)
+                    print(f"DEBUG render: result_gpu = {cache.result_gpu is not None}")
+                    print(f"DEBUG render: ex_gpu = {cache.ex_gpu is not None}")
+                    print(f"DEBUG render: ey_gpu = {cache.ey_gpu is not None}")
+            except Exception as e:
+                print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
+                pass  # Graceful fallback if GPU upload fails
 
             with self.state_lock:
                 self.state.render_cache = cache

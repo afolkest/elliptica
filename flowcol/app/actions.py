@@ -246,6 +246,24 @@ def ensure_render(state: AppState) -> bool:
         conductor_masks=conductor_masks,
         interior_masks=interior_masks,
     )
+
+    # Upload render result to GPU for fast postprocessing
+    try:
+        from flowcol.gpu import GPUContext
+        print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
+        print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
+        print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")
+        if GPUContext.is_available():
+            state.render_cache.result_gpu = GPUContext.to_gpu(result.array)
+            state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
+            state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
+            print(f"DEBUG render: result_gpu = {state.render_cache.result_gpu is not None}")
+            print(f"DEBUG render: ex_gpu = {state.render_cache.ex_gpu is not None}")
+            print(f"DEBUG render: ey_gpu = {state.render_cache.ey_gpu is not None}")
+    except Exception as e:
+        print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
+        pass  # Graceful fallback if GPU upload fails
+
     state.field_dirty = False
     state.render_dirty = False
     state.view_mode = "render"
@@ -278,9 +296,11 @@ def ensure_base_rgb(state: AppState) -> bool:
         return False
 
     if cache.base_rgb is None:
+        # Use GPU tensor if available (much faster!)
         cache.base_rgb = build_base_rgb(
             cache.display_array,
             state.display_settings,
+            display_array_gpu=cache.display_array_gpu,
         )
 
     return True

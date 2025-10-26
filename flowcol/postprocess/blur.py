@@ -80,7 +80,7 @@ def _directional_blur(
     dir_y: np.ndarray,
     sigma: float,
 ) -> np.ndarray:
-    """Apply 1D Gaussian blur along specified direction field.
+    """Apply 1D Gaussian blur along specified direction field (optimized).
 
     Args:
         array: Input array (H, W)
@@ -93,52 +93,34 @@ def _directional_blur(
     """
     h, w = array.shape
 
-    # Sample radius (3 sigma covers ~99.7% of Gaussian)
-    radius = int(np.ceil(3 * sigma))
-    if radius == 0:
-        return array
+    # Sample radius - use fewer samples for speed (2 sigma instead of 3)
+    radius = max(1, int(np.ceil(2 * sigma)))
 
-    # Create sample offsets along direction
-    t_samples = np.linspace(-radius, radius, 2 * radius + 1)
-    n_samples = len(t_samples)
+    # Use fewer samples for large sigma (trade quality for speed)
+    n_samples = min(2 * radius + 1, 11)  # Cap at 11 samples
+    t_samples = np.linspace(-radius, radius, n_samples)
 
     # Gaussian weights
     weights = np.exp(-0.5 * (t_samples / sigma) ** 2)
     weights /= np.sum(weights)
 
     # Create coordinate grids
-    y_grid, x_grid = np.ogrid[:h, :w]
-    y_grid = y_grid.astype(np.float32)
-    x_grid = x_grid.astype(np.float32)
+    y_grid, x_grid = np.mgrid[:h, :w].astype(np.float32)
 
-    # Vectorized: create all sample coordinates at once
-    # Shape: (n_samples, H, W)
-    sample_y_all = y_grid[None, :, :] + dir_y[None, :, :] * t_samples[:, None, None]
-    sample_x_all = x_grid[None, :, :] + dir_x[None, :, :] * t_samples[:, None, None]
+    # Accumulate weighted samples
+    result = np.zeros_like(array, dtype=np.float32)
 
-    # Clamp to boundaries
-    sample_y_all = np.clip(sample_y_all, 0, h - 1)
-    sample_x_all = np.clip(sample_x_all, 0, w - 1)
+    # Process samples one at a time to reduce memory usage
+    for i, (t, weight) in enumerate(zip(t_samples, weights)):
+        # Compute sample coordinates
+        sample_y = y_grid + dir_y * t
+        sample_x = x_grid + dir_x * t
 
-    # Flatten to 1D for map_coordinates
-    # Coordinates shape: (2, n_samples * H * W)
-    coords = np.stack([
-        sample_y_all.ravel(),
-        sample_x_all.ravel()
-    ], axis=0)
+        # Clamp and round to nearest integer (nearest-neighbor, much faster than bilinear)
+        sample_y = np.clip(np.round(sample_y).astype(np.int32), 0, h - 1)
+        sample_x = np.clip(np.round(sample_x).astype(np.int32), 0, w - 1)
 
-    # Single map_coordinates call for all samples
-    samples_flat = map_coordinates(
-        array,
-        coords,
-        order=1,
-        mode='nearest'
-    )
+        # Direct array indexing (much faster than map_coordinates)
+        result += array[sample_y, sample_x] * weight
 
-    # Reshape back to (n_samples, H, W)
-    samples_all = samples_flat.reshape(n_samples, h, w)
-
-    # Weighted sum along sample dimension
-    result = np.sum(samples_all * weights[:, None, None], axis=0)
-
-    return result.astype(np.float32)
+    return result

@@ -35,7 +35,8 @@ def compute_field(
 
         # Scale mask first to field resolution
         if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
-            scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=1)
+            # Use order=0 (nearest neighbor) to preserve sharp edges and prevent thinning
+            scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=0)
         else:
             scaled_mask = conductor.mask
 
