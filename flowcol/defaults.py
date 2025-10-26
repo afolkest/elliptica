@@ -35,3 +35,8 @@ DEFAULT_COLOR_PALETTE: str = "Ink & Gold"
 
 # UI interaction defaults
 SCROLL_SCALE_SENSITIVITY: float = 0.02
+
+# Anisotropic edge blur defaults (in physical units - fraction of canvas)
+DEFAULT_EDGE_BLUR_SIGMA: float = 0.0  # Fraction of canvas
+DEFAULT_EDGE_BLUR_FALLOFF: float = 0.015  # Fraction of canvas (~15px at 1024)
+DEFAULT_EDGE_BLUR_STRENGTH: float = 1.0  # Dimensionless multiplier

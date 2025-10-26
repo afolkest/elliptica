@@ -27,6 +27,8 @@ class RenderResult:
     margin: float
     offset_x: int = 0  # Crop offset for mask alignment
     offset_y: int = 0  # Crop offset for mask alignment
+    ex: np.ndarray | None = None  # Electric field X component (for anisotropic blur)
+    ey: np.ndarray | None = None  # Electric field Y component (for anisotropic blur)
 
 
 @dataclass
@@ -185,6 +187,10 @@ def perform_render(
     crop_y1 = min(crop_y0 + canvas_scaled_h, lic_array.shape[0])
     lic_cropped = lic_array[crop_y0:crop_y1, crop_x0:crop_x1]
 
+    # Crop E-field arrays to match LIC
+    ex_cropped = ex[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
+    ey_cropped = ey[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
+
     t_end = time.time()
     print(f"Total render time: {t_end - t_start:.2f}s")
 
@@ -195,4 +201,6 @@ def perform_render(
         margin=margin_physical,
         offset_x=crop_x0,
         offset_y=crop_y0,
+        ex=ex_cropped,
+        ey=ey_cropped,
     )
