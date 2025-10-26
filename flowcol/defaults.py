@@ -2,7 +2,7 @@
 
 # Canvas / resolution
 DEFAULT_CANVAS_RESOLUTION: tuple[int, int] = (1024, 1024)
-RENDER_RESOLUTION_CHOICES: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+RENDER_RESOLUTION_CHOICES: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
 SUPERSAMPLE_CHOICES: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
 
 # LIC render settings
