@@ -186,6 +186,9 @@ class FlowColApp:
     postprocess_clip_slider_id: Optional[int] = None
     postprocess_contrast_slider_id: Optional[int] = None
     postprocess_gamma_slider_id: Optional[int] = None
+    edge_blur_sigma_slider_id: Optional[int] = None
+    edge_blur_falloff_slider_id: Optional[int] = None
+    edge_blur_strength_slider_id: Optional[int] = None
     color_enabled_checkbox_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
@@ -339,6 +342,41 @@ class FlowColApp:
                     max_value=3.0,
                     format="%.2f",
                     callback=self._on_gamma_slider,
+                    width=200,
+                )
+
+                dpg.add_spacer(height=10)
+                dpg.add_separator()
+                dpg.add_text("Edge Smoothing")
+                dpg.add_spacer(height=10)
+
+                self.edge_blur_sigma_slider_id = dpg.add_slider_float(
+                    label="Edge Blur Sigma",
+                    default_value=self.state.display_settings.edge_blur_sigma,
+                    min_value=0.0,
+                    max_value=0.01,
+                    format="%.4f",
+                    callback=self._on_edge_blur_sigma_slider,
+                    width=200,
+                )
+
+                self.edge_blur_falloff_slider_id = dpg.add_slider_float(
+                    label="Blur Falloff Distance",
+                    default_value=self.state.display_settings.edge_blur_falloff,
+                    min_value=0.0,
+                    max_value=0.05,
+                    format="%.4f",
+                    callback=self._on_edge_blur_falloff_slider,
+                    width=200,
+                )
+
+                self.edge_blur_strength_slider_id = dpg.add_slider_float(
+                    label="Blur Strength",
+                    default_value=self.state.display_settings.edge_blur_strength,
+                    min_value=0.0,
+                    max_value=2.0,
+                    format="%.2f",
+                    callback=self._on_edge_blur_strength_slider,
                     width=200,
                 )
 
@@ -654,6 +692,7 @@ class FlowColApp:
     def _apply_postprocessing(self) -> None:
         """Apply postprocessing settings to cached render and update display."""
         from flowcol.render import downsample_lic
+        from flowcol.postprocess.blur import apply_anisotropic_edge_blur
         from scipy.ndimage import zoom
 
         with self.state_lock:
@@ -663,13 +702,32 @@ class FlowColApp:
 
             settings = self.state.display_settings
             result = cache.result
+            canvas_w, canvas_h = self.state.project.canvas_resolution
+
+            # Apply anisotropic edge blur at full resolution (if enabled)
+            lic_to_process = result.array
+            if settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
+                # Convert physical units to pixels
+                reference_dim = min(canvas_w, canvas_h)
+                scale = cache.multiplier * cache.supersample
+                sigma_pixels = settings.edge_blur_sigma * reference_dim * scale
+                falloff_pixels = settings.edge_blur_falloff * reference_dim * scale
+
+                lic_to_process = apply_anisotropic_edge_blur(
+                    result.array,
+                    result.ex,
+                    result.ey,
+                    cache.conductor_masks,
+                    sigma_pixels,
+                    falloff_pixels,
+                    settings.edge_blur_strength,
+                )
 
             # Apply downsampling with blur
             # canvas_resolution is (width, height), but downsample_lic expects (height, width)
-            canvas_w, canvas_h = self.state.project.canvas_resolution
             target_shape = (canvas_h, canvas_w)
             downsampled = downsample_lic(
-                result.array,
+                lic_to_process,
                 target_shape,
                 cache.supersample,
                 settings.downsample_sigma,
@@ -1648,6 +1706,7 @@ class FlowColApp:
             supersample = cache.supersample
 
         from flowcol.render import downsample_lic
+        from flowcol.postprocess.blur import apply_anisotropic_edge_blur
         from PIL import Image
         from datetime import datetime
 
@@ -1657,11 +1716,40 @@ class FlowColApp:
         output_dir.mkdir(exist_ok=True)
         margin_physical = result.margin
 
+        # Apply anisotropic edge blur at full render resolution (if enabled)
+        lic_blurred = result.array
+        if settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
+            reference_dim = min(canvas_w, canvas_h)
+            render_scale = multiplier * supersample
+            sigma_pixels = settings.edge_blur_sigma * reference_dim * render_scale
+            falloff_pixels = settings.edge_blur_falloff * reference_dim * render_scale
+
+            # Need conductor masks at render resolution for blur
+            from flowcol.postprocess.masks import rasterize_conductor_masks
+            conductor_masks_render, _ = rasterize_conductor_masks(
+                project.conductors,
+                result.array.shape,
+                margin_physical,
+                render_scale,
+                result.offset_x,
+                result.offset_y,
+            )
+
+            lic_blurred = apply_anisotropic_edge_blur(
+                result.array,
+                result.ex,
+                result.ey,
+                conductor_masks_render,
+                sigma_pixels,
+                falloff_pixels,
+                settings.edge_blur_strength,
+            )
+
         if supersample > 1.0:
             # Save supersampled version at render resolution
             render_scale = multiplier * supersample
             final_rgb_super = self._apply_postprocessing_for_save(
-                result.array,
+                lic_blurred,
                 project,
                 settings,
                 conductor_color_settings,
@@ -1683,7 +1771,7 @@ class FlowColApp:
             output_shape = (output_canvas_h, output_canvas_w)
 
             downsampled_lic = downsample_lic(
-                result.array,
+                lic_blurred,
                 output_shape,
                 supersample,
                 settings.downsample_sigma,
@@ -1717,7 +1805,7 @@ class FlowColApp:
             # No supersampling: save single version
             render_scale = multiplier
             final_rgb = self._apply_postprocessing_for_save(
-                result.array,
+                lic_blurred,
                 project,
                 settings,
                 conductor_color_settings,
@@ -1734,6 +1822,27 @@ class FlowColApp:
             pil_img.save(output_path)
 
             dpg.set_value("status_text", f"Saved {output_path.name}")
+
+    def _on_edge_blur_sigma_slider(self, sender, app_data):
+        """Handle edge blur sigma slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.display_settings.edge_blur_sigma = value
+        self._apply_postprocessing()
+
+    def _on_edge_blur_falloff_slider(self, sender, app_data):
+        """Handle edge blur falloff slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.display_settings.edge_blur_falloff = value
+        self._apply_postprocessing()
+
+    def _on_edge_blur_strength_slider(self, sender, app_data):
+        """Handle edge blur strength slider change."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.display_settings.edge_blur_strength = value
+        self._apply_postprocessing()
 
     def _on_downsample_slider(self, sender, app_data):
         """Handle downsampling blur sigma slider change."""

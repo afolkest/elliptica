@@ -50,6 +50,9 @@ class DisplaySettings:
     gamma: float = defaults.DEFAULT_GAMMA
     color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
     palette: str = defaults.DEFAULT_COLOR_PALETTE
+    edge_blur_sigma: float = defaults.DEFAULT_EDGE_BLUR_SIGMA
+    edge_blur_falloff: float = defaults.DEFAULT_EDGE_BLUR_FALLOFF
+    edge_blur_strength: float = defaults.DEFAULT_EDGE_BLUR_STRENGTH
 
 
 @dataclass
