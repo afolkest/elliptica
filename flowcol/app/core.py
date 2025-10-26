@@ -65,9 +65,14 @@ class RenderCache:
     display_array: Optional[np.ndarray] = None
     # Cached intermediate for fast colorization updates
     base_rgb: Optional[np.ndarray] = None
-    # Segmentation masks at display resolution
+    # Segmentation masks at display resolution (for region overlays)
     conductor_masks: Optional[list[np.ndarray]] = None
     interior_masks: Optional[list[np.ndarray]] = None
+    # Segmentation masks at full render resolution (for edge blur)
+    full_res_conductor_masks: Optional[list[np.ndarray]] = None
+    full_res_interior_masks: Optional[list[np.ndarray]] = None
+    # Project fingerprint for staleness detection
+    project_fingerprint: str = ""
 
 
 @dataclass
