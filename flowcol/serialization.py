@@ -262,6 +262,7 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
     return {
         'downsample_sigma': settings.downsample_sigma,
         'clip_percent': settings.clip_percent,
+        'brightness': settings.brightness,
         'contrast': settings.contrast,
         'gamma': settings.gamma,
         'color_enabled': settings.color_enabled,
@@ -278,6 +279,7 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
     return DisplaySettings(
         downsample_sigma=data.get('downsample_sigma', defaults.DEFAULT_DOWNSAMPLE_SIGMA),
         clip_percent=data.get('clip_percent', defaults.DEFAULT_CLIP_PERCENT),
+        brightness=data.get('brightness', defaults.DEFAULT_BRIGHTNESS),
         contrast=data.get('contrast', defaults.DEFAULT_CONTRAST),
         gamma=data.get('gamma', defaults.DEFAULT_GAMMA),
         color_enabled=data.get('color_enabled', defaults.DEFAULT_COLOR_ENABLED),

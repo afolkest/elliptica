@@ -350,6 +350,7 @@ def _normalize_unit(arr: np.ndarray) -> np.ndarray:
 def colorize_array(
     arr: np.ndarray,
     palette: str | None = None,
+    brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
     clip_percent: float = 0.5,
@@ -359,6 +360,7 @@ def colorize_array(
     Args:
         arr: Input array to colorize
         palette: Color palette name
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast adjustment (1.0 = no change)
         gamma: Gamma correction (1.0 = no change)
         clip_percent: Percentile clipping (e.g., 0.5 clips bottom 0.5% and top 0.5%).
@@ -378,6 +380,8 @@ def colorize_array(
         norm = _normalize_unit(arr)
     if not np.isclose(contrast, 1.0):
         norm = np.clip((norm - 0.5) * contrast + 0.5, 0.0, 1.0)
+    if not np.isclose(brightness, 0.0):
+        norm = np.clip(norm + brightness, 0.0, 1.0)
     gamma = max(float(gamma), 1e-3)
     if not np.isclose(gamma, 1.0):
         norm = np.power(norm, gamma, dtype=np.float32)
@@ -390,11 +394,12 @@ def colorize_array(
 
 def _apply_display_transforms(
     arr: np.ndarray,
+    brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
     clip_percent: float = 0.5,
 ) -> np.ndarray:
-    """Apply clip/contrast/gamma transforms to normalize array to [0,1]."""
+    """Apply clip/brightness/contrast/gamma transforms to normalize array to [0,1]."""
     arr = arr.astype(np.float32, copy=False)
 
     # Percentile-based normalization (clipping)
@@ -411,6 +416,10 @@ def _apply_display_transforms(
     # Contrast adjustment
     if not np.isclose(contrast, 1.0):
         norm = np.clip((norm - 0.5) * contrast + 0.5, 0.0, 1.0)
+
+    # Brightness adjustment (after contrast, before gamma)
+    if not np.isclose(brightness, 0.0):
+        norm = np.clip(norm + brightness, 0.0, 1.0)
 
     # Gamma correction
     gamma = max(float(gamma), 1e-3)

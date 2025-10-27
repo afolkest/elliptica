@@ -58,6 +58,7 @@ def downsample_lic_gpu(
 def build_base_rgb_gpu(
     tensor: torch.Tensor,
     clip_percent: float,
+    brightness: float,
     contrast: float,
     gamma: float,
     color_enabled: bool,
@@ -68,6 +69,7 @@ def build_base_rgb_gpu(
     Args:
         tensor: Input grayscale tensor (H, W) on GPU
         clip_percent: Percentile clipping (e.g., 2.0 for 2%-98%)
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier
         gamma: Gamma exponent
         color_enabled: Whether to apply color palette
@@ -79,8 +81,8 @@ def build_base_rgb_gpu(
     # Percentile clip and normalize to [0, 1]
     normalized, _, _ = percentile_clip_gpu(tensor, clip_percent)
 
-    # Apply contrast and gamma
-    adjusted = apply_contrast_gamma_gpu(normalized, contrast, gamma)
+    # Apply brightness, contrast and gamma
+    adjusted = apply_contrast_gamma_gpu(normalized, brightness, contrast, gamma)
 
     # Convert to RGB
     if color_enabled and lut is not None:
@@ -137,6 +139,7 @@ def downsample_lic_hybrid(
 def build_base_rgb_hybrid(
     arr: np.ndarray,
     clip_percent: float,
+    brightness: float,
     contrast: float,
     gamma: float,
     color_enabled: bool,
@@ -150,6 +153,7 @@ def build_base_rgb_hybrid(
     Args:
         arr: Input grayscale array (H, W)
         clip_percent: Percentile clipping
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier
         gamma: Gamma exponent
         color_enabled: Whether to apply color palette
@@ -172,6 +176,7 @@ def build_base_rgb_hybrid(
         rgb_tensor = build_base_rgb_gpu(
             tensor,
             clip_percent,
+            brightness,
             contrast,
             gamma,
             color_enabled,
@@ -189,6 +194,7 @@ def build_base_rgb_hybrid(
         # Create a minimal DisplaySettings object
         settings = DisplaySettings(
             clip_percent=clip_percent,
+            brightness=brightness,
             contrast=contrast,
             gamma=gamma,
             color_enabled=color_enabled,

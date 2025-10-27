@@ -42,6 +42,7 @@ def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -
         rgb_gpu = build_base_rgb_gpu(
             display_array_gpu,
             settings.clip_percent,
+            settings.brightness,
             settings.contrast,
             settings.gamma,
             settings.color_enabled,
@@ -75,11 +76,11 @@ def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -
 
         if not settings.color_enabled:
             # Grayscale mode with JIT-accelerated transforms
-            rgb = grayscale_to_rgb_jit(norm, settings.contrast, settings.gamma)
+            rgb = grayscale_to_rgb_jit(norm, settings.brightness, settings.contrast, settings.gamma)
             return rgb
         else:
             # Color mode: apply contrast/gamma, then LUT
-            norm_adjusted = apply_contrast_gamma_jit(norm, settings.contrast, settings.gamma)
+            norm_adjusted = apply_contrast_gamma_jit(norm, settings.brightness, settings.contrast, settings.gamma)
             lut = _get_palette_lut(settings.palette)
             rgb = apply_palette_lut_jit(norm_adjusted, lut)
             return rgb
@@ -173,6 +174,7 @@ def apply_region_overlays(
                     region_rgb = colorize_array(
                         scalar_array,
                         palette=settings.interior.palette,
+                        brightness=display_settings.brightness,
                         gamma=display_settings.gamma,
                         contrast=display_settings.contrast,
                         clip_percent=display_settings.clip_percent,
@@ -192,6 +194,7 @@ def apply_region_overlays(
                     region_rgb = colorize_array(
                         scalar_array,
                         palette=settings.surface.palette,
+                        brightness=display_settings.brightness,
                         gamma=display_settings.gamma,
                         contrast=display_settings.contrast,
                         clip_percent=display_settings.clip_percent,

@@ -2,6 +2,9 @@
 
 import numpy as np
 from scipy.ndimage import distance_transform_edt, map_coordinates
+from typing import Optional
+
+from flowcol import config
 
 
 def apply_anisotropic_edge_blur(
@@ -12,7 +15,7 @@ def apply_anisotropic_edge_blur(
     sigma: float,
     falloff_distance: float,
     strength: float,
-    power: float = 1.0,
+    power: Optional[float] = None,
 ) -> np.ndarray:
     """Apply anisotropic blur perpendicular to field lines near conductor edges.
 
@@ -24,7 +27,7 @@ def apply_anisotropic_edge_blur(
         sigma: Gaussian sigma for perpendicular blur (pixels)
         falloff_distance: Distance from edge where blur falls to zero (pixels)
         strength: Global strength multiplier (0-2)
-        power: Power law exponent for falloff (default 1.0)
+        power: Power law exponent for falloff (None uses config.EDGE_BLUR_DECAY_POWER)
 
     Returns:
         Blurred LIC array
@@ -50,9 +53,12 @@ def apply_anisotropic_edge_blur(
     # Distance is 0 at edge, increases outward
     distance_field = distance_transform_edt(1.0 - (combined_mask > 0.01))
 
+    # Resolve exponent: use caller override if provided, otherwise config default
+    exponent = float(power) if power is not None else config.EDGE_BLUR_DECAY_POWER
+    exponent = max(exponent, 1e-6)
+
     # Compute blend weight using power law falloff: 1 / (1 + (dist/a)^p)
-    # weight = strength / (1 + (distance / falloff_distance)^power)
-    weight = strength / (1.0 + np.power(distance_field / falloff_distance, power))
+    weight = strength / (1.0 + np.power(distance_field / falloff_distance, exponent))
     weight = np.clip(weight, 0.0, 1.0)
 
     # Early exit if no significant weight anywhere
