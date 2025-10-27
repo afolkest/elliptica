@@ -7,13 +7,15 @@ import numba
 @numba.jit(nopython=True, parallel=False, fastmath=True, cache=True)
 def apply_contrast_gamma_jit(
     norm: np.ndarray,
+    brightness: float,
     contrast: float,
     gamma: float,
 ) -> np.ndarray:
-    """Apply contrast and gamma correction to normalized [0,1] array.
+    """Apply brightness, contrast and gamma correction to normalized [0,1] array.
 
     Args:
         norm: Normalized array in [0, 1]
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier
         gamma: Gamma exponent
 
@@ -30,6 +32,11 @@ def apply_contrast_gamma_jit(
             # Contrast adjustment
             if contrast != 1.0:
                 val = (val - 0.5) * contrast + 0.5
+                val = max(0.0, min(1.0, val))
+
+            # Brightness adjustment (after contrast, before gamma)
+            if brightness != 0.0:
+                val = val + brightness
                 val = max(0.0, min(1.0, val))
 
             # Gamma correction
@@ -79,13 +86,15 @@ def apply_palette_lut_jit(
 @numba.jit(nopython=True, parallel=False, fastmath=True, cache=True)
 def grayscale_to_rgb_jit(
     norm: np.ndarray,
+    brightness: float,
     contrast: float,
     gamma: float,
 ) -> np.ndarray:
-    """Convert grayscale array to RGB with contrast/gamma.
+    """Convert grayscale array to RGB with brightness/contrast/gamma.
 
     Args:
         norm: Normalized array in [0, 1], shape (H, W)
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier
         gamma: Gamma exponent
 
@@ -102,6 +111,11 @@ def grayscale_to_rgb_jit(
             # Contrast adjustment
             if contrast != 1.0:
                 val = (val - 0.5) * contrast + 0.5
+                val = max(0.0, min(1.0, val))
+
+            # Brightness adjustment (after contrast, before gamma)
+            if brightness != 0.0:
+                val = val + brightness
                 val = max(0.0, min(1.0, val))
 
             # Gamma correction

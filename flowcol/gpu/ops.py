@@ -67,11 +67,12 @@ def percentile_clip_gpu(tensor: torch.Tensor, clip_percent: float) -> Tuple[torc
     return normalized, vmin, vmax
 
 
-def apply_contrast_gamma_gpu(tensor: torch.Tensor, contrast: float, gamma: float) -> torch.Tensor:
-    """Apply contrast and gamma correction on GPU.
+def apply_contrast_gamma_gpu(tensor: torch.Tensor, brightness: float, contrast: float, gamma: float) -> torch.Tensor:
+    """Apply brightness, contrast and gamma correction on GPU.
 
     Args:
         tensor: Normalized tensor in [0, 1] (H, W) on GPU
+        brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier (1.0 = no change)
         gamma: Gamma exponent (1.0 = no change)
 
@@ -83,6 +84,11 @@ def apply_contrast_gamma_gpu(tensor: torch.Tensor, contrast: float, gamma: float
     # Contrast adjustment: (val - 0.5) * contrast + 0.5
     if contrast != 1.0:
         result = (result - 0.5) * contrast + 0.5
+        result = torch.clamp(result, 0.0, 1.0)
+
+    # Brightness adjustment (after contrast, before gamma)
+    if brightness != 0.0:
+        result = result + brightness
         result = torch.clamp(result, 0.0, 1.0)
 
     # Gamma correction: val ^ gamma

@@ -187,6 +187,7 @@ class FlowColApp:
     conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
     postprocess_downsample_slider_id: Optional[int] = None
     postprocess_clip_slider_id: Optional[int] = None
+    postprocess_brightness_slider_id: Optional[int] = None
     postprocess_contrast_slider_id: Optional[int] = None
     postprocess_gamma_slider_id: Optional[int] = None
     edge_blur_sigma_slider_id: Optional[int] = None
@@ -387,6 +388,16 @@ class FlowColApp:
                     width=200,
                 )
 
+                self.postprocess_brightness_slider_id = dpg.add_slider_float(
+                    label="Brightness",
+                    default_value=self.state.display_settings.brightness,
+                    min_value=-0.5,
+                    max_value=0.5,
+                    format="%.2f",
+                    callback=self._on_brightness_slider,
+                    width=200,
+                )
+
                 self.postprocess_contrast_slider_id = dpg.add_slider_float(
                     label="Contrast",
                     default_value=self.state.display_settings.contrast,
@@ -416,7 +427,7 @@ class FlowColApp:
                     label="Edge Blur Sigma",
                     default_value=self.state.display_settings.edge_blur_sigma,
                     min_value=0.0,
-                    max_value=0.01,
+                    max_value=0.05,
                     format="%.4f",
                     callback=self._on_edge_blur_sigma_slider,
                     width=200,
@@ -426,7 +437,7 @@ class FlowColApp:
                     label="Blur Falloff Distance",
                     default_value=self.state.display_settings.edge_blur_falloff,
                     min_value=0.0,
-                    max_value=0.05,
+                    max_value=0.15,
                     format="%.4f",
                     callback=self._on_edge_blur_falloff_slider,
                     width=200,
@@ -1645,6 +1656,8 @@ class FlowColApp:
                 dpg.set_value(self.postprocess_downsample_slider_id, self.state.display_settings.downsample_sigma)
             if self.postprocess_clip_slider_id is not None:
                 dpg.set_value(self.postprocess_clip_slider_id, self.state.display_settings.clip_percent)
+            if self.postprocess_brightness_slider_id is not None:
+                dpg.set_value(self.postprocess_brightness_slider_id, self.state.display_settings.brightness)
             if self.postprocess_contrast_slider_id is not None:
                 dpg.set_value(self.postprocess_contrast_slider_id, self.state.display_settings.contrast)
             if self.postprocess_gamma_slider_id is not None:
@@ -2151,6 +2164,7 @@ class FlowColApp:
             base_rgb = colorize_array(
                 lic_array,
                 palette=settings.palette,
+                brightness=settings.brightness,
                 contrast=settings.contrast,
                 gamma=settings.gamma,
                 clip_percent=settings.clip_percent,
@@ -2158,6 +2172,7 @@ class FlowColApp:
         else:
             normalized = _apply_display_transforms(
                 lic_array,
+                brightness=settings.brightness,
                 contrast=settings.contrast,
                 gamma=settings.gamma,
                 clip_percent=settings.clip_percent,
@@ -2411,6 +2426,17 @@ class FlowColApp:
             self.state.display_settings.clip_percent = value
             self.state.invalidate_base_rgb()
         # Clip is display-only, just refresh texture
+        self._refresh_render_texture()
+        self._mark_canvas_dirty()
+
+    def _on_brightness_slider(self, sender, app_data):
+        """Handle brightness slider change (real-time with GPU acceleration)."""
+        value = float(app_data)
+        with self.state_lock:
+            self.state.display_settings.brightness = value
+            self.state.invalidate_base_rgb()
+
+        # GPU is fast enough for real-time updates - no debouncing needed!
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 

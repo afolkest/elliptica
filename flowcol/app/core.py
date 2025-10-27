@@ -47,6 +47,7 @@ class DisplaySettings:
 
     downsample_sigma: float = defaults.DEFAULT_DOWNSAMPLE_SIGMA
     clip_percent: float = defaults.DEFAULT_CLIP_PERCENT
+    brightness: float = defaults.DEFAULT_BRIGHTNESS
     contrast: float = defaults.DEFAULT_CONTRAST
     gamma: float = defaults.DEFAULT_GAMMA
     color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
