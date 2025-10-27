@@ -1162,6 +1162,7 @@ class FlowColApp:
             if idx >= 0 and idx < len(self.state.project.conductors):
                 self.state.project.conductors[idx].smear_enabled = bool(app_data)
         self._update_region_properties_panel()
+        self._refresh_render_texture()
         self._mark_canvas_dirty()
 
     def _on_smear_sigma(self, sender, app_data):
@@ -1172,6 +1173,7 @@ class FlowColApp:
             idx = self.state.selected_idx
             if idx >= 0 and idx < len(self.state.project.conductors):
                 self.state.project.conductors[idx].smear_sigma = float(app_data)
+        self._refresh_render_texture()
         self._mark_canvas_dirty()
 
     def _on_smear_feather(self, sender, app_data):
@@ -1182,6 +1184,7 @@ class FlowColApp:
             idx = self.state.selected_idx
             if idx >= 0 and idx < len(self.state.project.conductors):
                 self.state.project.conductors[idx].smear_feather = float(app_data)
+        self._refresh_render_texture()
         self._mark_canvas_dirty()
 
     def _scale_conductor(self, idx: int, factor: float) -> bool:
