@@ -40,3 +40,4 @@ SCROLL_SCALE_SENSITIVITY: float = 0.02
 DEFAULT_EDGE_BLUR_SIGMA: float = 0.0  # Fraction of canvas
 DEFAULT_EDGE_BLUR_FALLOFF: float = 0.015  # Fraction of canvas (~15px at 1024)
 DEFAULT_EDGE_BLUR_STRENGTH: float = 1.0  # Dimensionless multiplier
+DEFAULT_EDGE_BLUR_POWER: float = 1.0  # Power law exponent

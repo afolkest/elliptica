@@ -814,6 +814,7 @@ class FlowColApp:
                         sigma_pixels,
                         falloff_pixels,
                         settings.edge_blur_strength,
+                        settings.edge_blur_power,
                     )
 
                     torch.mps.synchronize()
@@ -837,6 +838,7 @@ class FlowColApp:
                         sigma_pixels,
                         falloff_pixels,
                         settings.edge_blur_strength,
+                        settings.edge_blur_power,
                     )
 
                     elapsed = time.time() - start
@@ -2264,6 +2266,7 @@ class FlowColApp:
                 sigma_pixels,
                 falloff_pixels,
                 settings.edge_blur_strength,
+                settings.edge_blur_power,
             )
 
         if supersample > 1.0:

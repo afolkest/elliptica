@@ -54,6 +54,7 @@ class DisplaySettings:
     edge_blur_sigma: float = defaults.DEFAULT_EDGE_BLUR_SIGMA
     edge_blur_falloff: float = defaults.DEFAULT_EDGE_BLUR_FALLOFF
     edge_blur_strength: float = defaults.DEFAULT_EDGE_BLUR_STRENGTH
+    edge_blur_power: float = defaults.DEFAULT_EDGE_BLUR_POWER
 
 
 @dataclass
