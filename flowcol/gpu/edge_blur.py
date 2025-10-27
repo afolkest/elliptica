@@ -13,6 +13,7 @@ def apply_anisotropic_edge_blur_gpu(
     sigma: float,
     falloff_distance: float,
     strength: float,
+    power: float = 1.0,
 ) -> torch.Tensor:
     """Apply anisotropic blur perpendicular to field lines near conductor edges (GPU).
 
@@ -24,6 +25,7 @@ def apply_anisotropic_edge_blur_gpu(
         sigma: Gaussian sigma for perpendicular blur (pixels)
         falloff_distance: Distance from edge where blur falls to zero (pixels)
         strength: Global strength multiplier (0-2)
+        power: Power law exponent for falloff (default 1.0)
 
     Returns:
         Blurred LIC tensor on GPU
@@ -50,8 +52,8 @@ def apply_anisotropic_edge_blur_gpu(
     # Distance transform (approximation on GPU)
     distance_field = _distance_transform_gpu(combined_mask > 0.01)
 
-    # Compute blend weight: high near edges, decays with distance
-    weight = strength * torch.exp(-distance_field / falloff_distance)
+    # Compute blend weight using power law falloff: 1 / (1 + (dist/a)^p)
+    weight = strength / (1.0 + torch.pow(distance_field / falloff_distance, power))
     weight = torch.clamp(weight, 0.0, 1.0)
 
     # Early exit if no significant weight anywhere

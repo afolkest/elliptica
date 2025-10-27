@@ -269,6 +269,7 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
         'edge_blur_sigma': settings.edge_blur_sigma,
         'edge_blur_falloff': settings.edge_blur_falloff,
         'edge_blur_strength': settings.edge_blur_strength,
+        'edge_blur_power': settings.edge_blur_power,
     }
 
 
@@ -284,6 +285,7 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
         edge_blur_sigma=data.get('edge_blur_sigma', defaults.DEFAULT_EDGE_BLUR_SIGMA),
         edge_blur_falloff=data.get('edge_blur_falloff', defaults.DEFAULT_EDGE_BLUR_FALLOFF),
         edge_blur_strength=data.get('edge_blur_strength', defaults.DEFAULT_EDGE_BLUR_STRENGTH),
+        edge_blur_power=data.get('edge_blur_power', defaults.DEFAULT_EDGE_BLUR_POWER),
     )
 
 
