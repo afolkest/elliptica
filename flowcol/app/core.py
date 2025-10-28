@@ -57,6 +57,18 @@ class DisplaySettings:
     edge_blur_strength: float = defaults.DEFAULT_EDGE_BLUR_STRENGTH
     edge_blur_power: float = defaults.DEFAULT_EDGE_BLUR_POWER
 
+    def to_color_params(self):
+        """Convert to pure ColorParams for backend functions."""
+        from flowcol.postprocess.color import ColorParams
+        return ColorParams(
+            clip_percent=self.clip_percent,
+            brightness=self.brightness,
+            contrast=self.contrast,
+            gamma=self.gamma,
+            color_enabled=self.color_enabled,
+            palette=self.palette,
+        )
+
 
 @dataclass
 class RenderCache:

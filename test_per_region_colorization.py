@@ -143,7 +143,7 @@ def test_compositor_integration():
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
-        state.display_settings,
+        state.display_settings.to_color_params(),
     )
 
     assert final_rgb is not None

@@ -968,7 +968,7 @@ class FlowColApp:
                         cache.interior_masks,
                         self.state.conductor_color_settings,
                         self.state.project.conductors,
-                        self.state.display_settings,
+                        self.state.display_settings.to_color_params(),
                     )
                 else:
                     final_rgb = base_rgb
@@ -2216,7 +2216,7 @@ class FlowColApp:
                 interior_masks,
                 conductor_color_settings,
                 project.conductors,
-                settings,
+                settings.to_color_params(),
             )
         else:
             final_rgb = base_rgb
