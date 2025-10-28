@@ -136,86 +136,8 @@ def downsample_lic_hybrid(
         return zoom(filtered, (scale_y, scale_x), order=1)
 
 
-def build_base_rgb_hybrid(
-    arr: np.ndarray,
-    clip_percent: float,
-    brightness: float,
-    contrast: float,
-    gamma: float,
-    color_enabled: bool,
-    lut_numpy: np.ndarray | None,
-    use_gpu: bool = True,
-) -> np.ndarray:
-    """Hybrid colorization with automatic GPU/CPU fallback.
-
-    This is a drop-in replacement for the CPU-only build_base_rgb.
-
-    Args:
-        arr: Input grayscale array (H, W)
-        clip_percent: Percentile clipping
-        brightness: Brightness adjustment (0.0 = no change, additive)
-        contrast: Contrast multiplier
-        gamma: Gamma exponent
-        color_enabled: Whether to apply color palette
-        lut_numpy: Color lookup table (N, 3) as numpy array
-        use_gpu: Whether to attempt GPU acceleration
-
-    Returns:
-        RGB uint8 array (H, W, 3)
-    """
-    if use_gpu and GPUContext.is_available():
-        # GPU path
-        tensor = GPUContext.to_gpu(arr)
-
-        # Upload LUT to GPU if provided
-        lut_gpu = None
-        if lut_numpy is not None:
-            lut_gpu = GPUContext.to_gpu(lut_numpy)
-
-        # Process on GPU
-        rgb_tensor = build_base_rgb_gpu(
-            tensor,
-            clip_percent,
-            brightness,
-            contrast,
-            gamma,
-            color_enabled,
-            lut_gpu,
-        )
-
-        # Convert to uint8 and download
-        rgb_uint8_tensor = (rgb_tensor * 255.0).clamp(0, 255).to(torch.uint8)
-        return GPUContext.to_cpu(rgb_uint8_tensor)
-    else:
-        # CPU fallback
-        from flowcol.postprocess.color import build_base_rgb, ColorParams
-
-        # TODO: Palette inference from lut_numpy
-        # Currently we can't reverse-engineer which palette name corresponds to lut_numpy.
-        # This CPU fallback path is rarely hit (GPU usually available), but if we ever
-        # rely on non-default palettes when GPU is unavailable, we'd need to either:
-        # 1. Pass palette name as explicit parameter to build_base_rgb_hybrid(), or
-        # 2. Add a reverse LUT lookup in render.py (fragile)
-        # For now, default palette is acceptable since GPU path dominates.
-        palette = "Ink & Gold"  # Default fallback when GPU unavailable
-
-        # Create pure ColorParams (no UI dependency!)
-        color_params = ColorParams(
-            clip_percent=clip_percent,
-            brightness=brightness,
-            contrast=contrast,
-            gamma=gamma,
-            color_enabled=color_enabled,
-            palette=palette,
-        )
-
-        # Use CPU implementation
-        return build_base_rgb(arr, color_params)
-
-
 __all__ = [
     'downsample_lic_gpu',
     'build_base_rgb_gpu',
     'downsample_lic_hybrid',
-    'build_base_rgb_hybrid',
 ]

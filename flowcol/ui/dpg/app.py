@@ -889,10 +889,8 @@ class FlowColApp:
                 # elapsed = time.time() - start
                 # print(f"🚀 GPU downsample: {elapsed*1000:.1f}ms")
 
-                # Store GPU tensor for colorization
-                cache.display_array_gpu = downsampled_gpu
-                # Download to CPU for legacy code paths
-                cache.display_array = GPUContext.to_cpu(downsampled_gpu)
+                # Set GPU as primary source - CPU download happens lazily via property
+                cache.set_display_array_gpu(downsampled_gpu)
             else:
                 # CPU fallback
                 from flowcol.render import downsample_lic
@@ -902,8 +900,8 @@ class FlowColApp:
                     cache.supersample,
                     settings.downsample_sigma,
                 )
-                cache.display_array = downsampled
-                cache.display_array_gpu = None
+                # Set CPU as primary source (clears any GPU tensor)
+                cache.set_display_array_cpu(downsampled)
 
             # Downsample masks to match display_array resolution if needed
             if cache.conductor_masks:
@@ -1781,7 +1779,8 @@ class FlowColApp:
                 cache.supersample,
                 self.state.display_settings.downsample_sigma,
             )
-            cache.display_array = display_array
+            # Set CPU as primary source (this is CPU-only path)
+            cache.set_display_array_cpu(display_array)
 
             # Recompute masks at full render resolution
             if self.state.project.conductors:

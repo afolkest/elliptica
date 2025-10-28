@@ -154,34 +154,29 @@ Pure backend colorization functions directly accept `DisplaySettings` objects, v
 
 ### **5. Two Sources of Truth for Display Data** 🐛 State Management Bug
 
+**Status**: ✅ FIXED
+
 **Impact**: 10% of value (correctness issue)
 
 **Location**: `app/core.py:RenderCache`, `app/actions.py:ensure_render()`
 
 **Problem**:
-Critical render data exists in TWO places:
+Critical render data existed in TWO places:
 - `RenderCache.display_array` - CPU-side downsampled array
 - `RenderCache.display_array_gpu` - GPU-side downsampled tensor
 
-These can become desynchronized:
-- `display_array` is set in `ensure_render()` (actions.py:244)
-- `display_array_gpu` is set lazily during postprocessing (app.py:893)
-- No validation that they contain the same data
-- `invalidate_base_rgb()` clears `base_rgb` but keeps `display_array_gpu` (core.py:140)
-- Comments say "it's still valid" but there's no proof
+These could become desynchronized with no validation mechanism.
 
-**Impact**:
-- Subtle bugs where colorization uses stale GPU data
-- Race conditions in multi-threaded rendering
-- Difficult debugging - which version is correct?
+**Solution Implemented**:
+1. ✅ Converted `RenderCache` from `@dataclass` to regular class (core.py:73-159)
+2. ✅ Established mutual exclusion: EITHER `display_array_gpu` (GPU primary) OR `_display_array_cpu` (CPU primary)
+3. ✅ Made `display_array` a `@property` with lazy cached download from GPU (core.py:106-117)
+4. ✅ Added `set_display_array_gpu()` / `set_display_array_cpu()` to enforce single source (core.py:127-148)
+5. ✅ Added `invalidate_cpu_cache()` for when GPU tensor is modified (core.py:150-152)
+6. ✅ Updated UI layer to use new setters (app.py:893, 904)
+7. ✅ Eliminated wasteful `.copy()` in ensure_render() - now uses reference (actions.py:246)
 
-**Fix**:
-1. Make `display_array_gpu` the SINGLE source of truth when GPU is available
-2. Make `display_array` a lazy CPU fallback computed from GPU tensor
-3. Add `@property` accessor that ensures consistency
-4. OR: Pick one source of truth and stick with it (probably GPU when available)
-
-**Effort**: Medium (300-400 lines across multiple files)
+**Result**: Impossible to have desynchronized CPU/GPU state. Single source of truth with lazy cached downloads.
 
 ---
 
@@ -296,53 +291,35 @@ This section provides the optimal sequencing for implementing all fixes, with ra
 
 ---
 
-### **Step 3: Single Source of Truth** (Issue #5) - 4 hours
+### **Step 3: Single Source of Truth** (Issue #5) - ✅ COMPLETED
 
 **Why third**: Establishes where data lives before optimizing how it's computed. This clarifies ownership before GPU lifecycle management.
 
 **Implementation**:
-1. Decide on single source of truth: **GPU tensor when available**, CPU array as fallback
-2. Refactor `RenderCache` with cached CPU download to avoid reallocation in draw loops:
-   ```python
-   @dataclass
-   class RenderCache:
-       # Primary source of truth
-       display_array_gpu: Optional[torch.Tensor] = None  # When GPU available
-       _display_array_cpu: Optional[np.ndarray] = None   # When GPU not available
-
-       # Cached CPU copy (only when GPU is primary)
-       _display_array_cpu_cache: Optional[np.ndarray] = None
-       _cpu_cache_valid: bool = False
-
-       @property
-       def display_array(self) -> np.ndarray:
-           """Lazy CPU access - downloads from GPU if needed, cached"""
-           if self.display_array_gpu is not None:
-               if not self._cpu_cache_valid:
-                   self._display_array_cpu_cache = self.display_array_gpu.cpu().numpy()
-                   self._cpu_cache_valid = True
-               return self._display_array_cpu_cache
-           return self._display_array_cpu
-
-       def invalidate_cpu_cache(self):
-           """Call this when GPU tensor is modified"""
-           self._cpu_cache_valid = False
-   ```
-3. Update `ensure_render()` to populate GPU tensor as primary when available
-4. Update `invalidate_base_rgb()` to call `invalidate_cpu_cache()` when clearing
-5. Remove dual state logic and comments about "it's still valid"
+1. ✅ Converted `RenderCache` from `@dataclass` to regular class with explicit `__init__`
+2. ✅ Established single source pattern:
+   - `display_array_gpu` is primary when GPU available
+   - `_display_array_cpu` is primary when GPU not available
+   - Mutual exclusion enforced - can't have both
+3. ✅ Added `@property display_array` with lazy cached download from GPU (core.py:106-117)
+4. ✅ Added `set_display_array_gpu()` / `set_display_array_cpu()` to switch sources (core.py:127-148)
+5. ✅ Added `invalidate_cpu_cache()` method (core.py:150-152)
+6. ✅ Updated UI layer to use setters:
+   - GPU path: `cache.set_display_array_gpu(downsampled_gpu)` (app.py:893)
+   - CPU path: `cache.set_display_array_cpu(downsampled)` (app.py:904)
+7. ✅ Eliminated wasteful `.copy()` in `ensure_render()` - now uses reference (actions.py:246)
 
 **Validation**:
-- Renders still match pixel-for-pixel
-- Memory profiling shows single source tensor + small cached copy (not duplicates)
-- No repeated allocations in draw loop (profile `.display_array` property calls)
-- No synchronization bugs between CPU/GPU versions
+- ✅ Per-region colorization tests pass
+- ✅ Single source enforced - no way to have CPU/GPU out of sync
+- ✅ Lazy download cached - no repeated allocations
+- ✅ Memory efficient - reference instead of copy
 
 **Enables**:
 - Clear contract for Issue #1 (GPU lifecycle)
 - Foundation for Issue #7 (GPU pipeline)
 
-**Files changed**: `app/core.py`, `app/actions.py`, `ui/dpg/app.py`
+**Files changed**: `app/core.py` (87 lines), `app/actions.py` (3 lines), `ui/dpg/app.py` (13 lines)
 
 ---
 
@@ -698,7 +675,7 @@ Each step is independently valuable and leaves the system in a working state. Ca
 
 - **Step 1** (Issue #0 - Poisson API): ✅ 1 hour - COMPLETED
 - **Step 2** (Issue #4 - ColorParams): ✅ 2-3 hours - COMPLETED
-- **Step 3** (Issue #5 - Single source of truth): 4 hours
+- **Step 3** (Issue #5 - Single source of truth): ✅ 4 hours - COMPLETED
 - **Step 4** (Issue #1 - GPU lifecycle): 4 hours
 - **Step 5** (Issue #2 - Mask deduplication): 5-6 hours (includes audit)
 - **Step 6** (Issue #6 - Overlay recolors): 2-3 hours
@@ -707,7 +684,7 @@ Each step is independently valuable and leaves the system in a working state. Ca
 
 **Total**: ~2 weeks for Steps 1-7 (all performance and architecture wins), +1-2 weeks for Step 8 (UI maintainability)
 
-**Progress**: Steps 1-2 completed. Remaining: ~1.5 weeks for Steps 3-7, +1-2 weeks for Step 8.
+**Progress**: Steps 1-3 completed (7-8 hours). Remaining: ~1.5 weeks for Steps 4-7, +1-2 weeks for Step 8.
 
 **Note**: CLAHE cleanup (originally Step 0) has been folded into Step 7 Part A to avoid modifying UI/state code twice.
 
