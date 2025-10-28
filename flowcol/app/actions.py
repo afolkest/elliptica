@@ -299,7 +299,7 @@ def ensure_base_rgb(state: AppState) -> bool:
         # Use GPU tensor if available (much faster!)
         cache.base_rgb = build_base_rgb(
             cache.display_array,
-            state.display_settings,
+            state.display_settings.to_color_params(),
             display_array_gpu=cache.display_array_gpu,
         )
 

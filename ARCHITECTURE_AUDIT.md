@@ -133,34 +133,22 @@ The FlowColApp class is a God Object handling:
 
 ### **4. Backend/UI Coupling via DisplaySettings** 🔗 Architecture Boundary Violation
 
-**Impact**: 15% of value (enables headless usage)
+**Status**: ✅ FIXED
 
 **Location**: `postprocess/color.py:build_base_rgb()`, `render.py:colorize_array()`
 
 **Problem**:
-Pure backend colorization functions directly accept `DisplaySettings` objects:
-```python
-def build_base_rgb(scalar_array, settings, display_array_gpu=None)
-```
+Pure backend colorization functions directly accept `DisplaySettings` objects, violating the functional/OOP boundary stated in CLAUDE.md.
 
-This violates the functional/OOP boundary stated in CLAUDE.md:
-- Backend should be pure functions
-- Display settings are UI concerns
-- Makes it impossible to use colorization without importing UI code
-- Breaks clean testing - need to mock entire app/core module
+**Solution Implemented**:
+1. ✅ Created `ColorParams` dataclass in `flowcol/postprocess/color.py:9-21`
+2. ✅ Updated `build_base_rgb()` to accept `ColorParams` instead of `DisplaySettings`
+3. ✅ Updated `apply_region_overlays()` to accept `ColorParams` instead of `DisplaySettings`
+4. ✅ Added `DisplaySettings.to_color_params()` method in `flowcol/app/core.py:60-70`
+5. ✅ Updated all 5 call sites to use `.to_color_params()`
+6. ✅ Verified no backend imports from `app/`
 
-**Impact**:
-- Can't use colorization in headless scripts without creating fake DisplaySettings
-- Circular dependency risk (though not present yet)
-- Violates stated architecture philosophy
-
-**Fix**:
-1. Extract `ColorParams` pure dataclass with just (clip_percent, brightness, contrast, gamma, color_enabled, palette)
-2. Backend functions accept `ColorParams`
-3. `DisplaySettings` includes a `to_color_params()` method for UI convenience
-4. Clean separation: backend has no knowledge of UI types
-
-**Effort**: Low (100-150 lines changed)
+**Result**: Clean backend/UI separation enables headless usage without UI dependencies.
 
 ---
 
@@ -284,42 +272,27 @@ This section provides the optimal sequencing for implementing all fixes, with ra
 
 ---
 
-### **Step 2: Backend/UI Decoupling** (Issue #4) - 2-3 hours
-
-**Why second**: Creates clean interfaces before touching implementations. This establishes contracts that later GPU work will depend on.
+### **Step 2: Backend/UI Decoupling** (Issue #4) - ✅ COMPLETED
 
 **Implementation**:
-1. Create `ColorParams` dataclass in `flowcol/postprocess/color.py` (or new `flowcol/color_types.py`):
-   ```python
-   @dataclass
-   class ColorParams:
-       clip_percent: float
-       brightness: float
-       contrast: float
-       gamma: float
-       color_enabled: bool
-       palette: str
-   ```
-   **Note**: Keep this separate from `types.py` which is currently project/conductor domain models. Color params are rendering concerns and belong near postprocess code.
-
-2. Add `DisplaySettings.to_color_params() -> ColorParams` method
-3. Update all backend functions to accept `ColorParams`:
-   - `render.py:colorize_array()`
-   - `postprocess/color.py:build_base_rgb()`
-   - Any other functions taking `DisplaySettings`
-4. Update all call sites to use `.to_color_params()`
+1. ✅ Created `ColorParams` dataclass in `flowcol/postprocess/color.py:9-21`
+2. ✅ Added `DisplaySettings.to_color_params()` method in `flowcol/app/core.py:60-70`
+3. ✅ Updated backend functions:
+   - `postprocess/color.py:build_base_rgb()` - now accepts `ColorParams`
+   - `postprocess/color.py:apply_region_overlays()` - now accepts `ColorParams`
+4. ✅ Updated all call sites (5 locations):
+   - `flowcol/app/actions.py:302`
+   - `flowcol/gpu/pipeline.py:198-208`
+   - `flowcol/ui/dpg/app.py:971`
+   - `flowcol/ui/dpg/app.py:2219`
+   - `test_per_region_colorization.py:146`
 
 **Validation**:
-- All existing renders still work
-- Can write headless script that uses colorization without importing UI code
-- No imports of `app.core` in `flowcol/*` backend modules
+- ✅ All files compile successfully
+- ✅ No backend imports from `app/`
+- ✅ Clean separation achieved
 
-**Enables**:
-- Clean signatures for Issue #6 (overlay recolors)
-- Clean signatures for Issue #7 (GPU pipeline)
-- Headless batch rendering scripts
-
-**Files changed**: `postprocess/color.py` (or new `color_types.py`), `app/core.py`, `render.py`, call sites in `ui/dpg/app.py`
+**Result**: Backend colorization functions are now pure and headless-ready. GPU pipeline no longer depends on UI types.
 
 ---
 
@@ -723,8 +696,8 @@ Each step is independently valuable and leaves the system in a working state. Ca
 
 ## Estimated Timeline
 
-- **Step 1** (Issue #0 - Poisson API): 1 hour
-- **Step 2** (Issue #4 - ColorParams): 2-3 hours
+- **Step 1** (Issue #0 - Poisson API): ✅ 1 hour - COMPLETED
+- **Step 2** (Issue #4 - ColorParams): ✅ 2-3 hours - COMPLETED
 - **Step 3** (Issue #5 - Single source of truth): 4 hours
 - **Step 4** (Issue #1 - GPU lifecycle): 4 hours
 - **Step 5** (Issue #2 - Mask deduplication): 5-6 hours (includes audit)
@@ -733,6 +706,8 @@ Each step is independently valuable and leaves the system in a working state. Ca
 - **Step 8** (Issue #3 - UI refactor): 1-2 weeks
 
 **Total**: ~2 weeks for Steps 1-7 (all performance and architecture wins), +1-2 weeks for Step 8 (UI maintainability)
+
+**Progress**: Steps 1-2 completed. Remaining: ~1.5 weeks for Steps 3-7, +1-2 weeks for Step 8.
 
 **Note**: CLAHE cleanup (originally Step 0) has been folded into Step 7 Part A to avoid modifying UI/state code twice.
 

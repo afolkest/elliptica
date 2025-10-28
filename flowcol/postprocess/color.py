@@ -1,16 +1,32 @@
 """Global colorization functions for display rendering."""
 
+from dataclasses import dataclass
 import numpy as np
 from flowcol.render import colorize_array, array_to_pil, _normalize_unit, _get_palette_lut
 from flowcol.postprocess.fast import apply_contrast_gamma_jit, apply_palette_lut_jit, grayscale_to_rgb_jit
 
 
-def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -> np.ndarray:
+@dataclass
+class ColorParams:
+    """Pure color parameters for backend colorization functions.
+
+    This type lives in the backend (flowcol/postprocess/) to avoid UI coupling.
+    UI layer converts DisplaySettings -> ColorParams at the boundary.
+    """
+    clip_percent: float
+    brightness: float
+    contrast: float
+    gamma: float
+    color_enabled: bool
+    palette: str
+
+
+def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_array_gpu=None) -> np.ndarray:
     """Apply global colorization to scalar LIC field (GPU or JIT-accelerated).
 
     Args:
         scalar_array: Grayscale LIC array (float32)
-        settings: DisplaySettings with color_enabled, palette, gamma, contrast, clip_percent
+        color_params: ColorParams with color_enabled, palette, gamma, contrast, clip_percent, brightness
         display_array_gpu: Optional GPU tensor to use instead of scalar_array (faster!)
 
     Returns:
@@ -34,18 +50,18 @@ def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -
         import torch
         start = time.time()
 
-        lut_numpy = _get_palette_lut(settings.palette) if settings.color_enabled else None
+        lut_numpy = _get_palette_lut(color_params.palette) if color_params.color_enabled else None
         lut_gpu = None
         if lut_numpy is not None:
             lut_gpu = GPUContext.to_gpu(lut_numpy)
 
         rgb_gpu = build_base_rgb_gpu(
             display_array_gpu,
-            settings.clip_percent,
-            settings.brightness,
-            settings.contrast,
-            settings.gamma,
-            settings.color_enabled,
+            color_params.clip_percent,
+            color_params.brightness,
+            color_params.contrast,
+            color_params.gamma,
+            color_params.color_enabled,
             lut_gpu,
         )
 
@@ -63,10 +79,9 @@ def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -
         arr = scalar_array.astype(np.float32, copy=False)
 
         # Clip/normalize to [0, 1]
-        clip_percent = settings.clip_percent
-        if clip_percent > 0.0:
-            vmin = float(np.percentile(arr, clip_percent))
-            vmax = float(np.percentile(arr, 100.0 - clip_percent))
+        if color_params.clip_percent > 0.0:
+            vmin = float(np.percentile(arr, color_params.clip_percent))
+            vmax = float(np.percentile(arr, 100.0 - color_params.clip_percent))
             if vmax > vmin:
                 norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
             else:
@@ -74,14 +89,14 @@ def build_base_rgb(scalar_array: np.ndarray, settings, display_array_gpu=None) -
         else:
             norm = _normalize_unit(arr)
 
-        if not settings.color_enabled:
+        if not color_params.color_enabled:
             # Grayscale mode with JIT-accelerated transforms
-            rgb = grayscale_to_rgb_jit(norm, settings.brightness, settings.contrast, settings.gamma)
+            rgb = grayscale_to_rgb_jit(norm, color_params.brightness, color_params.contrast, color_params.gamma)
             return rgb
         else:
             # Color mode: apply contrast/gamma, then LUT
-            norm_adjusted = apply_contrast_gamma_jit(norm, settings.brightness, settings.contrast, settings.gamma)
-            lut = _get_palette_lut(settings.palette)
+            norm_adjusted = apply_contrast_gamma_jit(norm, color_params.brightness, color_params.contrast, color_params.gamma)
+            lut = _get_palette_lut(color_params.palette)
             rgb = apply_palette_lut_jit(norm_adjusted, lut)
             return rgb
 
@@ -130,7 +145,7 @@ def apply_region_overlays(
     interior_masks: list[np.ndarray],
     conductor_color_settings: dict,
     conductors: list,
-    display_settings,
+    color_params: ColorParams,
 ) -> np.ndarray:
     """Composite per-region color overrides over base RGB.
 
@@ -150,7 +165,7 @@ def apply_region_overlays(
         interior_masks: List of interior masks at display resolution
         conductor_color_settings: dict[conductor_id -> ConductorColorSettings]
         conductors: List of Conductor objects
-        display_settings: DisplaySettings for gamma/contrast/clip
+        color_params: ColorParams for gamma/contrast/clip/brightness
 
     Returns:
         Final composited RGB uint8 array
@@ -174,10 +189,10 @@ def apply_region_overlays(
                     region_rgb = colorize_array(
                         scalar_array,
                         palette=settings.interior.palette,
-                        brightness=display_settings.brightness,
-                        gamma=display_settings.gamma,
-                        contrast=display_settings.contrast,
-                        clip_percent=display_settings.clip_percent,
+                        brightness=color_params.brightness,
+                        gamma=color_params.gamma,
+                        contrast=color_params.contrast,
+                        clip_percent=color_params.clip_percent,
                     )
                     result = _blend_region(result, region_rgb, mask)
                 else:
@@ -194,10 +209,10 @@ def apply_region_overlays(
                     region_rgb = colorize_array(
                         scalar_array,
                         palette=settings.surface.palette,
-                        brightness=display_settings.brightness,
-                        gamma=display_settings.gamma,
-                        contrast=display_settings.contrast,
-                        clip_percent=display_settings.clip_percent,
+                        brightness=color_params.brightness,
+                        gamma=color_params.gamma,
+                        contrast=color_params.contrast,
+                        clip_percent=color_params.clip_percent,
                     )
                     result = _blend_region(result, region_rgb, mask)
                 else:

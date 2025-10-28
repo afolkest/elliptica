@@ -188,20 +188,29 @@ def build_base_rgb_hybrid(
         return GPUContext.to_cpu(rgb_uint8_tensor)
     else:
         # CPU fallback
-        from flowcol.postprocess.color import build_base_rgb
-        from flowcol.app.core import DisplaySettings
+        from flowcol.postprocess.color import build_base_rgb, ColorParams
 
-        # Create a minimal DisplaySettings object
-        settings = DisplaySettings(
+        # TODO: Palette inference from lut_numpy
+        # Currently we can't reverse-engineer which palette name corresponds to lut_numpy.
+        # This CPU fallback path is rarely hit (GPU usually available), but if we ever
+        # rely on non-default palettes when GPU is unavailable, we'd need to either:
+        # 1. Pass palette name as explicit parameter to build_base_rgb_hybrid(), or
+        # 2. Add a reverse LUT lookup in render.py (fragile)
+        # For now, default palette is acceptable since GPU path dominates.
+        palette = "Ink & Gold"  # Default fallback when GPU unavailable
+
+        # Create pure ColorParams (no UI dependency!)
+        color_params = ColorParams(
             clip_percent=clip_percent,
             brightness=brightness,
             contrast=contrast,
             gamma=gamma,
             color_enabled=color_enabled,
+            palette=palette,
         )
 
         # Use CPU implementation
-        return build_base_rgb(arr, settings)
+        return build_base_rgb(arr, color_params)
 
 
 __all__ = [
