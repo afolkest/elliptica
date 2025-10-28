@@ -29,6 +29,9 @@ class RenderResult:
     offset_y: int = 0  # Crop offset for mask alignment
     ex: np.ndarray | None = None  # Electric field X component (for anisotropic blur)
     ey: np.ndarray | None = None  # Electric field Y component (for anisotropic blur)
+    # Cached conductor masks at canvas resolution (saves redundant rasterization)
+    conductor_masks_canvas: list[np.ndarray] | None = None  # Surface masks
+    interior_masks_canvas: list[np.ndarray] | None = None  # Interior masks
 
 
 @dataclass
@@ -191,6 +194,20 @@ def perform_render(
     ex_cropped = ex[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
     ey_cropped = ey[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
 
+    # Rasterize conductor masks at canvas resolution (do this once to avoid redundant rasterization)
+    conductor_masks_canvas = None
+    interior_masks_canvas = None
+    if project.conductors:
+        from flowcol.postprocess.masks import rasterize_conductor_masks
+        conductor_masks_canvas, interior_masks_canvas = rasterize_conductor_masks(
+            project.conductors,
+            lic_cropped.shape,
+            margin_physical,
+            scale,
+            crop_x0,
+            crop_y0,
+        )
+
     t_end = time.time()
     print(f"Total render time: {t_end - t_start:.2f}s")
 
@@ -203,4 +220,6 @@ def perform_render(
         offset_y=crop_y0,
         ex=ex_cropped,
         ey=ey_cropped,
+        conductor_masks_canvas=conductor_masks_canvas,
+        interior_masks_canvas=interior_masks_canvas,
     )
