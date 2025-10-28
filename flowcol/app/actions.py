@@ -8,14 +8,15 @@ from scipy.ndimage import zoom
 from flowcol.pipeline import perform_render
 from flowcol.types import Conductor
 from flowcol.app.core import AppState, RenderCache
+from flowcol.postprocess.masks import derive_interior
+from flowcol.app.core import ConductorColorSettings
+from flowcol.gpu import GPUContext
 
 MAX_CONDUCTOR_DIM = 32768
 
 
 def add_conductor(state: AppState, conductor: Conductor) -> None:
     """Insert a new conductor and mark field/render dirty."""
-    from flowcol.postprocess.masks import derive_interior
-    from flowcol.app.core import ConductorColorSettings
 
     # Assign unique ID
     conductor.id = state.project.next_conductor_id
@@ -223,6 +224,21 @@ def ensure_render(state: AppState) -> bool:
     if result is None:
         return False
 
+    # Free old GPU tensors before creating new cache
+    if state.render_cache and GPUContext.is_available():
+        old_cache = state.render_cache
+        if (old_cache.result_gpu is not None or
+            old_cache.ex_gpu is not None or
+            old_cache.ey_gpu is not None or
+            old_cache.display_array_gpu is not None):
+            # Clear all GPU tensors including display_array_gpu (largest one!)
+            old_cache.result_gpu = None
+            old_cache.ex_gpu = None
+            old_cache.ey_gpu = None
+            old_cache.display_array_gpu = None
+            old_cache.invalidate_cpu_cache()
+            GPUContext.empty_cache()
+
     # Generate conductor segmentation masks at display resolution
     from flowcol.postprocess.masks import rasterize_conductor_masks
 
@@ -251,7 +267,6 @@ def ensure_render(state: AppState) -> bool:
 
     # Upload render result to GPU for fast postprocessing
     try:
-        from flowcol.gpu import GPUContext
         print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
         print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
         print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")

@@ -63,5 +63,15 @@ class GPUContext:
         """Download GPU tensor to NumPy array."""
         return tensor.cpu().numpy()
 
+    @classmethod
+    def empty_cache(cls) -> None:
+        """Release cached GPU memory back to system.
+
+        Call this after freeing large tensors to ensure VRAM is released.
+        Only effective when MPS is available.
+        """
+        if cls.is_available():
+            torch.mps.empty_cache()
+
 
 __all__ = ['GPUContext']
