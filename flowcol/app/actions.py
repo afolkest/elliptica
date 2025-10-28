@@ -237,11 +237,13 @@ def ensure_render(state: AppState) -> bool:
             scale,
         )
 
+    # Initialize display_array as reference to result.array for backend tests
+    # UI layer will replace this with downsampled version during postprocessing
     state.render_cache = RenderCache(
         result=result,
         multiplier=settings.multiplier,
         supersample=settings.supersample,
-        display_array=result.array.copy(),
+        display_array=result.array,  # Reference (not copy!) - UI layer will replace
         base_rgb=None,  # Will be built on-demand
         conductor_masks=conductor_masks,
         interior_masks=interior_masks,

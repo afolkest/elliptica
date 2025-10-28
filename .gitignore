@@ -11,6 +11,7 @@ CLAUDE.md
 assets
 renders
 projects
+candidates
 
 # C extensions
 *.so
