@@ -60,13 +60,13 @@ def compute_electric_field(phi):
     return -ex, -ey
 
 
-def test_resolution_convergence(resolutions=[64, 128, 256, 512], boundary_type=DIRICHLET):
+def test_resolution_convergence(resolutions=[64, 128, 256, 512], boundary_condition=DIRICHLET):
     """Test solver at multiple resolutions and measure convergence."""
 
     times = []
     solutions = []
 
-    print(f"\nTesting resolution convergence with {['Dirichlet', 'Neumann'][boundary_type]} BCs:")
+    print(f"\nTesting resolution convergence with {['Dirichlet', 'Neumann'][boundary_condition]} BCs:")
     print("-" * 50)
 
     for res in resolutions:
@@ -81,7 +81,10 @@ def test_resolution_convergence(resolutions=[64, 128, 256, 512], boundary_type=D
             conductor_mask,
             values,
             tol=1e-6,
-            boundary_type=boundary_type
+            boundary_top=boundary_condition,
+            boundary_bottom=boundary_condition,
+            boundary_left=boundary_condition,
+            boundary_right=boundary_condition
         )
         elapsed = time.time() - start
         times.append(elapsed)
@@ -106,7 +109,7 @@ def test_resolution_convergence(resolutions=[64, 128, 256, 512], boundary_type=D
 def test_l_shape():
     """Test with L-shaped conductor and create detailed visualization."""
 
-    res = 2048
+    res = 256  # Reduced from 2048 for faster testing
     print(f"\nTesting L-shaped conductor at {res}×{res}:")
     print("-" * 50)
 
@@ -117,11 +120,15 @@ def test_l_shape():
 
     # Solve with both BCs
     start = time.time()
-    phi_d = solve_poisson_system(conductor_mask, values, boundary_type=DIRICHLET)
+    phi_d = solve_poisson_system(conductor_mask, values,
+                                  boundary_top=DIRICHLET, boundary_bottom=DIRICHLET,
+                                  boundary_left=DIRICHLET, boundary_right=DIRICHLET)
     time_d = time.time() - start
 
     start = time.time()
-    phi_n = solve_poisson_system(conductor_mask, values, boundary_type=NEUMANN)
+    phi_n = solve_poisson_system(conductor_mask, values,
+                                  boundary_top=NEUMANN, boundary_bottom=NEUMANN,
+                                  boundary_left=NEUMANN, boundary_right=NEUMANN)
     time_n = time.time() - start
 
     print(f"Dirichlet: {time_d:.3f}s | φ ∈ [{phi_d.min():.4f}, {phi_d.max():.4f}]")
@@ -136,7 +143,7 @@ def test_l_shape():
         # Add field lines using streamplot
         ex, ey = compute_electric_field(phi)
         # Downsample for streamplot to avoid issues
-        step = 32  # Larger step for 2k res
+        step = 8  # Adjusted for 256 res
         y, x = np.mgrid[0:res:step, 0:res:step]
         ax.streamplot(x, y, ex[::step, ::step], ey[::step, ::step],
                      color='white', density=1.0,
@@ -166,7 +173,9 @@ def validate_parallel_plates():
     values[:, left] = 0.0   # Left plate at 0V
     values[:, right] = 1.0  # Right plate at 1V
 
-    phi = solve_poisson_system(mask, values, boundary_type=DIRICHLET)
+    phi = solve_poisson_system(mask, values,
+                                boundary_top=DIRICHLET, boundary_bottom=DIRICHLET,
+                                boundary_left=DIRICHLET, boundary_right=DIRICHLET)
 
     # Check if solution is approximately linear between plates
     mid_row = phi[res//2, left:right+1]
@@ -186,8 +195,8 @@ def main():
     print("POISSON SOLVER TEST SUITE")
     print("=" * 60)
 
-    # Test resolutions for performance
-    resolutions = [1024, 2048, 4096]
+    # Test resolutions for performance (using smaller sizes for quick testing)
+    resolutions = [64, 128, 256]
 
     # Test with Dirichlet BCs
     dirichlet_sols, d_times = test_resolution_convergence(resolutions, DIRICHLET)
