@@ -205,6 +205,9 @@ class AppState:
             self.render_cache.ey_gpu = None
             # Clear CPU cached postprocessing results
             self.render_cache.edge_blurred_array = None
+            # Release GPU memory back to system
+            from flowcol.gpu import GPUContext
+            GPUContext.empty_cache()
         self.render_cache = None
         self.render_dirty = True
 
