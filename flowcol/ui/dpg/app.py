@@ -1782,17 +1782,23 @@ class FlowColApp:
             # Set CPU as primary source (this is CPU-only path)
             cache.set_display_array_cpu(display_array)
 
-            # Recompute masks at full render resolution
+            # Use cached masks from RenderResult if available (avoids redundant rasterization)
             if self.state.project.conductors:
-                scale = cache.multiplier * cache.supersample
-                full_res_conductor_masks, full_res_interior_masks = rasterize_conductor_masks(
-                    self.state.project.conductors,
-                    cache.result.canvas_scaled_shape,
-                    cache.result.margin,
-                    scale,
-                    cache.result.offset_x,
-                    cache.result.offset_y,
-                )
+                if cache.result.conductor_masks_canvas is not None:
+                    # Use pre-computed masks from render
+                    full_res_conductor_masks = cache.result.conductor_masks_canvas
+                    full_res_interior_masks = cache.result.interior_masks_canvas
+                else:
+                    # Fallback: rasterize masks (for compatibility with older cached renders)
+                    scale = cache.multiplier * cache.supersample
+                    full_res_conductor_masks, full_res_interior_masks = rasterize_conductor_masks(
+                        self.state.project.conductors,
+                        cache.result.canvas_scaled_shape,
+                        cache.result.margin,
+                        scale,
+                        cache.result.offset_x,
+                        cache.result.offset_y,
+                    )
 
                 # Store full-resolution masks (for edge blur)
                 cache.full_res_conductor_masks = full_res_conductor_masks
@@ -2675,23 +2681,13 @@ class FlowColApp:
                     postprocess.downsample_sigma,
                 )
 
-            # Generate conductor segmentation masks at full resolution, then downsample
-            full_res_conductor_masks = None
-            full_res_interior_masks = None
+            # Use cached masks from RenderResult (avoids redundant rasterization)
+            full_res_conductor_masks = result.conductor_masks_canvas
+            full_res_interior_masks = result.interior_masks_canvas
             conductor_masks = None
             interior_masks = None
-            if project_snapshot.conductors:
+            if project_snapshot.conductors and full_res_conductor_masks is not None:
                 from scipy.ndimage import zoom
-
-                scale = settings_snapshot.multiplier * settings_snapshot.supersample
-                full_res_conductor_masks, full_res_interior_masks = rasterize_conductor_masks(
-                    project_snapshot.conductors,
-                    result.canvas_scaled_shape,
-                    result.margin,
-                    scale,
-                    result.offset_x,
-                    result.offset_y,
-                )
 
                 # Downsample masks to match display_array resolution
                 if result.array.shape != display_array.shape:

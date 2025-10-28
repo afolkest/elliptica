@@ -239,19 +239,9 @@ def ensure_render(state: AppState) -> bool:
             old_cache.invalidate_cpu_cache()
             GPUContext.empty_cache()
 
-    # Generate conductor segmentation masks at display resolution
-    from flowcol.postprocess.masks import rasterize_conductor_masks
-
-    conductor_masks = None
-    interior_masks = None
-    if state.project.conductors:
-        scale = settings.multiplier * settings.supersample
-        conductor_masks, interior_masks = rasterize_conductor_masks(
-            state.project.conductors,
-            result.canvas_scaled_shape,
-            result.margin,
-            scale,
-        )
+    # Use pre-computed conductor masks from RenderResult (avoids redundant rasterization)
+    conductor_masks = result.conductor_masks_canvas
+    interior_masks = result.interior_masks_canvas
 
     # Initialize display_array as reference to result.array for backend tests
     # UI layer will replace this with downsampled version during postprocessing
