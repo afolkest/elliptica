@@ -6,94 +6,8 @@ Based on thorough codebase review, prioritized by impact (80/20 rule).
 
 ## Critical Issues Worth Fixing
 
-### **0. Poisson API Regression Blocks Tests** 🧨 Critical
-
-**Impact**: 30% of value (correctness + CI signal)
-
-**Location**: `poisson.py:98`, `tests/test_poisson.py:80`
-
-**Problem**:
-- Public API changed from `boundary_type=` to four directional parameters.
-- Tests (and likely downstream tooling) still call the old signature.
-- Result: every Poisson test raises immediately, so we have zero coverage of the field solver path.
-
-**Impact**:
-- Core physics code is effectively untested; regressions would ship unnoticed.
-- Breaks developer confidence and slows iteration because the suite is red by default.
-
-**Fix**:
-1. Provide a compatibility shim or restore a keyword that maps to the new args.
-2. Update tests to the current API once the shim exists (keeps suite green both ways).
-3. Add a regression test that exercises both call styles until the deprecation window ends.
-
-**Effort**: Low (50-80 lines + test updates)
-
----
-
 ### **1. GPU Tensor Memory Leak/Lifecycle Chaos** ✅ FIXED
-
-**Status**: ✅ FIXED
-
-**Impact**: 30% of value
-
-**Location**: `app/core.py:RenderCache`, `app/actions.py:ensure_render()`, `ui/dpg/app.py`
-
-**Problem**:
-GPU tensors (`result_gpu`, `display_array_gpu`, `ex_gpu`, `ey_gpu`) had inconsistent lifecycle management:
-- Created in `ensure_render()` but never explicitly freed before new uploads
-- Cleared in `clear_render_cache()` but no MPS cache flush
-- VRAM accumulation across multiple renders
-
-**Solution Implemented**:
-1. ✅ Added `GPUContext.empty_cache()` method that calls `torch.mps.empty_cache()` (gpu/__init__.py:66-74)
-2. ✅ Updated `clear_render_cache()` to call `empty_cache()` after clearing tensors (app/core.py:208-210)
-3. ✅ Updated `ensure_render()` to free ALL old GPU tensors before uploading new ones (app/actions.py:227-240):
-   - Clears `result_gpu`, `ex_gpu`, `ey_gpu` (field data)
-   - **Critically**: Also clears `display_array_gpu` (largest tensor - downsampled display frame)
-   - Calls `invalidate_cpu_cache()` to ensure lazy CPU cache is cleared
-   - Then calls `empty_cache()` to release VRAM back to system
-4. ✅ Added comprehensive test suite in `test_gpu_memory_lifecycle.py`:
-   - Tests cleanup on `clear_render_cache()`
-   - Tests cleanup on re-render
-   - Tests multiple sequential renders don't leak
-   - Tests graceful fallback when GPU unavailable
-
-**Result**: Proper MPS memory management with explicit cleanup at the right lifecycle points. VRAM is released immediately when old renders are replaced or cleared. All GPU tensors including the large display frame are freed before allocating new ones.
-
----
-
 ### **2. Redundant Mask Rasterization** ✅ FIXED
-
-**Status**: ✅ FIXED
-
-**Impact**: 25% of value (15-20% total render time saved)
-
-**Location**: `app/actions.py:ensure_render()`, `postprocess/masks.py:rasterize_conductor_masks()`
-
-**Problem**:
-Conductor masks were rasterized MULTIPLE times per render:
-1. During field computation (field.py:37-52) - scaled and blurred for Poisson solve (unavoidable)
-2. After render for display resolution (actions.py:249) - for colorization overlays
-3. On cache rebuild (app.py:1788) - when loading from disk
-4. During postprocess worker (app.py:2687) - after background render
-
-Sites 2, 3, and 4 all rasterized at the same resolution (canvas_scaled_shape), creating significant redundancy.
-
-**Solution Implemented**:
-1. ✅ Added `conductor_masks_canvas` and `interior_masks_canvas` fields to RenderResult (pipeline.py:33-34)
-2. ✅ Compute masks ONCE in `perform_render()` at canvas resolution (pipeline.py:197-209)
-3. ✅ Updated `ensure_render()` to use cached masks from RenderResult (actions.py:242-244)
-4. ✅ Updated `_rebuild_cache_display_fields()` to use cached masks with fallback (app.py:1785-1805)
-5. ✅ Updated `_postprocess_render_on_worker()` to use cached masks (app.py:2684-2707)
-6. ✅ Added comprehensive test suite (`test_mask_deduplication.py`):
-   - Tests masks are cached in RenderResult
-   - Tests RenderCache uses cached masks (same object, not rasterized again)
-   - Performance benchmark with 5 conductors
-
-**Result**: Eliminated 2-3 redundant rasterizations per render. Masks computed once in `perform_render()` and reused by all consumers. Field computation masks remain separate (they need blur anyway).
-
----
-
 ### **3. UI God Object (2888 lines)** 🏗️ Architecture Debt
 
 **Impact**: 20% of value (maintainability multiplier)
@@ -132,100 +46,11 @@ The FlowColApp class is a God Object handling:
 
 ---
 
-### **4. Backend/UI Coupling via DisplaySettings** 🔗 Architecture Boundary Violation
-
-**Status**: ✅ FIXED
-
-**Location**: `postprocess/color.py:build_base_rgb()`, `render.py:colorize_array()`
-
-**Problem**:
-Pure backend colorization functions directly accept `DisplaySettings` objects, violating the functional/OOP boundary stated in CLAUDE.md.
-
-**Solution Implemented**:
-1. ✅ Created `ColorParams` dataclass in `flowcol/postprocess/color.py:9-21`
-2. ✅ Updated `build_base_rgb()` to accept `ColorParams` instead of `DisplaySettings`
-3. ✅ Updated `apply_region_overlays()` to accept `ColorParams` instead of `DisplaySettings`
-4. ✅ Added `DisplaySettings.to_color_params()` method in `flowcol/app/core.py:60-70`
-5. ✅ Updated all 5 call sites to use `.to_color_params()`
-6. ✅ Verified no backend imports from `app/`
-
-**Result**: Clean backend/UI separation enables headless usage without UI dependencies.
-
----
-
-### **5. Two Sources of Truth for Display Data** 🐛 State Management Bug
-
-**Status**: ✅ FIXED
-
-**Impact**: 10% of value (correctness issue)
-
-**Location**: `app/core.py:RenderCache`, `app/actions.py:ensure_render()`
-
-**Problem**:
-Critical render data existed in TWO places:
-- `RenderCache.display_array` - CPU-side downsampled array
-- `RenderCache.display_array_gpu` - GPU-side downsampled tensor
-
-These could become desynchronized with no validation mechanism.
-
-**Solution Implemented**:
-1. ✅ Converted `RenderCache` from `@dataclass` to regular class (core.py:73-159)
-2. ✅ Established mutual exclusion: EITHER `display_array_gpu` (GPU primary) OR `_display_array_cpu` (CPU primary)
-3. ✅ Made `display_array` a `@property` with lazy cached download from GPU (core.py:106-117)
-4. ✅ Added `set_display_array_gpu()` / `set_display_array_cpu()` to enforce single source (core.py:127-148)
-5. ✅ Added `invalidate_cpu_cache()` for when GPU tensor is modified (core.py:150-152)
-6. ✅ Updated UI layer to use new setters (app.py:893, 904)
-7. ✅ Eliminated wasteful `.copy()` in ensure_render() - now uses reference (actions.py:246)
-
-**Result**: Impossible to have desynchronized CPU/GPU state. Single source of truth with lazy cached downloads.
-
----
-
+### **4. Backend/UI Coupling via DisplaySettings** ✅ FIXED
+### **5. Two Sources of Truth for Display Data** ✅ FIXED
 ### **6. Overlay Colorization Re-renders Whole Frame** ✅ FIXED
 
-**Status**: ✅ FIXED
-
-**Impact**: 15% of value (major share of postprocess cost)
-
-**Location**: `postprocess/color.py:141-243` - `apply_region_overlays()`
-
-**Problem**:
-Each conductor overlay called `colorize_array()` on the ENTIRE LIC frame:
-- With 5 conductors: ~50M pixel operations (5 × full frame)
-- 99% of pixels discarded during masking
-- Complexity: O(R·total_pixels) where R = number of regions
-- Example: 1920×1080 with 5 conductors = 10.3M pixels × 5 = 51.8M operations
-
-**Solution Implemented**:
-1. ✅ Pre-compute RGB for each UNIQUE palette once (not per-region!)
-2. ✅ Collect unique palettes needed across all regions (color.py:183-194)
-3. ✅ Build cached RGB using `build_base_rgb()` for each unique palette (color.py:196-206)
-   - Reuses optimized GPU or JIT-accelerated CPU path
-   - Percentiles computed on full array (correct normalization)
-4. ✅ Blend each region using cached palette RGB + mask (color.py:221-241)
-5. ✅ Added `display_array_gpu` parameter for GPU acceleration (color.py:149)
-6. ✅ Updated all 3 call sites:
-   - `ui/dpg/app.py:970` - Main display path (passes `cache.display_array_gpu`)
-   - `ui/dpg/app.py:2173` - Export/save path (uses CPU-optimized `build_base_rgb`)
-   - `test_per_region_colorization.py:139` - Test (default None)
-7. ✅ Added comprehensive test suite (`test_overlay_recolor_optimization.py`):
-   - Palette caching validation with shared palettes
-   - Visual consistency test
-   - Performance benchmark comparing old vs new
-   - Solid color fills (unchanged)
-   - Empty case (no overlays)
-
-**Complexity Analysis**:
-- Old: O(R·total_pixels) = 5 regions × 10.3M pixels = 51.8M ops
-- New: O(P·total_pixels + R·mask_pixels) = 2 unique palettes × 10.3M + 5 × ~50K = 21M ops
-- **Theoretical speedup: 2.5x for typical case**
-- With more regions sharing palettes: up to 10-25x speedup!
-
-**Result**: Eliminated redundant full-frame colorizations. Pre-compute unique palettes ONCE, blend using cached RGB in masked regions. Dramatic performance improvement for conductor color changes.
-
----
-
-### **7. Postprocess Phase Still CPU-Bound** ⚡ GPU Roadblock
+### **7. Postprocess Phase Still CPU-Bound** ⚡ GPU Roadblock -- idk if fixed??????
 
 **Impact**: 25% of value (keeps us from a true GPU-first pipeline)
 
