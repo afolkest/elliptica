@@ -321,7 +321,7 @@ class FileIOController:
 
             # Rebuild display fields from loaded cache
             if loaded_cache is not None:
-                self.app._rebuild_cache_display_fields()
+                self.app.cache_panel.rebuild_cache_display_fields()
 
             # Update UI to reflect loaded state
             self.app._mark_canvas_dirty()
@@ -330,7 +330,7 @@ class FileIOController:
             self.app._rebuild_conductor_controls()
             self.app._update_conductor_slider_labels()
             self.sync_ui_from_state()
-            self.app._update_cache_status_display()
+            self.app.cache_panel.update_cache_status_display()
 
             # Status message
             if loaded_cache:

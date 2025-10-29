@@ -234,7 +234,7 @@ class RenderOrchestrator:
             with self.app.state_lock:
                 self.app.state.view_mode = "render"
             self.app._update_control_visibility()
-            self.app._update_cache_status_display()
+            self.app.cache_panel.update_cache_status_display()
 
             # Auto-save cache if project has been saved before
             if self.app.file_io.current_project_path is not None:

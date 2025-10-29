@@ -19,6 +19,7 @@ from flowcol.app import actions
 from flowcol.ui.dpg.render_modal import RenderModalController
 from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
 from flowcol.ui.dpg.file_io_controller import FileIOController
+from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
 from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
@@ -26,7 +27,6 @@ from flowcol import defaults
 from flowcol.render import colorize_array, _apply_display_transforms
 # apply_region_overlays removed - using unified GPU/CPU pipeline via apply_full_postprocess_hybrid
 from flowcol.postprocess.masks import rasterize_conductor_masks
-from flowcol.serialization import compute_project_fingerprint
 from PIL import Image
 from datetime import datetime
 
@@ -162,14 +162,6 @@ class FlowColApp:
     postprocess_gamma_slider_id: Optional[int] = None
     color_enabled_checkbox_id: Optional[int] = None
 
-    # Cache status display
-    cache_status_text_id: Optional[int] = None
-    cache_warning_group_id: Optional[int] = None
-    back_to_edit_button_id: Optional[int] = None
-    mark_clean_button_id: Optional[int] = None
-    discard_cache_button_id: Optional[int] = None
-    view_postprocessing_button_id: Optional[int] = None
-
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
     canvas_dirty: bool = True
@@ -208,6 +200,7 @@ class FlowColApp:
         self.render_modal = RenderModalController(self)
         self.render_orchestrator = RenderOrchestrator(self)
         self.file_io = FileIOController(self)
+        self.cache_panel = CacheManagementPanel(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -261,11 +254,7 @@ class FlowColApp:
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
                 dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
-                self.view_postprocessing_button_id = dpg.add_button(
-                    label="View Postprocessing",
-                    callback=self._on_view_postprocessing_clicked,
-                    show=False
-                )
+                self.cache_panel.build_view_postprocessing_button(edit_group)
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
                 dpg.add_text("Canvas Size")
@@ -313,23 +302,7 @@ class FlowColApp:
                 dpg.add_spacer(height=10)
 
                 # Render Cache Status
-                dpg.add_text("Render Cache")
-                self.cache_status_text_id = dpg.add_text("No cached render")
-                with dpg.group() as cache_warning_group:
-                    self.cache_warning_group_id = cache_warning_group
-                    dpg.add_text("⚠️  Project modified since render", color=(255, 200, 100))
-                    with dpg.group(horizontal=True):
-                        self.mark_clean_button_id = dpg.add_button(
-                            label="Mark Clean",
-                            callback=self._on_mark_clean_clicked,
-                            width=90
-                        )
-                        self.discard_cache_button_id = dpg.add_button(
-                            label="Discard",
-                            callback=self._on_discard_cache_clicked,
-                            width=90
-                        )
-                dpg.configure_item(self.cache_warning_group_id, show=False)
+                self.cache_panel.build_cache_status_ui(render_group)
 
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
@@ -1026,144 +999,6 @@ class FlowColApp:
 
 
     # ------------------------------------------------------------------
-    # Render Cache Management
-    # ------------------------------------------------------------------
-    def _update_cache_status_display(self) -> None:
-        """Update cache status text and warning visibility."""
-        if dpg is None:
-            return
-
-        with self.state_lock:
-            cache = self.state.render_cache
-
-            if cache is None:
-                # No cache
-                if self.cache_status_text_id:
-                    dpg.set_value(self.cache_status_text_id, "No cached render")
-                if self.cache_warning_group_id:
-                    dpg.configure_item(self.cache_warning_group_id, show=False)
-                return
-
-            # Cache exists - show resolution
-            shape = cache.result.array.shape
-            status_text = f"✓ {shape[1]}×{shape[0]} @ {cache.supersample}×"
-
-            # Check if dirty (fingerprint mismatch)
-            current_fp = compute_project_fingerprint(self.state.project)
-            is_dirty = (cache.project_fingerprint != current_fp)
-
-            if is_dirty:
-                status_text = f"⚠️  {shape[1]}×{shape[0]} @ {cache.supersample}× (modified)"
-                if self.cache_warning_group_id:
-                    dpg.configure_item(self.cache_warning_group_id, show=True)
-            else:
-                if self.cache_warning_group_id:
-                    dpg.configure_item(self.cache_warning_group_id, show=False)
-
-            if self.cache_status_text_id:
-                dpg.set_value(self.cache_status_text_id, status_text)
-
-    def _on_mark_clean_clicked(self, sender, app_data):
-        """Mark cache as clean (reset fingerprint to current project state)."""
-        with self.state_lock:
-            if self.state.render_cache is not None:
-                current_fp = compute_project_fingerprint(self.state.project)
-                self.state.render_cache.project_fingerprint = current_fp
-
-        self._update_cache_status_display()
-        dpg.set_value("status_text", "Render cache marked as clean")
-
-    def _on_discard_cache_clicked(self, sender, app_data):
-        """Discard cached render."""
-        with self.state_lock:
-            self.state.render_cache = None
-            self.state.view_mode = "edit"
-
-        self._update_control_visibility()
-        self._mark_canvas_dirty()
-        self._update_cache_status_display()
-        dpg.set_value("status_text", "Render cache discarded")
-
-    def _on_view_postprocessing_clicked(self, sender, app_data):
-        """Switch to render mode using existing cache (no re-render)."""
-        with self.state_lock:
-            if self.state.render_cache is None:
-                dpg.set_value("status_text", "No cached render available")
-                return
-            self.state.view_mode = "render"
-
-        self._update_control_visibility()
-        self._mark_canvas_dirty()
-        self._refresh_render_texture()
-        dpg.set_value("status_text", "Viewing cached render")
-
-
-    def _rebuild_cache_display_fields(self) -> None:
-        """Rebuild display_array and masks from loaded cache RenderResult."""
-        from flowcol.render import downsample_lic
-        from flowcol.postprocess.masks import rasterize_conductor_masks
-        from scipy.ndimage import zoom
-
-        with self.state_lock:
-            cache = self.state.render_cache
-            if cache is None or cache.result is None:
-                return
-
-            # Recompute display_array
-            canvas_w, canvas_h = self.state.project.canvas_resolution
-            target_shape = (canvas_h, canvas_w)
-            display_array = downsample_lic(
-                cache.result.array,
-                target_shape,
-                cache.supersample,
-                self.state.display_settings.downsample_sigma,
-            )
-            # Set CPU as primary source (this is CPU-only path)
-            cache.set_display_array_cpu(display_array)
-
-            # Use cached masks from RenderResult if available (avoids redundant rasterization)
-            if self.state.project.conductors:
-                if cache.result.conductor_masks_canvas is not None:
-                    # Use pre-computed masks from render
-                    full_res_conductor_masks = cache.result.conductor_masks_canvas
-                    full_res_interior_masks = cache.result.interior_masks_canvas
-                else:
-                    # Fallback: rasterize masks (for compatibility with older cached renders)
-                    scale = cache.multiplier * cache.supersample
-                    full_res_conductor_masks, full_res_interior_masks = rasterize_conductor_masks(
-                        self.state.project.conductors,
-                        cache.result.canvas_scaled_shape,
-                        cache.result.margin,
-                        scale,
-                        cache.result.offset_x,
-                        cache.result.offset_y,
-                    )
-
-                # Store full-resolution masks (for edge blur)
-                cache.full_res_conductor_masks = full_res_conductor_masks
-                cache.full_res_interior_masks = full_res_interior_masks
-
-                # Downsample masks to match display_array resolution (for region overlays)
-                if cache.result.array.shape != display_array.shape:
-                    scale_y = display_array.shape[0] / cache.result.array.shape[0]
-                    scale_x = display_array.shape[1] / cache.result.array.shape[1]
-                    conductor_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_conductor_masks
-                    ]
-                    interior_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_interior_masks
-                    ]
-                else:
-                    # Same resolution - reuse full-res masks
-                    conductor_masks = full_res_conductor_masks
-                    interior_masks = full_res_interior_masks
-
-                cache.conductor_masks = conductor_masks
-                cache.interior_masks = interior_masks
-
-    # ------------------------------------------------------------------
     # Canvas input processing
     # ------------------------------------------------------------------
     def _detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
@@ -1839,9 +1674,9 @@ class FlowColApp:
         if dpg.does_item_exist("render_field_button"):
             dpg.configure_item("render_field_button", show=(mode == "edit"))
 
-        if self.view_postprocessing_button_id is not None:
+        if self.cache_panel.view_postprocessing_button_id is not None:
             show_button = (mode == "edit" and has_cache)
-            dpg.configure_item(self.view_postprocessing_button_id, show=show_button)
+            dpg.configure_item(self.cache_panel.view_postprocessing_button_id, show=show_button)
 
         self._update_conductor_slider_labels()
 
