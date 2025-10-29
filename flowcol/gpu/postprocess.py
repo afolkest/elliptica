@@ -71,21 +71,8 @@ def apply_full_postprocess_gpu(
         lut_tensor,
     )
 
-    # Step 2: Apply conductor smear (if any conductors have smear enabled)
-    has_smear = any(c.smear_enabled for c in conductors)
-    if has_smear and conductor_masks_cpu is not None:
-        base_rgb = apply_conductor_smear_gpu(
-            base_rgb,
-            scalar_tensor,
-            conductor_masks_cpu,
-            conductors,
-            render_shape,
-            canvas_resolution,
-            lut_tensor,
-            lic_percentiles,
-        )
-
-    # Step 3: Apply region overlays (if any conductors have custom colors)
+    # Step 2: Apply region overlays (if any conductors have custom colors)
+    # Must come BEFORE smear so that custom colors get smeared too!
     has_overlays = any(
         conductor.id in conductor_color_settings
         for conductor in conductors
@@ -119,6 +106,21 @@ def apply_full_postprocess_gpu(
             brightness,
             contrast,
             gamma,
+        )
+
+    # Step 3: Apply conductor smear (if any conductors have smear enabled)
+    # Comes AFTER region overlays so smear applies to custom colored regions
+    has_smear = any(c.smear_enabled for c in conductors)
+    if has_smear and conductor_masks_cpu is not None:
+        base_rgb = apply_conductor_smear_gpu(
+            base_rgb,
+            scalar_tensor,
+            conductor_masks_cpu,
+            conductors,
+            render_shape,
+            canvas_resolution,
+            lut_tensor,
+            lic_percentiles,
         )
 
     return torch.clamp(base_rgb, 0.0, 1.0)
@@ -200,54 +202,57 @@ def apply_full_postprocess_hybrid(
             return GPUContext.to_cpu(rgb_uint8_tensor)
 
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
-            # GPU operation failed (OOM, unsupported op, etc.) - fall back to CPU
-            print(f"⚠️  GPU postprocessing failed ({e}), falling back to CPU")
-            # Continue to CPU fallback below
-    # CPU fallback: use existing CPU functions (also reached if GPU path throws exception)
-        from flowcol.postprocess.color import build_base_rgb, apply_region_overlays, ColorParams
-        from flowcol.render import apply_conductor_smear
+            # GPU operation failed (OOM, unsupported op) - try CPU device
+            print(f"⚠️  GPU postprocessing failed ({e}), retrying with device='cpu'")
 
-        color_params = ColorParams(
-            clip_percent=clip_percent,
-            brightness=brightness,
-            contrast=contrast,
-            gamma=gamma,
-            color_enabled=color_enabled,
-            palette=palette,
-        )
+            # Retry with CPU device (PyTorch operations work on CPU too!)
+            scalar_tensor_cpu = scalar_tensor.to('cpu') if scalar_tensor.device.type != 'cpu' else scalar_tensor
 
-        # Build base RGB (CPU)
-        base_rgb = build_base_rgb(scalar_array, color_params, display_array_gpu=None)
-
-        # Apply conductor smear (CPU)
-        # Note: apply_conductor_smear expects a Project object, but we don't want to
-        # import types.Project here (circular dependency). Instead, we skip smear in
-        # CPU fallback mode. This is acceptable because:
-        # 1. GPU mode is the primary path (99% of use cases)
-        # 2. CPU fallback is only for systems without torch
-        # 3. The CPU path can still be used via the UI which has proper Project objects
-        #
-        # For now, we skip smear in this specific CPU fallback to avoid the fake object issue.
-        # TODO: Refactor apply_conductor_smear to accept individual parameters instead of Project
-
-        # Apply region overlays (CPU)
-        has_overlays = any(
-            conductor.id in conductor_color_settings
-            for conductor in conductors
-        )
-        if has_overlays and conductor_masks is not None and interior_masks is not None:
-            base_rgb = apply_region_overlays(
-                base_rgb,
-                scalar_array,
+            rgb_tensor_cpu = apply_full_postprocess_gpu(
+                scalar_tensor_cpu,
                 conductor_masks,
                 interior_masks,
                 conductor_color_settings,
                 conductors,
-                color_params,
-                display_array_gpu=None,
+                render_shape,
+                canvas_resolution,
+                clip_percent,
+                brightness,
+                contrast,
+                gamma,
+                color_enabled,
+                palette,
+                lic_percentiles,
             )
 
-    return base_rgb
+            # Convert to uint8 and return (already on CPU)
+            rgb_uint8_tensor = (rgb_tensor_cpu * 255.0).clamp(0, 255).to(torch.uint8)
+            return rgb_uint8_tensor.numpy()
+    else:
+        # No GPU available - use CPU device with PyTorch
+        # PyTorch operations work fine on CPU, often faster than NumPy!
+        scalar_tensor_cpu = torch.from_numpy(scalar_array).to(dtype=torch.float32, device='cpu')
+
+        rgb_tensor_cpu = apply_full_postprocess_gpu(
+            scalar_tensor_cpu,
+            conductor_masks,
+            interior_masks,
+            conductor_color_settings,
+            conductors,
+            render_shape,
+            canvas_resolution,
+            clip_percent,
+            brightness,
+            contrast,
+            gamma,
+            color_enabled,
+            palette,
+            lic_percentiles,
+        )
+
+        # Convert to uint8 and return
+        rgb_uint8_tensor = (rgb_tensor_cpu * 255.0).clamp(0, 255).to(torch.uint8)
+        return rgb_uint8_tensor.numpy()
 
 
 __all__ = [

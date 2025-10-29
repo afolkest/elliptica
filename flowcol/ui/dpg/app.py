@@ -21,8 +21,8 @@ from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
 from flowcol.mask_utils import load_conductor_masks
-from flowcol.render import colorize_array, apply_conductor_smear, _apply_display_transforms
-from flowcol.postprocess.color import apply_region_overlays
+from flowcol.render import colorize_array, _apply_display_transforms
+# apply_region_overlays removed - using unified GPU/CPU pipeline via apply_full_postprocess_hybrid
 from flowcol.postprocess.masks import rasterize_conductor_masks
 from flowcol.serialization import save_project, load_project, save_render_cache, load_render_cache, compute_project_fingerprint
 from PIL import Image
