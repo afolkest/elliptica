@@ -13,7 +13,11 @@ class GPUContext:
 
     @classmethod
     def device(cls) -> torch.device:
-        """Get GPU device (lazy initialization)."""
+        """Get GPU device (lazy initialization).
+
+        Returns MPS if available (Apple Silicon), otherwise CPU.
+        PyTorch operations work on both devices, so CPU is a valid fallback.
+        """
         if cls._device is None:
             if cls.is_available():
                 cls._device = torch.device('mps')
