@@ -21,6 +21,7 @@ from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
 from flowcol.ui.dpg.file_io_controller import FileIOController
 from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
 from flowcol.ui.dpg.postprocessing_panel import PostprocessingPanel
+from flowcol.ui.dpg.conductor_controls_panel import ConductorControlsPanel
 from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
@@ -154,8 +155,6 @@ class FlowColApp:
     render_controls_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
-    conductor_controls_container_id: Optional[int] = None
-    conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
@@ -197,6 +196,7 @@ class FlowColApp:
         self.file_io = FileIOController(self)
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
+        self.conductor_controls = ConductorControlsPanel(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -276,14 +276,7 @@ class FlowColApp:
                 dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size)
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
-                dpg.add_text("Conductor Voltages")
-                self.conductor_controls_container_id = dpg.add_child_window(
-                    autosize_x=True,
-                    height=400,
-                    border=False,
-                    tag="conductor_controls_child",
-                    no_scroll_with_mouse=False,
-                )
+                self.conductor_controls.build_conductor_controls_container(edit_group)
 
             with dpg.group(tag="render_controls_group") as render_group:
                 self.render_controls_id = render_group
@@ -326,7 +319,7 @@ class FlowColApp:
         self._update_control_visibility()
         self.file_io.ensure_conductor_file_dialog()
         self._update_canvas_inputs()
-        self._rebuild_conductor_controls()
+        self.conductor_controls.rebuild_conductor_controls()
 
     # ------------------------------------------------------------------
     # Canvas window layout
@@ -614,142 +607,6 @@ class FlowColApp:
         if self.canvas_height_input_id is not None:
             dpg.set_value(self.canvas_height_input_id, int(height))
 
-    def _rebuild_conductor_controls(self) -> None:
-        if dpg is None or self.conductor_controls_container_id is None:
-            return
-
-        dpg.delete_item(self.conductor_controls_container_id, children_only=True)
-        self.conductor_slider_ids.clear()
-
-        with self.state_lock:
-            conductors = list(self.state.project.conductors)
-            selected_idx = self.state.selected_idx
-
-        if not conductors:
-            dpg.add_text("No conductors loaded.", parent=self.conductor_controls_container_id)
-            return
-
-        for idx, conductor in enumerate(conductors):
-            label = f"C{idx + 1}"
-            if idx == selected_idx:
-                label += " (selected)"
-            slider_id = dpg.add_slider_float(
-                label=label,
-                default_value=float(conductor.voltage),
-                min_value=-1.0,
-                max_value=1.0,
-                format="%.3f",
-                callback=self._on_conductor_voltage_slider,
-                user_data=idx,
-                parent=self.conductor_controls_container_id,
-            )
-            self.conductor_slider_ids[idx] = slider_id
-
-            # Add blur slider with fractional toggle
-            with dpg.group(horizontal=True, parent=self.conductor_controls_container_id):
-                if conductor.blur_is_fractional:
-                    max_val = 0.1
-                    fmt = "%.3f"
-                else:
-                    max_val = 20.0
-                    fmt = "%.1f px"
-                dpg.add_slider_float(
-                    label=f"  Blur {idx + 1}",
-                    default_value=float(conductor.blur_sigma),
-                    min_value=0.0,
-                    max_value=max_val,
-                    format=fmt,
-                    callback=self._on_conductor_blur_slider,
-                    user_data=idx,
-                    width=200,
-                    tag=f"blur_slider_{idx}",
-                )
-                dpg.add_checkbox(
-                    label="Frac",
-                    default_value=conductor.blur_is_fractional,
-                    callback=self._on_blur_fractional_toggle,
-                    user_data=idx,
-                    tag=f"blur_frac_checkbox_{idx}",
-                )
-
-
-    def _update_conductor_slider_labels(self, skip_idx: Optional[int] = None) -> None:
-        if dpg is None or not self.conductor_slider_ids:
-            return
-
-        with self.state_lock:
-            conductors = list(self.state.project.conductors)
-            selected_idx = self.state.selected_idx
-
-        for idx, slider_id in list(self.conductor_slider_ids.items()):
-            if slider_id is None or not dpg.does_item_exist(slider_id):
-                continue
-            if idx >= len(conductors):
-                continue
-            label = f"C{idx + 1}"
-            if idx == selected_idx:
-                label += " (selected)"
-            dpg.configure_item(slider_id, label=label)
-            if skip_idx is not None and idx == skip_idx:
-                continue
-            dpg.set_value(slider_id, float(conductors[idx].voltage))
-
-    def _on_conductor_voltage_slider(self, sender, app_data, user_data):
-        if dpg is None:
-            return
-        idx = int(user_data)
-        value = float(app_data)
-        with self.state_lock:
-            actions.set_conductor_voltage(self.state, idx, value)
-        self._mark_canvas_dirty()
-        dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
-        self._update_conductor_slider_labels(skip_idx=idx)
-
-    def _on_conductor_blur_slider(self, sender, app_data, user_data):
-        if dpg is None:
-            return
-        idx = int(user_data)
-        value = float(app_data)
-        with self.state_lock:
-            if idx < len(self.state.project.conductors):
-                self.state.project.conductors[idx].blur_sigma = value
-                self.state.field_cache = None
-                is_frac = self.state.project.conductors[idx].blur_is_fractional
-        self._mark_canvas_dirty()
-        if is_frac:
-            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.3f} (fraction)")
-        else:
-            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.1f} px")
-
-    def _on_blur_fractional_toggle(self, sender, app_data, user_data):
-        if dpg is None:
-            return
-        idx = int(user_data)
-        is_fractional = bool(app_data)
-        with self.state_lock:
-            if idx < len(self.state.project.conductors):
-                conductor = self.state.project.conductors[idx]
-                conductor.blur_is_fractional = is_fractional
-                # Convert value when switching modes
-                if is_fractional:
-                    # Convert from pixels to fraction (assume ~1000px reference)
-                    conductor.blur_sigma = min(conductor.blur_sigma / 1000.0, 0.1)
-                else:
-                    # Convert from fraction to pixels
-                    conductor.blur_sigma = conductor.blur_sigma * 1000.0
-                self.state.field_cache = None
-        # Update slider range and format
-        slider_id = f"blur_slider_{idx}"
-        if dpg.does_item_exist(slider_id):
-            if is_fractional:
-                dpg.configure_item(slider_id, max_value=0.1, format="%.3f")
-            else:
-                dpg.configure_item(slider_id, max_value=20.0, format="%.1f px")
-            with self.state_lock:
-                if idx < len(self.state.project.conductors):
-                    dpg.set_value(slider_id, self.state.project.conductors[idx].blur_sigma)
-        self._mark_canvas_dirty()
-
     def _scale_conductor(self, idx: int, factor: float) -> bool:
         if dpg is None:
             return False
@@ -765,7 +622,7 @@ class FlowColApp:
             return False
 
         self._mark_canvas_dirty()
-        self._update_conductor_slider_labels()
+        self.conductor_controls.update_conductor_slider_labels()
         self.postprocess_panel.update_region_properties_panel()
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
         return True
@@ -846,7 +703,7 @@ class FlowColApp:
                     hit_idx, hit_region = self._detect_region_at_point(x, y)
                     self.state.set_selected(hit_idx)
                     self.selected_region = hit_region
-                self._update_conductor_slider_labels()
+                self.conductor_controls.update_conductor_slider_labels()
                 self.postprocess_panel.update_region_properties_panel()
             self.mouse_down_last = mouse_down
             return
@@ -868,7 +725,7 @@ class FlowColApp:
                     self.drag_last_pos = (x, y)
                 else:
                     self.drag_active = False
-            self._update_conductor_slider_labels()
+            self.conductor_controls.update_conductor_slider_labels()
             self.postprocess_panel.update_region_properties_panel()
             self._mark_canvas_dirty()
 
@@ -914,7 +771,7 @@ class FlowColApp:
                     self.conductor_textures.clear()
                     self.conductor_texture_shapes.clear()
                 self._mark_canvas_dirty()
-                self._rebuild_conductor_controls()
+                self.conductor_controls.rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")
         self.backspace_down_last = backspace_down
 
@@ -955,8 +812,8 @@ class FlowColApp:
                         new_idx = len(self.state.project.conductors) - 1
                         self.state.set_selected(new_idx)
                     self._mark_canvas_dirty()
-                    self._rebuild_conductor_controls()
-                    self._update_conductor_slider_labels()
+                    self.conductor_controls.rebuild_conductor_controls()
+                    self.conductor_controls.update_conductor_slider_labels()
                     dpg.set_value("status_text", f"Pasted as C{new_idx + 1}")
             self.ctrl_v_down_last = ctrl_v_down
 
@@ -1321,7 +1178,7 @@ class FlowColApp:
             show_button = (mode == "edit" and has_cache)
             dpg.configure_item(self.cache_panel.view_postprocessing_button_id, show=show_button)
 
-        self._update_conductor_slider_labels()
+        self.conductor_controls.update_conductor_slider_labels()
 
 def run() -> None:
     """Launch FlowCol Dear PyGui application."""

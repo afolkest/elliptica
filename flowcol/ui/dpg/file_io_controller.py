@@ -161,8 +161,8 @@ class FileIOController:
 
         self.app._mark_canvas_dirty()
         self.app._update_control_visibility()
-        self.app._rebuild_conductor_controls()
-        self.app._update_conductor_slider_labels()
+        self.app.conductor_controls.rebuild_conductor_controls()
+        self.app.conductor_controls.update_conductor_slider_labels()
         dpg.set_value("status_text", f"Loaded conductor '{Path(path_str).name}'")
 
     # ------------------------------------------------------------------
@@ -327,8 +327,8 @@ class FileIOController:
             self.app._mark_canvas_dirty()
             self.app._update_canvas_scale()  # Recalculate scale for new canvas resolution
             self.app._update_control_visibility()
-            self.app._rebuild_conductor_controls()
-            self.app._update_conductor_slider_labels()
+            self.app.conductor_controls.rebuild_conductor_controls()
+            self.app.conductor_controls.update_conductor_slider_labels()
             self.sync_ui_from_state()
             self.app.cache_panel.update_cache_status_display()
 
