@@ -967,6 +967,7 @@ class FlowColApp:
                         self.state.conductor_color_settings,
                         self.state.project.conductors,
                         self.state.display_settings.to_color_params(),
+                        cache.display_array_gpu,  # GPU acceleration for palette colorization
                     )
                 else:
                     final_rgb = base_rgb
@@ -2167,26 +2168,9 @@ class FlowColApp:
         """
         from flowcol.postprocess.masks import rasterize_conductor_masks
 
-        # Colorize
-        if settings.color_enabled and settings.palette:
-            base_rgb = colorize_array(
-                lic_array,
-                palette=settings.palette,
-                brightness=settings.brightness,
-                contrast=settings.contrast,
-                gamma=settings.gamma,
-                clip_percent=settings.clip_percent,
-            )
-        else:
-            normalized = _apply_display_transforms(
-                lic_array,
-                brightness=settings.brightness,
-                contrast=settings.contrast,
-                gamma=settings.gamma,
-                clip_percent=settings.clip_percent,
-            )
-            arr_uint8 = (normalized * 255).astype(np.uint8)
-            base_rgb = np.stack([arr_uint8, arr_uint8, arr_uint8], axis=-1)
+        # Colorize using optimized path (JIT-accelerated on CPU)
+        from flowcol.postprocess.color import build_base_rgb
+        base_rgb = build_base_rgb(lic_array, settings.to_color_params(), display_array_gpu=None)
 
         # Generate masks at this resolution
         conductor_masks = None
