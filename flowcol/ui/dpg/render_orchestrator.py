@@ -237,8 +237,8 @@ class RenderOrchestrator:
             self.app._update_cache_status_display()
 
             # Auto-save cache if project has been saved before
-            if self.app.current_project_path is not None:
-                self.app._auto_save_cache()
+            if self.app.file_io.current_project_path is not None:
+                self.app.file_io.auto_save_cache()
             else:
                 if dpg is not None:
                     dpg.set_value("status_text", "Render complete. (Save project to preserve cache)")
