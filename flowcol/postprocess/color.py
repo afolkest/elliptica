@@ -67,7 +67,13 @@ def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_
 
         # Convert to uint8 and download
         rgb_uint8_tensor = (rgb_gpu * 255.0).clamp(0, 255).to(torch.uint8)
-        torch.mps.synchronize()  # Wait for GPU work to complete
+
+        # Synchronize GPU (platform-specific)
+        if torch.backends.mps.is_available():
+            torch.mps.synchronize()
+        elif torch.cuda.is_available():
+            torch.cuda.synchronize()
+
         result = GPUContext.to_cpu(rgb_uint8_tensor)
 
         # Uncomment for performance debugging:

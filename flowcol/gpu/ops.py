@@ -140,10 +140,31 @@ def grayscale_to_rgb_gpu(tensor: torch.Tensor) -> torch.Tensor:
     return rgb
 
 
+def apply_highpass_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Apply Gaussian high-pass filter on GPU.
+
+    Subtracts Gaussian blur from the input tensor to emphasize high-frequency details.
+
+    Args:
+        tensor: 2D tensor (H, W) on GPU
+        sigma: Gaussian blur standard deviation
+
+    Returns:
+        High-pass filtered tensor (H, W) on GPU with unbounded range
+    """
+    if sigma <= 0:
+        return tensor.clone()
+
+    # High-pass = original - lowpass(blur)
+    blurred = gaussian_blur_gpu(tensor, sigma)
+    return tensor - blurred
+
+
 __all__ = [
     'gaussian_blur_gpu',
     'percentile_clip_gpu',
     'apply_contrast_gamma_gpu',
     'apply_palette_lut_gpu',
     'grayscale_to_rgb_gpu',
+    'apply_highpass_gpu',
 ]

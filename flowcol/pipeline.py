@@ -9,7 +9,6 @@ from flowcol.render import (
     compute_lic,
     downsample_lic,
     apply_gaussian_highpass,
-    apply_highpass_clahe,
     list_color_palettes,
 )
 
@@ -40,13 +39,6 @@ class PostProcessConfig:
 
     detail_enabled: bool = False
     detail_sigma_factor: float = 0.02
-    highpass_enabled: bool = False
-    highpass_sigma_factor: float = 0.01
-    highpass_clip_limit: float = 0.03
-    highpass_kernel_rows: int = 64
-    highpass_kernel_cols: int = 64
-    highpass_num_bins: int = 256
-    highpass_strength: float = 1.0
 
 
 def get_palette_name(palette_index: int) -> str | None:
@@ -89,18 +81,6 @@ def apply_postprocess(
         detail_sigma = max(config.detail_sigma_factor, 0.0) * reference_size
         if detail_sigma > 0.0:
             working = apply_gaussian_highpass(working, detail_sigma)
-
-    if config.highpass_enabled:
-        sigma_px = max(config.highpass_sigma_factor * reference_size, 0.0)
-        working = apply_highpass_clahe(
-            working,
-            sigma_px,
-            config.highpass_clip_limit,
-            config.highpass_kernel_rows,
-            config.highpass_kernel_cols,
-            config.highpass_num_bins,
-            config.highpass_strength,
-        )
 
     return working
 

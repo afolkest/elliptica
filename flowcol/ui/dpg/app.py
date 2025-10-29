@@ -796,51 +796,39 @@ class FlowColApp:
         self._mark_canvas_dirty()
 
     def _refresh_render_texture(self) -> None:
-        from flowcol.app.actions import ensure_base_rgb
-        from flowcol.postprocess.color import apply_region_overlays
         from PIL import Image
 
         if dpg is None or self.texture_registry_id is None:
             return
 
         with self.state_lock:
-            # Build base_rgb if needed
-            if not ensure_base_rgb(self.state):
+            cache = self.state.render_cache
+            if cache is None or cache.display_array is None:
                 # Fallback to grayscale if no render
                 arr = np.zeros((32, 32), dtype=np.float32)
                 pil_img = array_to_pil(arr, use_color=False)
             else:
-                # Use cached base_rgb
-                cache = self.state.render_cache
-                base_rgb = cache.base_rgb.copy()
+                # Use unified GPU postprocessing pipeline (much faster!)
+                from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
-                # Apply conductor smear effect (post-processing on RGB)
-                from flowcol.render import apply_conductor_smear
-                if any(c.smear_enabled for c in self.state.project.conductors):
-                    base_rgb = apply_conductor_smear(
-                        base_rgb,
-                        cache.display_array,  # LIC grayscale for re-blurring
-                        self.state.project,
-                        self.state.display_settings.palette,
-                        cache.display_array.shape,  # (height, width)
-                        color_enabled=self.state.display_settings.color_enabled,
-                        lic_percentiles=cache.lic_percentiles,  # Precomputed for performance
-                    )
-
-                # Apply per-region overlays
-                if cache.conductor_masks and cache.interior_masks:
-                    final_rgb = apply_region_overlays(
-                        base_rgb,
-                        cache.display_array,
-                        cache.conductor_masks,
-                        cache.interior_masks,
-                        self.state.conductor_color_settings,
-                        self.state.project.conductors,
-                        self.state.display_settings.to_color_params(),
-                        cache.display_array_gpu,  # GPU acceleration for palette colorization
-                    )
-                else:
-                    final_rgb = base_rgb
+                final_rgb = apply_full_postprocess_hybrid(
+                    scalar_array=cache.display_array,
+                    conductor_masks=cache.conductor_masks,
+                    interior_masks=cache.interior_masks,
+                    conductor_color_settings=self.state.conductor_color_settings,
+                    conductors=self.state.project.conductors,
+                    render_shape=cache.display_array.shape,
+                    canvas_resolution=self.state.project.canvas_resolution,
+                    clip_percent=self.state.display_settings.clip_percent,
+                    brightness=self.state.display_settings.brightness,
+                    contrast=self.state.display_settings.contrast,
+                    gamma=self.state.display_settings.gamma,
+                    color_enabled=self.state.display_settings.color_enabled,
+                    palette=self.state.display_settings.palette,
+                    lic_percentiles=cache.lic_percentiles,
+                    use_gpu=True,
+                    scalar_tensor=cache.display_array_gpu,  # Use pre-uploaded tensor if available
+                )
 
                 pil_img = Image.fromarray(final_rgb, mode='RGB')
 
@@ -2019,10 +2007,6 @@ class FlowColApp:
         """
         from flowcol.postprocess.masks import rasterize_conductor_masks
 
-        # Colorize using optimized path (JIT-accelerated on CPU)
-        from flowcol.postprocess.color import build_base_rgb
-        base_rgb = build_base_rgb(lic_array, settings.to_color_params(), display_array_gpu=None)
-
         # Generate masks at this resolution
         conductor_masks = None
         interior_masks = None
@@ -2036,36 +2020,34 @@ class FlowColApp:
                 offset_y,
             )
 
-        # Apply smear
+        # Compute percentiles for smear (if needed at export resolution)
+        lic_percentiles = None
         if any(c.smear_enabled for c in project.conductors):
-            # Compute percentiles for this resolution (export can be at any resolution)
             vmin = float(np.percentile(lic_array, 0.5))
             vmax = float(np.percentile(lic_array, 99.5))
             lic_percentiles = (vmin, vmax)
 
-            base_rgb = apply_conductor_smear(
-                base_rgb,
-                lic_array,
-                project,
-                settings.palette,
-                lic_array.shape,
-                color_enabled=settings.color_enabled,
-                lic_percentiles=lic_percentiles,
-            )
+        # Use unified GPU postprocessing pipeline (or CPU fallback)
+        from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
-        # Apply region overlays
-        if conductor_masks and interior_masks:
-            final_rgb = apply_region_overlays(
-                base_rgb,
-                lic_array,
-                conductor_masks,
-                interior_masks,
-                conductor_color_settings,
-                project.conductors,
-                settings.to_color_params(),
-            )
-        else:
-            final_rgb = base_rgb
+        final_rgb = apply_full_postprocess_hybrid(
+            scalar_array=lic_array,
+            conductor_masks=conductor_masks,
+            interior_masks=interior_masks,
+            conductor_color_settings=conductor_color_settings,
+            conductors=project.conductors,
+            render_shape=lic_array.shape,
+            canvas_resolution=canvas_resolution,
+            clip_percent=settings.clip_percent,
+            brightness=settings.brightness,
+            contrast=settings.contrast,
+            gamma=settings.gamma,
+            color_enabled=settings.color_enabled,
+            palette=settings.palette,
+            lic_percentiles=lic_percentiles,
+            use_gpu=True,  # GPU acceleration for faster exports
+            scalar_tensor=None,  # Will upload on-demand
+        )
 
         return final_rgb
 

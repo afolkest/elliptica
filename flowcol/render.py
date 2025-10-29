@@ -3,7 +3,6 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 from scipy.ndimage import gaussian_filter, zoom
-from skimage.exposure import equalize_adapthist
 from flowcol.types import RenderInfo, Project
 from flowcol.lic import convolve, get_cosine_kernel
 from flowcol import defaults
@@ -509,49 +508,6 @@ def apply_gaussian_highpass(arr: np.ndarray, sigma: float) -> np.ndarray:
     return arr - gaussian_filter(arr, sigma=sigma)
 
 
-def apply_highpass_clahe(
-    arr: np.ndarray,
-    sigma: float,
-    clip_limit: float,
-    kernel_rows: int,
-    kernel_cols: int,
-    num_bins: int,
-    strength: float = 1.0,
-) -> np.ndarray:
-    """Gaussian high-pass followed by CLAHE, blended with original.
-
-    This is the ORIGINAL working version from gauss_law_morph.
-    """
-    sigma = max(sigma, 1e-3)
-    clip_limit = max(clip_limit, 1e-4)
-    kernel_rows = max(kernel_rows, 1)
-    kernel_cols = max(kernel_cols, 1)
-    num_bins = max(num_bins, 2)
-    strength = float(np.clip(strength, 0.0, 1.0))
-
-    # Apply highpass
-    high = arr - gaussian_filter(arr, sigma)
-    min_val = float(high.min())
-    max_val = float(high.max())
-
-    # Apply CLAHE to highpass output
-    enhanced = equalize_adapthist(
-        image=high,
-        kernel_size=(kernel_rows, kernel_cols),
-        clip_limit=clip_limit,
-        nbins=num_bins,
-    )
-
-    # Rescale CLAHE output to match highpass range
-    if max_val > 1.0 or min_val < 0.0:
-        enhanced = enhanced * (max_val - min_val) + min_val
-
-    # Blend with original
-    if strength >= 1.0:
-        return enhanced
-    if strength <= 0.0:
-        return arr
-    return (1.0 - strength) * arr + strength * enhanced
 
 
 def downsample_lic(
