@@ -1,2 +1,3 @@
+-conductor-aware LIC 
 -noise oversampling?
 -real blue noise?

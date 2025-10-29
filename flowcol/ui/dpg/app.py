@@ -16,6 +16,7 @@ from flowcol.app.core import AppState, RenderCache, RenderSettings
 from pathlib import Path
 
 from flowcol.app import actions
+from flowcol.ui.dpg.render_modal import RenderModalController
 from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
@@ -92,16 +93,6 @@ def _image_to_texture_data(img) -> Tuple[int, int, np.ndarray]:
     return width, height, rgba.reshape(-1)
 
 
-def _label_for_supersample(value: float) -> str:
-    idx = min(range(len(SUPERSAMPLE_CHOICES)), key=lambda i: abs(SUPERSAMPLE_CHOICES[i] - value))
-    return SUPERSAMPLE_LABELS[idx]
-
-
-def _label_for_multiplier(value: float) -> str:
-    idx = min(range(len(RESOLUTION_CHOICES)), key=lambda i: abs(RESOLUTION_CHOICES[i] - value))
-    return RESOLUTION_LABELS[idx]
-
-
 def _clone_conductor(conductor: Conductor) -> Conductor:
     """Deep-copy conductor data for background rendering."""
     interior = None
@@ -165,18 +156,6 @@ class FlowColApp:
     viewport_created: bool = False
     edit_controls_id: Optional[int] = None
     render_controls_id: Optional[int] = None
-    render_modal_id: Optional[int] = None
-    render_supersample_radio_id: Optional[int] = None
-    render_multiplier_radio_id: Optional[int] = None
-    render_passes_input_id: Optional[int] = None
-    render_streamlength_input_id: Optional[int] = None
-    render_margin_input_id: Optional[int] = None
-    render_seed_input_id: Optional[int] = None
-    render_sigma_input_id: Optional[int] = None
-    boundary_top_checkbox_id: Optional[int] = None
-    boundary_bottom_checkbox_id: Optional[int] = None
-    boundary_left_checkbox_id: Optional[int] = None
-    boundary_right_checkbox_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
     conductor_file_dialog_id: Optional[str] = None
@@ -209,7 +188,6 @@ class FlowColApp:
     drag_active: bool = False
     drag_last_pos: Tuple[float, float] = (0.0, 0.0)
     mouse_down_last: bool = False
-    render_modal_open: bool = False
     backspace_down_last: bool = False
     ctrl_c_down_last: bool = False
     ctrl_v_down_last: bool = False
@@ -236,6 +214,9 @@ class FlowColApp:
         GPUContext.warmup()
         device_name = "MPS" if GPUContext.is_available() else "CPU"
         print(f"GPU acceleration: {device_name}")
+
+        # Initialize controllers
+        self.render_modal = RenderModalController(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -288,7 +269,7 @@ class FlowColApp:
                 dpg.add_separator()
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self._open_conductor_dialog)
-                dpg.add_button(label="Render Field", callback=self._open_render_modal, tag="render_field_button")
+                dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
                 self.view_postprocessing_button_id = dpg.add_button(
                     label="View Postprocessing",
                     callback=self._on_view_postprocessing_clicked,
@@ -1051,118 +1032,6 @@ class FlowColApp:
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
         return True
 
-    def _ensure_render_modal(self) -> None:
-        if dpg is None or self.render_modal_id is not None:
-            return
-
-        with dpg.window(
-            label="Render Settings",
-            modal=True,
-            show=False,
-            tag="render_modal",
-            no_move=False,
-            no_close=True,
-            no_collapse=True,
-            width=420,
-            height=520,
-        ) as modal:
-            self.render_modal_id = modal
-
-            dpg.add_text("Supersample Factor")
-            self.render_supersample_radio_id = dpg.add_radio_button(
-                SUPERSAMPLE_LABELS,
-                horizontal=True,
-            )
-            dpg.add_spacer(height=10)
-
-            dpg.add_text("Render Resolution")
-            self.render_multiplier_radio_id = dpg.add_radio_button(
-                RESOLUTION_LABELS,
-                horizontal=True,
-            )
-            dpg.add_spacer(height=12)
-
-            dpg.add_separator()
-            dpg.add_spacer(height=12)
-
-            self.render_passes_input_id = dpg.add_input_int(
-                label="LIC Passes",
-                min_value=1,
-                step=1,
-                min_clamped=True,
-                width=160,
-            )
-
-            self.render_streamlength_input_id = dpg.add_input_float(
-                label="Streamlength Factor",
-                format="%.4f",
-                min_value=1e-6,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
-
-            self.render_margin_input_id = dpg.add_input_float(
-                label="Padding Margin",
-                format="%.3f",
-                min_value=0.0,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
-
-            self.render_seed_input_id = dpg.add_input_int(
-                label="Noise Seed",
-                step=1,
-                min_clamped=False,
-                width=160,
-            )
-
-            self.render_sigma_input_id = dpg.add_input_float(
-                label="Noise Low-pass Sigma",
-                format="%.2f",
-                min_value=0.0,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
-
-            dpg.add_spacer(height=15)
-            dpg.add_separator()
-            dpg.add_spacer(height=10)
-            dpg.add_text("Boundary Conditions")
-            dpg.add_spacer(height=5)
-
-            # Cross-shaped layout for boundary controls
-            with dpg.table(header_row=False, borders_innerH=False, borders_innerV=False,
-                          borders_outerH=False, borders_outerV=False):
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=120)
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
-
-                # Row 0: Top boundary centered
-                with dpg.table_row():
-                    dpg.add_text("")
-                    self.boundary_top_checkbox_id = dpg.add_checkbox(label="Top Neumann")
-                    dpg.add_text("")
-
-                # Row 1: Left and Right boundaries
-                with dpg.table_row():
-                    self.boundary_left_checkbox_id = dpg.add_checkbox(label="Left Neumann")
-                    dpg.add_text("(Insulating)", indent=30)
-                    self.boundary_right_checkbox_id = dpg.add_checkbox(label="Right Neumann")
-
-                # Row 2: Bottom boundary centered
-                with dpg.table_row():
-                    dpg.add_text("")
-                    self.boundary_bottom_checkbox_id = dpg.add_checkbox(label="Bottom Neumann")
-                    dpg.add_text("")
-
-            dpg.add_spacer(height=20)
-            with dpg.group(horizontal=True):
-                dpg.add_button(label="Render", width=140, callback=self._apply_render_modal)
-                dpg.add_button(label="Cancel", width=140, callback=self._cancel_render_modal)
-
     def _ensure_conductor_file_dialog(self) -> None:
         if dpg is None or self.conductor_file_dialog_id is not None:
             return
@@ -1185,24 +1054,6 @@ class FlowColApp:
             self.conductor_file_dialog_id = dialog
             dpg.add_file_extension(".png", color=(150, 180, 255, 255))
             dpg.add_file_extension(".*")
-
-    def _open_render_modal(self, sender, app_data):
-        if dpg is None:
-            return
-        if self.render_future is not None and not self.render_future.done():
-            dpg.set_value("status_text", "Render already in progress...")
-            return
-        self._ensure_render_modal()
-        self._update_render_modal_values()
-        if self.render_modal_id is not None:
-            dpg.configure_item(self.render_modal_id, show=True)
-            self.render_modal_open = True
-
-    def _close_render_modal(self) -> None:
-        if dpg is None or self.render_modal_id is None:
-            return
-        dpg.configure_item(self.render_modal_id, show=False)
-        self.render_modal_open = False
 
     def _open_conductor_dialog(self, sender, app_data):
         if dpg is None:
@@ -1663,96 +1514,6 @@ class FlowColApp:
 
                 cache.conductor_masks = conductor_masks
                 cache.interior_masks = interior_masks
-
-
-    def _update_render_modal_values(self) -> None:
-        if dpg is None:
-            return
-        with self.state_lock:
-            settings = replace(self.state.render_settings)
-            streamlength = self.state.project.streamlength_factor
-            project = self.state.project
-
-        if self.render_supersample_radio_id is not None:
-            dpg.set_value(self.render_supersample_radio_id, _label_for_supersample(settings.supersample))
-
-        if self.render_multiplier_radio_id is not None:
-            dpg.set_value(self.render_multiplier_radio_id, _label_for_multiplier(settings.multiplier))
-
-        if self.render_passes_input_id is not None:
-            dpg.set_value(self.render_passes_input_id, int(settings.num_passes))
-
-        if self.render_streamlength_input_id is not None:
-            dpg.set_value(self.render_streamlength_input_id, float(streamlength))
-
-        if self.render_margin_input_id is not None:
-            dpg.set_value(self.render_margin_input_id, float(settings.margin))
-
-        if self.render_seed_input_id is not None:
-            dpg.set_value(self.render_seed_input_id, int(settings.noise_seed))
-
-        if self.render_sigma_input_id is not None:
-            dpg.set_value(self.render_sigma_input_id, float(settings.noise_sigma))
-
-        # Update boundary condition checkboxes
-        from flowcol.poisson import NEUMANN
-        if self.boundary_top_checkbox_id is not None:
-            dpg.set_value(self.boundary_top_checkbox_id, project.boundary_top == NEUMANN)
-        if self.boundary_bottom_checkbox_id is not None:
-            dpg.set_value(self.boundary_bottom_checkbox_id, project.boundary_bottom == NEUMANN)
-        if self.boundary_left_checkbox_id is not None:
-            dpg.set_value(self.boundary_left_checkbox_id, project.boundary_left == NEUMANN)
-        if self.boundary_right_checkbox_id is not None:
-            dpg.set_value(self.boundary_right_checkbox_id, project.boundary_right == NEUMANN)
-
-    def _cancel_render_modal(self, sender=None, app_data=None) -> None:
-        self._close_render_modal()
-
-    def _apply_render_modal(self, sender=None, app_data=None) -> None:
-        if dpg is None:
-            return
-
-        supersample_label = dpg.get_value(self.render_supersample_radio_id) if self.render_supersample_radio_id else SUPERSAMPLE_LABELS[0]
-        multiplier_label = dpg.get_value(self.render_multiplier_radio_id) if self.render_multiplier_radio_id else RESOLUTION_LABELS[0]
-
-        supersample = SUPERSAMPLE_LOOKUP.get(supersample_label, SUPERSAMPLE_CHOICES[0])
-        multiplier = RESOLUTION_LOOKUP.get(multiplier_label, RESOLUTION_CHOICES[0])
-
-        passes = int(dpg.get_value(self.render_passes_input_id)) if self.render_passes_input_id is not None else defaults.DEFAULT_RENDER_PASSES
-        streamlength = float(dpg.get_value(self.render_streamlength_input_id)) if self.render_streamlength_input_id is not None else defaults.DEFAULT_STREAMLENGTH_FACTOR
-        margin = float(dpg.get_value(self.render_margin_input_id)) if self.render_margin_input_id is not None else defaults.DEFAULT_PADDING_MARGIN
-        noise_seed = int(dpg.get_value(self.render_seed_input_id)) if self.render_seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
-        noise_sigma = float(dpg.get_value(self.render_sigma_input_id)) if self.render_sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
-
-        # Read boundary condition checkboxes
-        from flowcol.poisson import DIRICHLET, NEUMANN
-        boundary_top = NEUMANN if (self.boundary_top_checkbox_id and dpg.get_value(self.boundary_top_checkbox_id)) else DIRICHLET
-        boundary_bottom = NEUMANN if (self.boundary_bottom_checkbox_id and dpg.get_value(self.boundary_bottom_checkbox_id)) else DIRICHLET
-        boundary_left = NEUMANN if (self.boundary_left_checkbox_id and dpg.get_value(self.boundary_left_checkbox_id)) else DIRICHLET
-        boundary_right = NEUMANN if (self.boundary_right_checkbox_id and dpg.get_value(self.boundary_right_checkbox_id)) else DIRICHLET
-
-        # Clamp to valid ranges similar to pygame UI
-        passes = max(passes, 1)
-        streamlength = max(streamlength, 1e-6)
-        margin = max(margin, 0.0)
-        noise_sigma = max(noise_sigma, 0.0)
-
-        with self.state_lock:
-            actions.set_supersample(self.state, supersample)
-            actions.set_render_multiplier(self.state, multiplier)
-            actions.set_num_passes(self.state, passes)
-            actions.set_margin(self.state, margin)
-            actions.set_noise_seed(self.state, noise_seed)
-            actions.set_noise_sigma(self.state, noise_sigma)
-            actions.set_streamlength_factor(self.state, streamlength)
-            # Update boundary conditions
-            self.state.project.boundary_top = boundary_top
-            self.state.project.boundary_bottom = boundary_bottom
-            self.state.project.boundary_left = boundary_left
-            self.state.project.boundary_right = boundary_right
-
-        self._close_render_modal()
-        self._start_render_job()
 
     # ------------------------------------------------------------------
     # Canvas input processing
