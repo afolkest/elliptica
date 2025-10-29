@@ -17,6 +17,7 @@ from pathlib import Path
 
 from flowcol.app import actions
 from flowcol.ui.dpg.render_modal import RenderModalController
+from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
 from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
@@ -139,10 +140,6 @@ class FlowColApp:
 
     state: AppState = field(default_factory=AppState)
     state_lock: threading.RLock = field(default_factory=threading.RLock)
-    executor: ThreadPoolExecutor = field(default_factory=lambda: ThreadPoolExecutor(max_workers=1))
-
-    render_future: Optional[Future] = None
-    render_error: Optional[str] = None
 
     canvas_id: Optional[int] = None
     canvas_layer_id: Optional[int] = None
@@ -217,6 +214,7 @@ class FlowColApp:
 
         # Initialize controllers
         self.render_modal = RenderModalController(self)
+        self.render_orchestrator = RenderOrchestrator(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -2147,195 +2145,6 @@ class FlowColApp:
     # Canvas input processing
     # ------------------------------------------------------------------
     # ------------------------------------------------------------------
-    # Rendering
-    # ------------------------------------------------------------------
-    def _start_render_job(self) -> None:
-        if self.render_future is not None and not self.render_future.done():
-            return
-
-        self.render_error = None
-        dpg.set_value("status_text", "Rendering...")
-
-        def job() -> bool:
-            with self.state_lock:
-                settings_snapshot: RenderSettings = replace(self.state.render_settings)
-                project_snapshot = _snapshot_project(self.state.project)
-            result = perform_render(
-                project_snapshot,
-                settings_snapshot.multiplier,
-                settings_snapshot.supersample,
-                settings_snapshot.num_passes,
-                settings_snapshot.margin,
-                settings_snapshot.noise_seed,
-                settings_snapshot.noise_sigma,
-                project_snapshot.streamlength_factor,
-            )
-            if result is None:
-                return False
-
-            # Apply initial postprocessing to create display array
-            from flowcol.render import downsample_lic
-            from flowcol.postprocess.masks import rasterize_conductor_masks
-
-            with self.state_lock:
-                postprocess = self.state.display_settings
-                # canvas_resolution is (width, height), but downsample_lic expects (height, width)
-                canvas_w, canvas_h = project_snapshot.canvas_resolution
-                target_shape = (canvas_h, canvas_w)
-                display_array = downsample_lic(
-                    result.array,
-                    target_shape,
-                    settings_snapshot.supersample,
-                    postprocess.downsample_sigma,
-                )
-
-            # Use cached masks from RenderResult (avoids redundant rasterization)
-            full_res_conductor_masks = result.conductor_masks_canvas
-            full_res_interior_masks = result.interior_masks_canvas
-            conductor_masks = None
-            interior_masks = None
-            if project_snapshot.conductors and full_res_conductor_masks is not None:
-                from scipy.ndimage import zoom
-
-                # Downsample masks to match display_array resolution
-                if result.array.shape != display_array.shape:
-                    scale_y = display_array.shape[0] / result.array.shape[0]
-                    scale_x = display_array.shape[1] / result.array.shape[1]
-                    conductor_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_conductor_masks
-                    ]
-                    interior_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_interior_masks
-                    ]
-                else:
-                    # Same resolution - reuse full-res masks
-                    conductor_masks = full_res_conductor_masks
-                    interior_masks = full_res_interior_masks
-
-            cache = RenderCache(
-                result=result,
-                multiplier=settings_snapshot.multiplier,
-                supersample=settings_snapshot.supersample,
-                display_array=display_array,
-                base_rgb=None,  # Will be built on-demand
-                conductor_masks=conductor_masks,
-                interior_masks=interior_masks,
-                full_res_conductor_masks=full_res_conductor_masks,
-                full_res_interior_masks=full_res_interior_masks,
-            )
-
-            # Set fingerprint for cache staleness detection
-            cache.project_fingerprint = compute_project_fingerprint(project_snapshot)
-
-            # Upload render result to GPU for fast postprocessing
-            try:
-                from flowcol.gpu import GPUContext
-                print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
-                print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
-                print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")
-                if GPUContext.is_available():
-                    cache.result_gpu = GPUContext.to_gpu(result.array)
-                    cache.ex_gpu = GPUContext.to_gpu(result.ex)
-                    cache.ey_gpu = GPUContext.to_gpu(result.ey)
-                    print(f"DEBUG render: result_gpu = {cache.result_gpu is not None}")
-                    print(f"DEBUG render: ex_gpu = {cache.ex_gpu is not None}")
-                    print(f"DEBUG render: ey_gpu = {cache.ey_gpu is not None}")
-            except Exception as e:
-                print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
-                pass  # Graceful fallback if GPU upload fails
-
-            with self.state_lock:
-                self.state.render_cache = cache
-                self.state.field_dirty = False
-                self.state.render_dirty = False
-                self.state.view_mode = "render"
-
-            # Auto-save high-res renders (>2k on any dimension)
-            render_h, render_w = result.array.shape
-            if render_w >= 2000 or render_h >= 2000:
-                from PIL import Image
-                from datetime import datetime
-                from flowcol.render import downsample_lic
-
-                output_dir = Path.cwd() / "output_raw"
-                output_dir.mkdir(exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                if settings_snapshot.supersample > 1.0:
-                    # Save supersampled raw LIC
-                    output_path_super = output_dir / f"render_{render_w}x{render_h}_supersampled_{timestamp}.png"
-                    img_data_super = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
-                    pil_img_super = Image.fromarray(img_data_super, mode='L')
-                    pil_img_super.save(output_path_super)
-                    print(f"Auto-saved supersampled render to: {output_path_super.name}")
-
-                    # Downsample and save final raw LIC
-                    canvas_w, canvas_h = project_snapshot.canvas_resolution
-                    output_canvas_w = int(round(canvas_w * settings_snapshot.multiplier))
-                    output_canvas_h = int(round(canvas_h * settings_snapshot.multiplier))
-                    output_shape = (output_canvas_h, output_canvas_w)
-
-                    downsampled_lic = downsample_lic(
-                        result.array,
-                        output_shape,
-                        settings_snapshot.supersample,
-                        0.6,  # Default sigma
-                    )
-
-                    output_h, output_w = downsampled_lic.shape
-                    output_path_final = output_dir / f"render_{output_w}x{output_h}_final_{timestamp}.png"
-                    img_data_final = (np.clip(downsampled_lic, 0, 1) * 255).astype(np.uint8)
-                    pil_img_final = Image.fromarray(img_data_final, mode='L')
-                    pil_img_final.save(output_path_final)
-                    print(f"Auto-saved final render to: {output_path_final.name}")
-                else:
-                    # Single save
-                    output_path = output_dir / f"render_{render_w}x{render_h}_{timestamp}.png"
-                    img_data = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
-                    pil_img = Image.fromarray(img_data, mode='L')
-                    pil_img.save(output_path)
-                    print(f"Auto-saved high-res render to: {output_path.name}")
-
-            return True
-
-        self.render_future = self.executor.submit(job)
-
-    def _poll_render_future(self) -> None:
-        if self.render_future is None:
-            return
-        if not self.render_future.done():
-            return
-
-        success = False
-        try:
-            success = bool(self.render_future.result())
-        except Exception as exc:  # pragma: no cover - unexpected
-            success = False
-            self.render_error = str(exc)
-
-        self.render_future = None
-
-        if success:
-            self._mark_canvas_dirty()
-            self._refresh_render_texture()
-            self.drag_active = False
-            with self.state_lock:
-                self.state.view_mode = "render"
-            self._update_control_visibility()
-            self._update_cache_status_display()
-
-            # Auto-save cache if project has been saved before
-            if self.current_project_path is not None:
-                self._auto_save_cache()
-            else:
-                dpg.set_value("status_text", "Render complete. (Save project to preserve cache)")
-        else:
-            msg = self.render_error or "Render failed (possibly due to excessive resolution)."
-            dpg.set_value("status_text", msg)
-
-    # ------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------
     def render(self) -> None:
@@ -2355,12 +2164,12 @@ class FlowColApp:
             while dpg.is_dearpygui_running():
                 self._process_canvas_mouse()
                 self._process_keyboard_shortcuts()
-                self._poll_render_future()
+                self.render_orchestrator.poll()
                 if self.canvas_dirty:
                     self._redraw_canvas()
                 dpg.render_dearpygui_frame()
         finally:
-            self.executor.shutdown(wait=False)
+            self.render_orchestrator.shutdown(wait=False)
             dpg.destroy_context()
 
 
