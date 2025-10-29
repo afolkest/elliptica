@@ -193,7 +193,7 @@ class RenderModalController:
         """
         if dpg is None:
             return
-        if self.app.render_future is not None and not self.app.render_future.done():
+        if self.app.render_orchestrator.render_future is not None and not self.app.render_orchestrator.render_future.done():
             dpg.set_value("status_text", "Render already in progress...")
             return
 
@@ -304,5 +304,5 @@ class RenderModalController:
             self.app.state.project.boundary_right = boundary_right
 
         self.close()
-        # Start the render job (will be moved to RenderOrchestrator in Phase 1b)
-        self.app._start_render_job()
+        # Start the render job via orchestrator
+        self.app.render_orchestrator.start_job()
