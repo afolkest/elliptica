@@ -20,6 +20,7 @@ from flowcol.ui.dpg.render_modal import RenderModalController
 from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
 from flowcol.ui.dpg.file_io_controller import FileIOController
 from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
+from flowcol.ui.dpg.postprocessing_panel import PostprocessingPanel
 from flowcol.render import array_to_pil, COLOR_PALETTES
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
@@ -155,12 +156,6 @@ class FlowColApp:
     canvas_height_input_id: Optional[int] = None
     conductor_controls_container_id: Optional[int] = None
     conductor_slider_ids: Dict[int, int] = field(default_factory=dict)
-    postprocess_downsample_slider_id: Optional[int] = None
-    postprocess_clip_slider_id: Optional[int] = None
-    postprocess_brightness_slider_id: Optional[int] = None
-    postprocess_contrast_slider_id: Optional[int] = None
-    postprocess_gamma_slider_id: Optional[int] = None
-    color_enabled_checkbox_id: Optional[int] = None
 
     conductor_textures: Dict[int, int] = field(default_factory=dict)
     conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
@@ -201,6 +196,7 @@ class FlowColApp:
         self.render_orchestrator = RenderOrchestrator(self)
         self.file_io = FileIOController(self)
         self.cache_panel = CacheManagementPanel(self)
+        self.postprocess_panel = PostprocessingPanel(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -306,187 +302,8 @@ class FlowColApp:
 
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
-                dpg.add_spacer(height=10)
-
-                self.postprocess_downsample_slider_id = dpg.add_slider_float(
-                    label="Downsampling Blur",
-                    default_value=self.state.display_settings.downsample_sigma,
-                    min_value=0.0,
-                    max_value=2.0,
-                    format="%.2f",
-                    callback=self._on_downsample_slider,
-                    width=200,
-                )
-
-                self.postprocess_clip_slider_id = dpg.add_slider_float(
-                    label="Clip %",
-                    default_value=self.state.display_settings.clip_percent,
-                    min_value=0.0,
-                    max_value=defaults.MAX_CLIP_PERCENT,
-                    format="%.2f%%",
-                    callback=self._on_clip_slider,
-                    width=200,
-                )
-
-                self.postprocess_brightness_slider_id = dpg.add_slider_float(
-                    label="Brightness",
-                    default_value=self.state.display_settings.brightness,
-                    min_value=-0.5,
-                    max_value=0.5,
-                    format="%.2f",
-                    callback=self._on_brightness_slider,
-                    width=200,
-                )
-
-                self.postprocess_contrast_slider_id = dpg.add_slider_float(
-                    label="Contrast",
-                    default_value=self.state.display_settings.contrast,
-                    min_value=0.5,
-                    max_value=2.0,
-                    format="%.2f",
-                    callback=self._on_contrast_slider,
-                    width=200,
-                )
-
-                self.postprocess_gamma_slider_id = dpg.add_slider_float(
-                    label="Gamma",
-                    default_value=self.state.display_settings.gamma,
-                    min_value=0.3,
-                    max_value=3.0,
-                    format="%.2f",
-                    callback=self._on_gamma_slider,
-                    width=200,
-                )
-
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
-                dpg.add_text("Colorization")
-                dpg.add_spacer(height=10)
-
-                self.color_enabled_checkbox_id = dpg.add_checkbox(
-                    label="Enable Color",
-                    default_value=self.state.display_settings.color_enabled,
-                    callback=self._on_color_enabled,
-                )
-
-                from flowcol.render import list_color_palettes
-                palette_names = list(list_color_palettes())
-
-                # Global palette selection with popup menu
-                dpg.add_text("Global Palette")
-                global_palette_button = dpg.add_button(
-                    label="Choose Palette...",
-                    width=200,
-                    tag="global_palette_button",
-                )
-                dpg.add_text(
-                    f"Current: {self.state.display_settings.palette}",
-                    tag="global_palette_current_text"
-                )
-
-                # Popup menu for global palette selection
-                with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
-                    dpg.add_text("Select a palette:")
-                    dpg.add_separator()
-                    with dpg.child_window(width=380, height=300):
-                        for palette_name in palette_names:
-                            colormap_tag = self.palette_colormaps[palette_name]
-                            btn = dpg.add_colormap_button(
-                                label=palette_name,
-                                width=350,
-                                height=25,
-                                callback=self._on_global_palette_button,
-                                user_data=palette_name,
-                                tag=f"global_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                            )
-                            dpg.bind_colormap(btn, colormap_tag)
-
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
-
-                # Region properties (shown when conductor selected in render mode)
-                with dpg.collapsing_header(label="Region Properties", default_open=True, tag="region_properties_header") as region_header:
-                    dpg.add_text("Select a conductor region to customize", tag="region_hint_text")
-
-                    dpg.add_spacer(height=5)
-                    dpg.add_text("Surface (Field Lines)", tag="surface_label")
-                    self.surface_enabled_checkbox_id = dpg.add_checkbox(
-                        label="Enable Custom Palette",
-                        callback=self._on_surface_enabled,
-                        tag="surface_enabled_checkbox",
-                    )
-                    # Surface palette popup
-                    surface_palette_button = dpg.add_button(
-                        label="Choose Surface Palette...",
-                        width=200,
-                        tag="surface_palette_button",
-                    )
-                    dpg.add_text("Current: None", tag="surface_palette_current_text")
-
-                    with dpg.popup(surface_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="surface_palette_popup"):
-                        dpg.add_text("Select surface palette:")
-                        dpg.add_separator()
-                        with dpg.child_window(width=380, height=250):
-                            for palette_name in palette_names:
-                                colormap_tag = self.palette_colormaps[palette_name]
-                                btn = dpg.add_colormap_button(
-                                    label=palette_name,
-                                    width=350,
-                                    height=25,
-                                    callback=self._on_surface_palette_button,
-                                    user_data=palette_name,
-                                    tag=f"surface_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                                )
-                                dpg.bind_colormap(btn, colormap_tag)
-
-                    dpg.add_spacer(height=10)
-                    dpg.add_text("Interior (Hollow Region)", tag="interior_label")
-                    self.interior_enabled_checkbox_id = dpg.add_checkbox(
-                        label="Enable Custom Palette",
-                        callback=self._on_interior_enabled,
-                        tag="interior_enabled_checkbox",
-                    )
-                    # Interior palette popup
-                    interior_palette_button = dpg.add_button(
-                        label="Choose Interior Palette...",
-                        width=200,
-                        tag="interior_palette_button",
-                    )
-                    dpg.add_text("Current: None", tag="interior_palette_current_text")
-
-                    with dpg.popup(interior_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="interior_palette_popup"):
-                        dpg.add_text("Select interior palette:")
-                        dpg.add_separator()
-                        with dpg.child_window(width=380, height=250):
-                            for palette_name in palette_names:
-                                colormap_tag = self.palette_colormaps[palette_name]
-                                btn = dpg.add_colormap_button(
-                                    label=palette_name,
-                                    width=350,
-                                    height=25,
-                                    callback=self._on_interior_palette_button,
-                                    user_data=palette_name,
-                                    tag=f"interior_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                                )
-                                dpg.bind_colormap(btn, colormap_tag)
-
-                    dpg.add_spacer(height=10)
-                    dpg.add_separator()
-                    dpg.add_text("Interior Smear")
-                    self.smear_enabled_checkbox_id = dpg.add_checkbox(
-                        label="Enable Interior Smear",
-                        callback=self._on_smear_enabled,
-                        tag="smear_enabled_checkbox",
-                    )
-                    self.smear_sigma_slider_id = dpg.add_slider_float(
-                        label="Blur Sigma",
-                        min_value=0.1,
-                        max_value=10.0,
-                        format="%.1f px",
-                        callback=self._on_smear_sigma,
-                        tag="smear_sigma_slider",
-                        width=200,
-                    )
+                # Build postprocessing UI (sliders, color controls, region properties)
+                self.postprocess_panel.build_postprocessing_ui(render_group, self.palette_colormaps)
 
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
@@ -877,26 +694,6 @@ class FlowColApp:
                 continue
             dpg.set_value(slider_id, float(conductors[idx].voltage))
 
-    def _update_region_properties_panel(self) -> None:
-        """Update region properties panel based on current selection."""
-        if dpg is None:
-            return
-
-        with self.state_lock:
-            selected = self.state.get_selected()
-            if selected and selected.id is not None:
-                settings = self.state.conductor_color_settings.get(selected.id)
-                if settings:
-                    # Update checkboxes only (colormap buttons are always visible)
-                    dpg.set_value("surface_enabled_checkbox", settings.surface.enabled)
-                    dpg.set_value("interior_enabled_checkbox", settings.interior.enabled)
-
-                # Update smear controls
-                dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
-                dpg.set_value("smear_sigma_slider", selected.smear_sigma)
-                # Show/hide slider based on smear enabled
-                dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
-
     def _on_conductor_voltage_slider(self, sender, app_data, user_data):
         if dpg is None:
             return
@@ -953,29 +750,6 @@ class FlowColApp:
                     dpg.set_value(slider_id, self.state.project.conductors[idx].blur_sigma)
         self._mark_canvas_dirty()
 
-    def _on_smear_enabled(self, sender, app_data):
-        """Toggle interior smear for selected conductor region."""
-        if dpg is None:
-            return
-        with self.state_lock:
-            idx, region = self.state.selected_idx, self.selected_region
-            if idx >= 0 and idx < len(self.state.project.conductors):
-                self.state.project.conductors[idx].smear_enabled = bool(app_data)
-        self._update_region_properties_panel()
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_smear_sigma(self, sender, app_data):
-        """Adjust smear blur sigma for selected conductor."""
-        if dpg is None:
-            return
-        with self.state_lock:
-            idx = self.state.selected_idx
-            if idx >= 0 and idx < len(self.state.project.conductors):
-                self.state.project.conductors[idx].smear_sigma = float(app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
     def _scale_conductor(self, idx: int, factor: float) -> bool:
         if dpg is None:
             return False
@@ -992,7 +766,7 @@ class FlowColApp:
 
         self._mark_canvas_dirty()
         self._update_conductor_slider_labels()
-        self._update_region_properties_panel()
+        self.postprocess_panel.update_region_properties_panel()
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
         return True
 
@@ -1073,7 +847,7 @@ class FlowColApp:
                     self.state.set_selected(hit_idx)
                     self.selected_region = hit_region
                 self._update_conductor_slider_labels()
-                self._update_region_properties_panel()
+                self.postprocess_panel.update_region_properties_panel()
             self.mouse_down_last = mouse_down
             return
 
@@ -1095,7 +869,7 @@ class FlowColApp:
                 else:
                     self.drag_active = False
             self._update_conductor_slider_labels()
-            self._update_region_properties_panel()
+            self.postprocess_panel.update_region_properties_panel()
             self._mark_canvas_dirty()
 
         if self.drag_active and mouse_down:
@@ -1408,137 +1182,6 @@ class FlowColApp:
             pil_img.save(output_path)
 
             dpg.set_value("status_text", f"Saved {output_path.name}")
-
-    def _on_downsample_slider(self, sender, app_data):
-        """Handle downsampling blur sigma slider change (real-time with GPU acceleration)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.downsample_sigma = value
-
-        # GPU is fast enough for real-time updates - no debouncing needed!
-        self._apply_postprocessing()
-
-    def _on_clip_slider(self, sender, app_data):
-        """Handle clip percent slider change."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.clip_percent = value
-            self.state.invalidate_base_rgb()
-        # Clip is display-only, just refresh texture
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_brightness_slider(self, sender, app_data):
-        """Handle brightness slider change (real-time with GPU acceleration)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.brightness = value
-            self.state.invalidate_base_rgb()
-
-        # GPU is fast enough for real-time updates - no debouncing needed!
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_contrast_slider(self, sender, app_data):
-        """Handle contrast slider change (real-time with GPU acceleration)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.contrast = value
-            self.state.invalidate_base_rgb()
-
-        # GPU is fast enough for real-time updates - no debouncing needed!
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_gamma_slider(self, sender, app_data):
-        """Handle gamma slider change (real-time with GPU acceleration)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.gamma = value
-            self.state.invalidate_base_rgb()
-
-        # GPU is fast enough for real-time updates - no debouncing needed!
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_color_enabled(self, sender, app_data):
-        """Handle color enabled checkbox change."""
-        from flowcol.app.actions import set_color_enabled
-        with self.state_lock:
-            set_color_enabled(self.state, app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_palette_changed(self, sender, app_data):
-        """Handle palette dropdown change."""
-        from flowcol.app.actions import set_palette
-        with self.state_lock:
-            set_palette(self.state, app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_global_palette_button(self, sender, app_data, user_data):
-        """Handle global colormap button click."""
-        from flowcol.app.actions import set_palette
-        palette_name = user_data
-        with self.state_lock:
-            set_palette(self.state, palette_name)
-        # Update current palette display
-        if dpg is not None:
-            dpg.set_value("global_palette_current_text", f"Current: {palette_name}")
-            dpg.configure_item("global_palette_popup", show=False)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_surface_enabled(self, sender, app_data):
-        """Handle surface custom palette checkbox."""
-        from flowcol.app.actions import set_region_style_enabled
-        with self.state_lock:
-            selected = self.state.get_selected()
-            if selected and selected.id is not None:
-                set_region_style_enabled(self.state, selected.id, "surface", app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_surface_palette_button(self, sender, app_data, user_data):
-        """Handle surface colormap button click."""
-        from flowcol.app.actions import set_region_palette
-        palette_name = user_data
-        with self.state_lock:
-            selected = self.state.get_selected()
-            if selected and selected.id is not None:
-                set_region_palette(self.state, selected.id, "surface", palette_name)
-        # Update current palette display
-        if dpg is not None:
-            dpg.set_value("surface_palette_current_text", f"Current: {palette_name}")
-            dpg.configure_item("surface_palette_popup", show=False)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_interior_enabled(self, sender, app_data):
-        """Handle interior custom color checkbox."""
-        from flowcol.app.actions import set_region_style_enabled
-        with self.state_lock:
-            selected = self.state.get_selected()
-            if selected and selected.id is not None:
-                set_region_style_enabled(self.state, selected.id, "interior", app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_interior_palette_button(self, sender, app_data, user_data):
-        """Handle interior colormap button click."""
-        from flowcol.app.actions import set_region_palette
-        palette_name = user_data
-        with self.state_lock:
-            selected = self.state.get_selected()
-            if selected and selected.id is not None:
-                set_region_palette(self.state, selected.id, "interior", palette_name)
-        # Update current palette display
-        if dpg is not None:
-            dpg.set_value("interior_palette_current_text", f"Current: {palette_name}")
-            dpg.configure_item("interior_palette_popup", show=False)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
 
     def _redraw_canvas(self) -> None:
         if dpg is None or self.canvas_layer_id is None:
