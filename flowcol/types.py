@@ -20,7 +20,6 @@ class Conductor:
     blur_is_fractional: bool = False  # If True, blur_sigma is fraction of canvas size
     smear_enabled: bool = False  # Enable texture smearing inside conductor
     smear_sigma: float = 2.0  # Gaussian blur for LIC texture in pixels
-    smear_feather: float = 3.0  # Feather distance from edge in pixels
     id: Optional[int] = None  # Assigned when added to project
 
 

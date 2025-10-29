@@ -243,6 +243,14 @@ def ensure_render(state: AppState) -> bool:
     conductor_masks = result.conductor_masks_canvas
     interior_masks = result.interior_masks_canvas
 
+    # Precompute LIC percentiles for smear normalization (CPU-only, not GPU friendly)
+    # These are used by apply_conductor_smear to normalize blurred textures
+    lic_percentiles = None
+    if any(c.smear_enabled for c in state.project.conductors):
+        vmin = float(np.percentile(result.array, 0.5))
+        vmax = float(np.percentile(result.array, 99.5))
+        lic_percentiles = (vmin, vmax)
+
     # Initialize display_array as reference to result.array for backend tests
     # UI layer will replace this with downsampled version during postprocessing
     state.render_cache = RenderCache(
@@ -253,6 +261,7 @@ def ensure_render(state: AppState) -> bool:
         base_rgb=None,  # Will be built on-demand
         conductor_masks=conductor_masks,
         interior_masks=interior_masks,
+        lic_percentiles=lic_percentiles,
     )
 
     # Upload render result to GPU for fast postprocessing

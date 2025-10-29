@@ -12,6 +12,8 @@ assets
 renders
 projects
 candidates
+experiments
+rlic
 
 # C extensions
 *.so
