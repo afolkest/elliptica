@@ -146,6 +146,7 @@ def apply_region_overlays(
     conductor_color_settings: dict,
     conductors: list,
     color_params: ColorParams,
+    display_array_gpu=None,
 ) -> np.ndarray:
     """Composite per-region color overrides over base RGB.
 
@@ -166,12 +167,45 @@ def apply_region_overlays(
         conductor_color_settings: dict[conductor_id -> ConductorColorSettings]
         conductors: List of Conductor objects
         color_params: ColorParams for gamma/contrast/clip/brightness
+        display_array_gpu: Optional GPU tensor for accelerated colorization
 
     Returns:
         Final composited RGB uint8 array
     """
     result = base_rgb.copy()
 
+    # OPTIMIZATION: Pre-compute RGB for each unique palette ONCE
+    # Instead of O(R·total_pixels), we get O(P·total_pixels + R·mask_pixels)
+    # where P = unique palettes (2-5 typically), R = regions (conductors)
+    palette_cache: dict[str, np.ndarray] = {}
+
+    # Collect unique palettes needed
+    unique_palettes = set()
+    for conductor in conductors:
+        if conductor.id is None:
+            continue
+        settings = conductor_color_settings.get(conductor.id)
+        if settings is None:
+            continue
+
+        if settings.interior.enabled and settings.interior.use_palette:
+            unique_palettes.add(settings.interior.palette)
+        if settings.surface.enabled and settings.surface.use_palette:
+            unique_palettes.add(settings.surface.palette)
+
+    # Pre-compute RGB for each unique palette
+    for palette_name in unique_palettes:
+        palette_params = ColorParams(
+            clip_percent=color_params.clip_percent,
+            brightness=color_params.brightness,
+            contrast=color_params.contrast,
+            gamma=color_params.gamma,
+            color_enabled=True,
+            palette=palette_name,
+        )
+        palette_cache[palette_name] = build_base_rgb(scalar_array, palette_params, display_array_gpu)
+
+    # Now blend each region using cached palette RGB
     for idx, conductor in enumerate(conductors):
         if conductor.id is None:
             continue
@@ -185,15 +219,8 @@ def apply_region_overlays(
             mask = interior_masks[idx]
             if np.any(mask > 0):
                 if settings.interior.use_palette:
-                    # Re-colorize scalar array in this region
-                    region_rgb = colorize_array(
-                        scalar_array,
-                        palette=settings.interior.palette,
-                        brightness=color_params.brightness,
-                        gamma=color_params.gamma,
-                        contrast=color_params.contrast,
-                        clip_percent=color_params.clip_percent,
-                    )
+                    # Use pre-computed palette RGB (no redundant colorization!)
+                    region_rgb = palette_cache[settings.interior.palette]
                     result = _blend_region(result, region_rgb, mask)
                 else:
                     # Solid color fill
@@ -205,15 +232,8 @@ def apply_region_overlays(
             mask = conductor_masks[idx]
             if np.any(mask > 0):
                 if settings.surface.use_palette:
-                    # Re-colorize scalar array in this region
-                    region_rgb = colorize_array(
-                        scalar_array,
-                        palette=settings.surface.palette,
-                        brightness=color_params.brightness,
-                        gamma=color_params.gamma,
-                        contrast=color_params.contrast,
-                        clip_percent=color_params.clip_percent,
-                    )
+                    # Use pre-computed palette RGB (no redundant colorization!)
+                    region_rgb = palette_cache[settings.surface.palette]
                     result = _blend_region(result, region_rgb, mask)
                 else:
                     # Solid color fill
