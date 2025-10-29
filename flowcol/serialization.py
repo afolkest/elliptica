@@ -208,7 +208,6 @@ def _conductor_to_dict(conductor: Conductor, index: int) -> dict[str, Any]:
         'blur_is_fractional': conductor.blur_is_fractional,
         'smear_enabled': conductor.smear_enabled,
         'smear_sigma': conductor.smear_sigma,
-        'smear_feather': conductor.smear_feather,
         'id': conductor.id,
         'masks': masks_meta,
     }
@@ -228,7 +227,6 @@ def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Co
         blur_is_fractional=data.get('blur_is_fractional', False),
         smear_enabled=data.get('smear_enabled', False),
         smear_sigma=data.get('smear_sigma', 2.0),
-        smear_feather=data.get('smear_feather', 3.0),
         id=data.get('id'),
     )
 
@@ -267,10 +265,6 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
         'gamma': settings.gamma,
         'color_enabled': settings.color_enabled,
         'palette': settings.palette,
-        'edge_blur_sigma': settings.edge_blur_sigma,
-        'edge_blur_falloff': settings.edge_blur_falloff,
-        'edge_blur_strength': settings.edge_blur_strength,
-        'edge_blur_power': settings.edge_blur_power,
     }
 
 
@@ -284,10 +278,6 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
         gamma=data.get('gamma', defaults.DEFAULT_GAMMA),
         color_enabled=data.get('color_enabled', defaults.DEFAULT_COLOR_ENABLED),
         palette=data.get('palette', defaults.DEFAULT_COLOR_PALETTE),
-        edge_blur_sigma=data.get('edge_blur_sigma', defaults.DEFAULT_EDGE_BLUR_SIGMA),
-        edge_blur_falloff=data.get('edge_blur_falloff', defaults.DEFAULT_EDGE_BLUR_FALLOFF),
-        edge_blur_strength=data.get('edge_blur_strength', defaults.DEFAULT_EDGE_BLUR_STRENGTH),
-        edge_blur_power=data.get('edge_blur_power', defaults.DEFAULT_EDGE_BLUR_POWER),
     )
 
 

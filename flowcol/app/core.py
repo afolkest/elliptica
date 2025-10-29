@@ -52,10 +52,6 @@ class DisplaySettings:
     gamma: float = defaults.DEFAULT_GAMMA
     color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
     palette: str = defaults.DEFAULT_COLOR_PALETTE
-    edge_blur_sigma: float = defaults.DEFAULT_EDGE_BLUR_SIGMA
-    edge_blur_falloff: float = defaults.DEFAULT_EDGE_BLUR_FALLOFF
-    edge_blur_strength: float = defaults.DEFAULT_EDGE_BLUR_STRENGTH
-    edge_blur_power: float = defaults.DEFAULT_EDGE_BLUR_POWER
 
     def to_color_params(self):
         """Convert to pure ColorParams for backend functions."""
@@ -91,11 +87,11 @@ class RenderCache:
         full_res_conductor_masks: Optional[list[np.ndarray]] = None,
         full_res_interior_masks: Optional[list[np.ndarray]] = None,
         project_fingerprint: str = "",
-        edge_blurred_array: Optional[np.ndarray] = None,
         result_gpu: Optional[torch.Tensor] = None,
         display_array_gpu: Optional[torch.Tensor] = None,
         ex_gpu: Optional[torch.Tensor] = None,
         ey_gpu: Optional[torch.Tensor] = None,
+        lic_percentiles: Optional[tuple[float, float]] = None,
     ):
         self.result = result
         self.multiplier = multiplier
@@ -106,10 +102,10 @@ class RenderCache:
         self.full_res_conductor_masks = full_res_conductor_masks
         self.full_res_interior_masks = full_res_interior_masks
         self.project_fingerprint = project_fingerprint
-        self.edge_blurred_array = edge_blurred_array
         self.result_gpu = result_gpu
         self.ex_gpu = ex_gpu
         self.ey_gpu = ey_gpu
+        self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
 
         # Single source of truth: GPU when available, CPU when not
         self.display_array_gpu = display_array_gpu
@@ -203,8 +199,6 @@ class AppState:
             self.render_cache.display_array_gpu = None
             self.render_cache.ex_gpu = None
             self.render_cache.ey_gpu = None
-            # Clear CPU cached postprocessing results
-            self.render_cache.edge_blurred_array = None
             # Release GPU memory back to system
             from flowcol.gpu import GPUContext
             GPUContext.empty_cache()

@@ -147,9 +147,6 @@ def test_roundtrip_all_settings():
         gamma=1.2,
         color_enabled=True,
         palette="Viridis",
-        edge_blur_sigma=0.001,
-        edge_blur_falloff=0.02,
-        edge_blur_strength=0.8,
     )
 
     # Custom boundary conditions
@@ -180,9 +177,6 @@ def test_roundtrip_all_settings():
         assert ds.gamma == 1.2
         assert ds.color_enabled is True
         assert ds.palette == "Viridis"
-        assert ds.edge_blur_sigma == 0.001
-        assert ds.edge_blur_falloff == 0.02
-        assert ds.edge_blur_strength == 0.8
 
         # Verify project settings
         assert loaded_state.project.boundary_top == 1
@@ -318,7 +312,6 @@ def test_backward_compatibility_missing_fields():
 
         # Display settings defaults
         assert loaded_state.display_settings.contrast == defaults.DEFAULT_CONTRAST
-        assert loaded_state.display_settings.edge_blur_sigma == defaults.DEFAULT_EDGE_BLUR_SIGMA
 
         # Conductor defaults
         c = loaded_state.project.conductors[0]

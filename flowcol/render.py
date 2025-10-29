@@ -582,6 +582,7 @@ def apply_conductor_smear(
     palette_name: str | None,
     render_shape: tuple[int, int],
     color_enabled: bool = True,
+    lic_percentiles: tuple[float, float] | None = None,
 ) -> np.ndarray:
     """Apply smear effect to texture inside conductor masks.
 
@@ -596,11 +597,11 @@ def apply_conductor_smear(
         palette_name: Color palette to use if color_enabled is True
         render_shape: (height, width) of render resolution
         color_enabled: Whether to apply color palette or use grayscale
+        lic_percentiles: Precomputed (vmin, vmax) for normalization, or None to compute
 
     Returns:
         Modified RGB image with smear applied
     """
-    from scipy.ndimage import distance_transform_edt
 
     # Convert to float for blending
     out = rgb.astype(np.float32) / 255.0
@@ -653,28 +654,27 @@ def apply_conductor_smear(
         lic_blur = gaussian_filter(lic_gray.astype(np.float32), sigma=sigma_px)
 
         # Re-normalize and colorize (creates "melted blob" effect)
-        # This uses the same logic as colorize_array but respects color_enabled
+        # Use precomputed percentiles if available, otherwise compute on-the-fly
         if color_enabled and palette_name:
             rgb_blur = colorize_array(lic_blur, palette=palette_name).astype(np.float32) / 255.0
         else:
             # Grayscale: normalize to [0, 1] and broadcast to RGB
             arr = lic_blur.astype(np.float32)
-            vmin = float(np.percentile(arr, 0.5))
-            vmax = float(np.percentile(arr, 99.5))
+            if lic_percentiles is not None:
+                vmin, vmax = lic_percentiles
+            else:
+                vmin = float(np.percentile(arr, 0.5))
+                vmax = float(np.percentile(arr, 99.5))
+
             if vmax > vmin:
                 norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
             else:
                 norm = np.clip((arr - arr.min()) / (arr.max() - arr.min() + 1e-10), 0.0, 1.0)
             rgb_blur = np.stack([norm, norm, norm], axis=-1)
 
-        # Create feathered blend weight using distance from conductor edge
-        feather_px = max(conductor.smear_feather, 1e-3)
-        din = distance_transform_edt(mask_bool)
-        weight = np.clip(din / feather_px, 0.0, 1.0)
-        weight = weight * full_mask  # Only inside mask
-
-        # Blend: original → blurred from edge to center
-        weight_3d = weight[..., None]
-        out = out * (1.0 - weight_3d) + rgb_blur * weight_3d
+        # Apply smear at full strength inside mask (no distance-based feathering)
+        # This is GPU-friendly and creates clean "melted blob" effect
+        weight = full_mask[..., None]  # Broadcast mask to RGB channels
+        out = out * (1.0 - weight) + rgb_blur * weight
 
     return np.clip(out * 255.0, 0, 255).astype(np.uint8)

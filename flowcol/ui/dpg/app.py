@@ -125,7 +125,6 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
         blur_is_fractional=conductor.blur_is_fractional,
         smear_enabled=conductor.smear_enabled,
         smear_sigma=conductor.smear_sigma,
-        smear_feather=conductor.smear_feather,
     )
 
 
@@ -190,9 +189,6 @@ class FlowColApp:
     postprocess_brightness_slider_id: Optional[int] = None
     postprocess_contrast_slider_id: Optional[int] = None
     postprocess_gamma_slider_id: Optional[int] = None
-    edge_blur_sigma_slider_id: Optional[int] = None
-    edge_blur_falloff_slider_id: Optional[int] = None
-    edge_blur_strength_slider_id: Optional[int] = None
     color_enabled_checkbox_id: Optional[int] = None
 
     # Cache status display
@@ -221,7 +217,6 @@ class FlowColApp:
     # Debouncing for expensive slider operations
     downsample_debounce_timer: Optional[threading.Timer] = None
     postprocess_debounce_timer: Optional[threading.Timer] = None
-    edge_blur_debounce_timer: Optional[threading.Timer] = None  # For very expensive edge blur
     mouse_wheel_delta: float = 0.0
     mouse_handler_registry_id: Optional[int] = None
 
@@ -420,41 +415,6 @@ class FlowColApp:
 
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
-                dpg.add_text("Edge Smoothing")
-                dpg.add_spacer(height=10)
-
-                self.edge_blur_sigma_slider_id = dpg.add_slider_float(
-                    label="Edge Blur Sigma",
-                    default_value=self.state.display_settings.edge_blur_sigma,
-                    min_value=0.0,
-                    max_value=0.05,
-                    format="%.4f",
-                    callback=self._on_edge_blur_sigma_slider,
-                    width=200,
-                )
-
-                self.edge_blur_falloff_slider_id = dpg.add_slider_float(
-                    label="Blur Falloff Distance",
-                    default_value=self.state.display_settings.edge_blur_falloff,
-                    min_value=0.0,
-                    max_value=0.15,
-                    format="%.4f",
-                    callback=self._on_edge_blur_falloff_slider,
-                    width=200,
-                )
-
-                self.edge_blur_strength_slider_id = dpg.add_slider_float(
-                    label="Blur Strength",
-                    default_value=self.state.display_settings.edge_blur_strength,
-                    min_value=0.0,
-                    max_value=2.0,
-                    format="%.2f",
-                    callback=self._on_edge_blur_strength_slider,
-                    width=200,
-                )
-
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
                 dpg.add_text("Colorization")
                 dpg.add_spacer(height=10)
 
@@ -580,15 +540,6 @@ class FlowColApp:
                         format="%.1f px",
                         callback=self._on_smear_sigma,
                         tag="smear_sigma_slider",
-                        width=200,
-                    )
-                    self.smear_feather_slider_id = dpg.add_slider_float(
-                        label="Feather",
-                        min_value=0.0,
-                        max_value=20.0,
-                        format="%.1f px",
-                        callback=self._on_smear_feather,
-                        tag="smear_feather_slider",
                         width=200,
                     )
 
@@ -762,13 +713,8 @@ class FlowColApp:
         conductor = Conductor(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
         add_conductor(self.state, conductor)
 
-    def _apply_postprocessing(self, recompute_edge_blur: bool = True) -> None:
-        """Apply postprocessing settings to cached render and update display.
-
-        Args:
-            recompute_edge_blur: If False, skip expensive edge blur recomputation
-        """
-        from flowcol.postprocess.blur import apply_anisotropic_edge_blur
+    def _apply_postprocessing(self) -> None:
+        """Apply postprocessing settings to cached render and update display."""
         from scipy.ndimage import zoom
 
         with self.state_lock:
@@ -792,86 +738,9 @@ class FlowColApp:
             except Exception:
                 pass
 
-            # Apply anisotropic edge blur at full resolution (if enabled)
+            # Source for downsampling: result_gpu (GPU) or result.array (CPU)
             lic_to_process = result.array
-            lic_to_process_gpu = None
-
-            if recompute_edge_blur and settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
-                # Convert physical units to pixels
-                reference_dim = min(canvas_w, canvas_h)
-                scale = cache.multiplier * cache.supersample
-                sigma_pixels = settings.edge_blur_sigma * reference_dim * scale
-                falloff_pixels = settings.edge_blur_falloff * reference_dim * scale
-
-                # Try GPU-accelerated edge blur first!
-                print(f"DEBUG edge_blur: use_gpu = {use_gpu}")
-                print(f"DEBUG edge_blur: result_gpu exists = {cache.result_gpu is not None}")
-                print(f"DEBUG edge_blur: ex_gpu exists = {hasattr(cache, 'ex_gpu') and cache.ex_gpu is not None}")
-                print(f"DEBUG edge_blur: ey_gpu exists = {hasattr(cache, 'ey_gpu') and cache.ey_gpu is not None}")
-                if use_gpu and cache.result_gpu is not None and cache.ex_gpu is not None and cache.ey_gpu is not None:
-                    print("🚀 Computing edge blur on GPU...")
-                    import time
-                    import torch
-                    start = time.time()
-
-                    from flowcol.gpu.edge_blur import apply_anisotropic_edge_blur_gpu
-
-                    # Use cached GPU tensors (no upload overhead!)
-                    lic_to_process_gpu = apply_anisotropic_edge_blur_gpu(
-                        cache.result_gpu,
-                        cache.ex_gpu,
-                        cache.ey_gpu,
-                        cache.full_res_conductor_masks,
-                        sigma_pixels,
-                        falloff_pixels,
-                        settings.edge_blur_strength,
-                        settings.edge_blur_power,
-                    )
-
-                    torch.mps.synchronize()
-                    elapsed = time.time() - start
-                    print(f"🚀 GPU edge blur: {elapsed*1000:.0f}ms")
-
-                    # Download for CPU cache
-                    lic_to_process = GPUContext.to_cpu(lic_to_process_gpu)
-                    cache.edge_blurred_array = lic_to_process
-                else:
-                    # CPU fallback
-                    print("🐌 Computing edge blur on CPU (slow)...")
-                    import time
-                    start = time.time()
-
-                    lic_to_process = apply_anisotropic_edge_blur(
-                        result.array,
-                        result.ex,
-                        result.ey,
-                        cache.full_res_conductor_masks,
-                        sigma_pixels,
-                        falloff_pixels,
-                        settings.edge_blur_strength,
-                        settings.edge_blur_power,
-                    )
-
-                    elapsed = time.time() - start
-                    print(f"🐌 CPU edge blur: {elapsed*1000:.0f}ms")
-
-                    # Cache the edge-blurred result
-                    cache.edge_blurred_array = lic_to_process
-
-                    # Upload to GPU if needed
-                    if use_gpu:
-                        lic_to_process_gpu = GPUContext.to_gpu(lic_to_process)
-            elif hasattr(cache, 'edge_blurred_array') and cache.edge_blurred_array is not None:
-                # Reuse cached edge-blurred result
-                lic_to_process = cache.edge_blurred_array
-
-                # Upload to GPU if needed
-                if use_gpu:
-                    lic_to_process_gpu = GPUContext.to_gpu(lic_to_process)
-            else:
-                # No edge blur - use result_gpu if available
-                if use_gpu and cache.result_gpu is not None:
-                    lic_to_process_gpu = cache.result_gpu
+            lic_to_process_gpu = cache.result_gpu if use_gpu else None
 
             # Apply downsampling with blur (GPU-accelerated)
             if use_gpu and lic_to_process_gpu is not None:
@@ -955,6 +824,7 @@ class FlowColApp:
                         self.state.display_settings.palette,
                         cache.display_array.shape,  # (height, width)
                         color_enabled=self.state.display_settings.color_enabled,
+                        lic_percentiles=cache.lic_percentiles,  # Precomputed for performance
                     )
 
                 # Apply per-region overlays
@@ -1091,10 +961,8 @@ class FlowColApp:
                 # Update smear controls
                 dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
                 dpg.set_value("smear_sigma_slider", selected.smear_sigma)
-                dpg.set_value("smear_feather_slider", selected.smear_feather)
-                # Show/hide sliders based on smear enabled
+                # Show/hide slider based on smear enabled
                 dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
-                dpg.configure_item("smear_feather_slider", show=selected.smear_enabled)
 
     def _on_conductor_voltage_slider(self, sender, app_data, user_data):
         if dpg is None:
@@ -1172,17 +1040,6 @@ class FlowColApp:
             idx = self.state.selected_idx
             if idx >= 0 and idx < len(self.state.project.conductors):
                 self.state.project.conductors[idx].smear_sigma = float(app_data)
-        self._refresh_render_texture()
-        self._mark_canvas_dirty()
-
-    def _on_smear_feather(self, sender, app_data):
-        """Adjust smear feather distance for selected conductor."""
-        if dpg is None:
-            return
-        with self.state_lock:
-            idx = self.state.selected_idx
-            if idx >= 0 and idx < len(self.state.project.conductors):
-                self.state.project.conductors[idx].smear_feather = float(app_data)
         self._refresh_render_texture()
         self._mark_canvas_dirty()
 
@@ -1664,12 +1521,6 @@ class FlowColApp:
                 dpg.set_value(self.postprocess_contrast_slider_id, self.state.display_settings.contrast)
             if self.postprocess_gamma_slider_id is not None:
                 dpg.set_value(self.postprocess_gamma_slider_id, self.state.display_settings.gamma)
-            if self.edge_blur_sigma_slider_id is not None:
-                dpg.set_value(self.edge_blur_sigma_slider_id, self.state.display_settings.edge_blur_sigma)
-            if self.edge_blur_falloff_slider_id is not None:
-                dpg.set_value(self.edge_blur_falloff_slider_id, self.state.display_settings.edge_blur_falloff)
-            if self.edge_blur_strength_slider_id is not None:
-                dpg.set_value(self.edge_blur_strength_slider_id, self.state.display_settings.edge_blur_strength)
             if self.color_enabled_checkbox_id is not None:
                 dpg.set_value(self.color_enabled_checkbox_id, self.state.display_settings.color_enabled)
 
@@ -2187,6 +2038,11 @@ class FlowColApp:
 
         # Apply smear
         if any(c.smear_enabled for c in project.conductors):
+            # Compute percentiles for this resolution (export can be at any resolution)
+            vmin = float(np.percentile(lic_array, 0.5))
+            vmax = float(np.percentile(lic_array, 99.5))
+            lic_percentiles = (vmin, vmax)
+
             base_rgb = apply_conductor_smear(
                 base_rgb,
                 lic_array,
@@ -2194,6 +2050,7 @@ class FlowColApp:
                 settings.palette,
                 lic_array.shape,
                 color_enabled=settings.color_enabled,
+                lic_percentiles=lic_percentiles,
             )
 
         # Apply region overlays
@@ -2236,7 +2093,6 @@ class FlowColApp:
             supersample = cache.supersample
 
         from flowcol.render import downsample_lic
-        from flowcol.postprocess.blur import apply_anisotropic_edge_blur
         from PIL import Image
         from datetime import datetime
 
@@ -2246,41 +2102,14 @@ class FlowColApp:
         output_dir.mkdir(exist_ok=True)
         margin_physical = result.margin
 
-        # Apply anisotropic edge blur at full render resolution (if enabled)
-        lic_blurred = result.array
-        if settings.edge_blur_sigma > 0 and result.ex is not None and result.ey is not None:
-            reference_dim = min(canvas_w, canvas_h)
-            render_scale = multiplier * supersample
-            sigma_pixels = settings.edge_blur_sigma * reference_dim * render_scale
-            falloff_pixels = settings.edge_blur_falloff * reference_dim * render_scale
-
-            # Need conductor masks at render resolution for blur
-            from flowcol.postprocess.masks import rasterize_conductor_masks
-            conductor_masks_render, _ = rasterize_conductor_masks(
-                project.conductors,
-                result.array.shape,
-                margin_physical,
-                render_scale,
-                result.offset_x,
-                result.offset_y,
-            )
-
-            lic_blurred = apply_anisotropic_edge_blur(
-                result.array,
-                result.ex,
-                result.ey,
-                conductor_masks_render,
-                sigma_pixels,
-                falloff_pixels,
-                settings.edge_blur_strength,
-                settings.edge_blur_power,
-            )
+        # Use render result directly (edge blur removed)
+        lic_array = result.array
 
         if supersample > 1.0:
             # Save supersampled version at render resolution
             render_scale = multiplier * supersample
             final_rgb_super = self._apply_postprocessing_for_save(
-                lic_blurred,
+                lic_array,
                 project,
                 settings,
                 conductor_color_settings,
@@ -2302,7 +2131,7 @@ class FlowColApp:
             output_shape = (output_canvas_h, output_canvas_w)
 
             downsampled_lic = downsample_lic(
-                lic_blurred,
+                lic_array,
                 output_shape,
                 supersample,
                 settings.downsample_sigma,
@@ -2336,7 +2165,7 @@ class FlowColApp:
             # No supersampling: save single version
             render_scale = multiplier
             final_rgb = self._apply_postprocessing_for_save(
-                lic_blurred,
+                lic_array,
                 project,
                 settings,
                 conductor_color_settings,
@@ -2354,54 +2183,6 @@ class FlowColApp:
 
             dpg.set_value("status_text", f"Saved {output_path.name}")
 
-    def _on_edge_blur_sigma_slider(self, sender, app_data):
-        """Handle edge blur sigma slider change (debounced for smooth dragging)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.edge_blur_sigma = value
-
-        # Cancel existing timer if still pending
-        if self.edge_blur_debounce_timer is not None:
-            self.edge_blur_debounce_timer.cancel()
-
-        # Schedule new debounced update (300ms after slider stops moving)
-        self.edge_blur_debounce_timer = threading.Timer(
-            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
-        )
-        self.edge_blur_debounce_timer.start()
-
-    def _on_edge_blur_falloff_slider(self, sender, app_data):
-        """Handle edge blur falloff slider change (debounced for smooth dragging)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.edge_blur_falloff = value
-
-        # Cancel existing timer if still pending
-        if self.edge_blur_debounce_timer is not None:
-            self.edge_blur_debounce_timer.cancel()
-
-        # Schedule new debounced update (300ms after slider stops moving)
-        self.edge_blur_debounce_timer = threading.Timer(
-            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
-        )
-        self.edge_blur_debounce_timer.start()
-
-    def _on_edge_blur_strength_slider(self, sender, app_data):
-        """Handle edge blur strength slider change (debounced for smooth dragging)."""
-        value = float(app_data)
-        with self.state_lock:
-            self.state.display_settings.edge_blur_strength = value
-
-        # Cancel existing timer if still pending
-        if self.edge_blur_debounce_timer is not None:
-            self.edge_blur_debounce_timer.cancel()
-
-        # Schedule new debounced update (300ms after slider stops moving)
-        self.edge_blur_debounce_timer = threading.Timer(
-            0.3, lambda: self._apply_postprocessing(recompute_edge_blur=True)
-        )
-        self.edge_blur_debounce_timer.start()
-
     def _on_downsample_slider(self, sender, app_data):
         """Handle downsampling blur sigma slider change (real-time with GPU acceleration)."""
         value = float(app_data)
@@ -2409,7 +2190,7 @@ class FlowColApp:
             self.state.display_settings.downsample_sigma = value
 
         # GPU is fast enough for real-time updates - no debouncing needed!
-        self._apply_postprocessing(recompute_edge_blur=False)
+        self._apply_postprocessing()
 
     def _on_clip_slider(self, sender, app_data):
         """Handle clip percent slider change."""
