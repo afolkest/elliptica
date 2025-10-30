@@ -229,7 +229,7 @@ class RenderOrchestrator:
         if success:
             # Render succeeded - update UI
             self.app._mark_canvas_dirty()
-            self.app._refresh_render_texture()
+            self.app.texture_manager.refresh_render_texture()
             self.app.drag_active = False
             with self.app.state_lock:
                 self.app.state.view_mode = "render"

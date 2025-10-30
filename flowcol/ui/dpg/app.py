@@ -22,7 +22,7 @@ from flowcol.ui.dpg.file_io_controller import FileIOController
 from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
 from flowcol.ui.dpg.postprocessing_panel import PostprocessingPanel
 from flowcol.ui.dpg.conductor_controls_panel import ConductorControlsPanel
-from flowcol.render import array_to_pil, COLOR_PALETTES
+from flowcol.ui.dpg.texture_manager import TextureManager
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
@@ -77,23 +77,6 @@ def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
     return mask[local_y, local_x] > 0.5
 
 
-def _mask_to_rgba(mask: np.ndarray, color: Tuple[float, float, float, float]) -> np.ndarray:
-    """Convert mask to RGBA float texture."""
-    h, w = mask.shape
-    rgba = np.zeros((h, w, 4), dtype=np.float32)
-    rgba[..., :3] = color[:3]
-    rgba[..., 3] = mask.astype(np.float32) * color[3]
-    return rgba.reshape(-1)
-
-
-def _image_to_texture_data(img) -> Tuple[int, int, np.ndarray]:
-    """Convert PIL image to float RGBA data."""
-    img = img.convert("RGBA")
-    width, height = img.size
-    rgba = np.asarray(img, dtype=np.float32) / 255.0
-    return width, height, rgba.reshape(-1)
-
-
 def _clone_conductor(conductor: Conductor) -> Conductor:
     """Deep-copy conductor data for background rendering."""
     interior = None
@@ -145,19 +128,12 @@ class FlowColApp:
     canvas_layer_id: Optional[int] = None
     canvas_window_id: Optional[int] = None
     display_scale: float = 1.0
-    texture_registry_id: Optional[int] = None
-    colormap_registry_id: Optional[int] = None
-    palette_colormaps: Dict[str, int] = field(default_factory=dict)  # palette_name -> colormap_tag
-    render_texture_id: Optional[int] = None
-    render_texture_size: Optional[Tuple[int, int]] = None
     viewport_created: bool = False
     edit_controls_id: Optional[int] = None
     render_controls_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
 
-    conductor_textures: Dict[int, int] = field(default_factory=dict)
-    conductor_texture_shapes: Dict[int, Tuple[int, int]] = field(default_factory=dict)
     canvas_dirty: bool = True
 
     drag_active: bool = False
@@ -191,6 +167,7 @@ class FlowColApp:
         print(f"GPU acceleration: {device_name}")
 
         # Initialize controllers
+        self.texture_manager = TextureManager(self)
         self.render_modal = RenderModalController(self)
         self.render_orchestrator = RenderOrchestrator(self)
         self.file_io = FileIOController(self)
@@ -217,16 +194,7 @@ class FlowColApp:
         """Create viewport, windows, and widgets."""
         self.require_backend()
         dpg.create_context()
-        self.texture_registry_id = dpg.add_texture_registry()
-
-        # Create colormap registry and convert our palettes to DPG colormaps
-        self.colormap_registry_id = dpg.add_colormap_registry()
-        for palette_name, colors_normalized in COLOR_PALETTES.items():
-            # DPG expects colors as [R, G, B, A] with values 0-255
-            colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
-            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
-            dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
-            self.palette_colormaps[palette_name] = tag
+        self.texture_manager.create_registries()
 
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
         self.viewport_created = True
@@ -296,7 +264,7 @@ class FlowColApp:
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
                 # Build postprocessing UI (sliders, color controls, region properties)
-                self.postprocess_panel.build_postprocessing_ui(render_group, self.palette_colormaps)
+                self.postprocess_panel.build_postprocessing_ui(render_group, self.texture_manager.palette_colormaps)
 
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
@@ -315,7 +283,7 @@ class FlowColApp:
                 with dpg.draw_node() as node:
                     self.canvas_layer_id = node
 
-        self._refresh_render_texture()
+        self.texture_manager.refresh_render_texture()
         self._update_control_visibility()
         self.file_io.ensure_conductor_file_dialog()
         self._update_canvas_inputs()
@@ -421,39 +389,6 @@ class FlowColApp:
                     return idx
         return -1
 
-    def _ensure_conductor_texture(self, idx: int, mask: np.ndarray) -> int:
-        assert dpg is not None and self.texture_registry_id is not None
-        tex_id = self.conductor_textures.get(idx)
-        width = mask.shape[1]
-        height = mask.shape[0]
-        existing_shape = self.conductor_texture_shapes.get(idx)
-        if tex_id is not None:
-            exists = dpg.does_item_exist(tex_id)
-            if not exists or existing_shape != (height, width):
-                if exists:
-                    dpg.delete_item(tex_id)
-                tex_id = None
-                self.conductor_textures.pop(idx, None)
-
-        rgba_flat = _mask_to_rgba(mask, CONDUCTOR_COLORS[idx % len(CONDUCTOR_COLORS)])
-
-        if tex_id is None:
-            tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
-            self.conductor_textures[idx] = tex_id
-        else:
-            dpg.set_value(tex_id, rgba_flat)
-        self.conductor_texture_shapes[idx] = (height, width)
-        return tex_id
-
-    def _ensure_render_texture(self, width: int, height: int) -> int:
-        assert dpg is not None and self.texture_registry_id is not None
-        if self.render_texture_id is None:
-            empty = np.zeros((height, width, 4), dtype=np.float32)
-            empty[..., 3] = 1.0
-            self.render_texture_id = dpg.add_dynamic_texture(width, height, empty.reshape(-1), parent=self.texture_registry_id)
-            self.render_texture_size = (width, height)
-        return self.render_texture_id
-
     def _add_demo_conductor(self) -> None:
         """Populate state with a simple circular conductor for quick manual testing."""
         from flowcol.app.actions import add_conductor
@@ -547,55 +482,8 @@ class FlowColApp:
             cache.base_rgb = None
 
         # Update texture with new postprocessed display
-        self._refresh_render_texture()
+        self.texture_manager.refresh_render_texture()
         self._mark_canvas_dirty()
-
-    def _refresh_render_texture(self) -> None:
-        from PIL import Image
-
-        if dpg is None or self.texture_registry_id is None:
-            return
-
-        with self.state_lock:
-            cache = self.state.render_cache
-            if cache is None or cache.display_array is None:
-                # Fallback to grayscale if no render
-                arr = np.zeros((32, 32), dtype=np.float32)
-                pil_img = array_to_pil(arr, use_color=False)
-            else:
-                # Use unified GPU postprocessing pipeline (much faster!)
-                from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
-
-                final_rgb = apply_full_postprocess_hybrid(
-                    scalar_array=cache.display_array,
-                    conductor_masks=cache.conductor_masks,
-                    interior_masks=cache.interior_masks,
-                    conductor_color_settings=self.state.conductor_color_settings,
-                    conductors=self.state.project.conductors,
-                    render_shape=cache.display_array.shape,
-                    canvas_resolution=self.state.project.canvas_resolution,
-                    clip_percent=self.state.display_settings.clip_percent,
-                    brightness=self.state.display_settings.brightness,
-                    contrast=self.state.display_settings.contrast,
-                    gamma=self.state.display_settings.gamma,
-                    color_enabled=self.state.display_settings.color_enabled,
-                    palette=self.state.display_settings.palette,
-                    lic_percentiles=cache.lic_percentiles,
-                    use_gpu=True,
-                    scalar_tensor=cache.display_array_gpu,  # Use pre-uploaded tensor if available
-                )
-
-                pil_img = Image.fromarray(final_rgb, mode='RGB')
-
-        width, height, data = _image_to_texture_data(pil_img)
-
-        if self.render_texture_id is None or self.render_texture_size != (width, height):
-            if self.render_texture_id is not None:
-                dpg.delete_item(self.render_texture_id)
-            self.render_texture_id = dpg.add_dynamic_texture(width, height, data, parent=self.texture_registry_id)
-            self.render_texture_size = (width, height)
-        else:
-            dpg.set_value(self.render_texture_id, data)
 
     def _update_canvas_inputs(self) -> None:
         if dpg is None:
@@ -615,8 +503,7 @@ class FlowColApp:
             self.state.set_selected(idx)
             changed = actions.scale_conductor(self.state, idx, factor)
             if changed:
-                self.conductor_textures.pop(idx, None)
-                self.conductor_texture_shapes.pop(idx, None)
+                self.texture_manager.clear_conductor_texture(idx)
         if not changed:
             dpg.set_value("status_text", "Scaling limit reached.")
             return False
@@ -768,8 +655,7 @@ class FlowColApp:
             if can_delete:
                 with self.state_lock:
                     actions.remove_conductor(self.state, idx)
-                    self.conductor_textures.clear()
-                    self.conductor_texture_shapes.clear()
+                    self.texture_manager.clear_all_conductor_textures()
                 self._mark_canvas_dirty()
                 self.conductor_controls.rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")
@@ -1045,7 +931,7 @@ class FlowColApp:
             return
         self.canvas_dirty = False
 
-        self._refresh_render_texture()
+        self.texture_manager.refresh_render_texture()
 
         with self.state_lock:
             project = self.state.project
@@ -1088,14 +974,14 @@ class FlowColApp:
                 dpg.draw_line((0, y), (canvas_w, y), color=color, thickness=thickness, parent=self.canvas_layer_id)
                 y += grid_spacing_y
 
-        if view_mode == "render" and render_cache and self.render_texture_id is not None and self.render_texture_size:
-            tex_w, tex_h = self.render_texture_size
+        if view_mode == "render" and render_cache and self.texture_manager.render_texture_id is not None and self.texture_manager.render_texture_size:
+            tex_w, tex_h = self.texture_manager.render_texture_size
             if tex_w > 0 and tex_h > 0:
                 scale_x = canvas_w / tex_w
                 scale_y = canvas_h / tex_h
                 pmax = (tex_w * scale_x, tex_h * scale_y)
                 dpg.draw_image(
-                    self.render_texture_id,
+                    self.texture_manager.render_texture_id,
                     (0, 0),
                     pmax,
                     uv_min=(0.0, 0.0),
@@ -1105,7 +991,7 @@ class FlowColApp:
 
         if view_mode == "edit" or render_cache is None:
             for idx, conductor in enumerate(conductors):
-                tex_id = self._ensure_conductor_texture(idx, conductor.mask)
+                tex_id = self.texture_manager.ensure_conductor_texture(idx, conductor.mask, CONDUCTOR_COLORS)
                 x0, y0 = conductor.position
                 width = conductor.mask.shape[1]
                 height = conductor.mask.shape[0]
