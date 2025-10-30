@@ -453,25 +453,6 @@ def array_to_pil(
         return Image.fromarray(img, mode='L').convert('RGB')
 
 
-def array_to_surface(
-    arr: np.ndarray,
-    *,
-    use_color: bool = False,
-    palette: str | None = None,
-    contrast: float = 1.0,
-    gamma: float = 1.0,
-    clip_percent: float = 0.5,
-):
-    """Convert scalar array to pygame surface, optionally colorized.
-
-    Note: UI always passes clip_percent explicitly from state (defaults to 0.0 there).
-          This default of 0.5 is for direct API usage to match gauss_law_morph behavior.
-    """
-    import pygame
-    pil_img = array_to_pil(arr, use_color=use_color, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
-    return pygame.image.fromstring(pil_img.tobytes(), pil_img.size, pil_img.mode)
-
-
 def save_render(
     arr: np.ndarray,
     project: Project,

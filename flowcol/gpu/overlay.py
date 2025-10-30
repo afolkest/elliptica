@@ -6,6 +6,7 @@ from typing import Tuple
 
 from flowcol.gpu import GPUContext
 from flowcol.gpu.pipeline import build_base_rgb_gpu
+from flowcol.render import _get_palette_lut
 
 
 def blend_region_gpu(
@@ -106,7 +107,6 @@ def apply_region_overlays_gpu(
             unique_palettes.add(settings.surface.palette)
 
     # Pre-compute RGB for each unique palette on GPU
-    from flowcol.render import _get_palette_lut
     for palette_name in unique_palettes:
         lut_numpy = _get_palette_lut(palette_name)
         lut_tensor = GPUContext.to_gpu(lut_numpy)

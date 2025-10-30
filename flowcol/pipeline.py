@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import time
 from flowcol.types import Project
 from flowcol.field import compute_field
+from flowcol.postprocess.masks import rasterize_conductor_masks
 from flowcol.render import (
     compute_lic,
     downsample_lic,
@@ -178,7 +179,6 @@ def perform_render(
     conductor_masks_canvas = None
     interior_masks_canvas = None
     if project.conductors:
-        from flowcol.postprocess.masks import rasterize_conductor_masks
         conductor_masks_canvas, interior_masks_canvas = rasterize_conductor_masks(
             project.conductors,
             lic_cropped.shape,

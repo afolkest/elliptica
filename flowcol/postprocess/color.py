@@ -1,7 +1,12 @@
 """Global colorization functions for display rendering."""
 
 from dataclasses import dataclass
+import time
 import numpy as np
+import torch
+
+from flowcol.gpu import GPUContext
+from flowcol.gpu.pipeline import build_base_rgb_gpu
 from flowcol.render import colorize_array, array_to_pil, _normalize_unit, _get_palette_lut
 from flowcol.postprocess.fast import apply_contrast_gamma_jit, apply_palette_lut_jit, grayscale_to_rgb_jit
 
@@ -35,19 +40,11 @@ def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_
     # Try GPU-accelerated path if tensor provided
     use_gpu = False
     if display_array_gpu is not None:
-        try:
-            from flowcol.gpu import GPUContext
-            from flowcol.gpu.pipeline import build_base_rgb_gpu
-
-            if GPUContext.is_available():
-                use_gpu = True
-        except Exception:
-            pass
+        if GPUContext.is_available():
+            use_gpu = True
 
     if use_gpu:
         # GPU path - much faster!
-        import time
-        import torch
         start = time.time()
 
         lut_numpy = _get_palette_lut(color_params.palette) if color_params.color_enabled else None

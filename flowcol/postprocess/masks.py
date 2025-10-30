@@ -1,7 +1,7 @@
 """Mask rasterization and interior detection for conductor colorization."""
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt
+from scipy.ndimage import distance_transform_edt, binary_fill_holes, zoom
 from typing import Optional
 
 
@@ -21,8 +21,6 @@ def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.nda
     Returns:
         Interior mask as float32 array, or None if no hollow interior exists
     """
-    from scipy.ndimage import binary_fill_holes
-
     # Convert to binary
     binary = (mask > 0.5).astype(bool)
 
@@ -123,8 +121,6 @@ def _rasterize_single_mask(
     Returns:
         Rasterized mask at target_shape resolution
     """
-    from scipy.ndimage import zoom
-
     target_h, target_w = target_shape
     pos_x, pos_y = position
 

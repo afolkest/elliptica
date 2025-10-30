@@ -4,16 +4,19 @@ from __future__ import annotations
 
 import json
 import zipfile
+import hashlib
 from pathlib import Path
 from typing import Any
 from dataclasses import asdict
 from datetime import datetime
+from io import BytesIO
 
 import numpy as np
 from PIL import Image
 
-from flowcol.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle
+from flowcol.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle, RenderCache
 from flowcol.types import Project, Conductor
+from flowcol.pipeline import RenderResult
 from flowcol import defaults
 
 SCHEMA_VERSION = "1.0"
@@ -334,7 +337,6 @@ def _save_mask_to_zip(zf: zipfile.ZipFile, mask: np.ndarray, filename: str) -> N
     img = Image.fromarray(mask_uint16)
 
     # Write to ZIP in-memory
-    from io import BytesIO
     buf = BytesIO()
     img.save(buf, format='PNG')
     zf.writestr(filename, buf.getvalue())
@@ -345,8 +347,6 @@ def _load_mask_from_zip(zf: zipfile.ZipFile, filename: str) -> np.ndarray:
 
     Converts [0, 65535] uint16 → [0, 1] float32.
     """
-    from io import BytesIO
-
     # Read PNG from ZIP
     buf = BytesIO(zf.read(filename))
     img = Image.open(buf)
@@ -371,8 +371,6 @@ def compute_project_fingerprint(project: Project) -> str:
     Returns:
         32-character MD5 hex string
     """
-    import hashlib
-
     parts = [
         # Canvas and global settings
         f"canvas:{project.canvas_resolution[0]}x{project.canvas_resolution[1]}",
@@ -413,7 +411,6 @@ def save_render_cache(
         project: Current project (for fingerprinting)
         filepath: Output path (should end with .flowcol.cache)
     """
-    from flowcol.app.core import RenderCache
 
     filepath = Path(filepath)
 
@@ -464,8 +461,6 @@ def load_render_cache(
     Returns:
         RenderCache with project_fingerprint set, or None if load fails
     """
-    from flowcol.app.core import RenderCache
-    from flowcol.pipeline import RenderResult
 
     filepath = Path(filepath)
     if not filepath.exists():
