@@ -164,7 +164,7 @@ class CanvasController:
             self.app.state.set_selected(idx)
             changed = actions.scale_conductor(self.app.state, idx, factor)
             if changed:
-                self.app.texture_manager.clear_conductor_texture(idx)
+                self.app.display_pipeline.texture_manager.clear_conductor_texture(idx)
         if not changed:
             dpg.set_value("status_text", "Scaling limit reached.")
             return False
@@ -283,7 +283,7 @@ class CanvasController:
             if can_delete:
                 with self.app.state_lock:
                     actions.remove_conductor(self.app.state, idx)
-                    self.app.texture_manager.clear_all_conductor_textures()
+                    self.app.display_pipeline.texture_manager.clear_all_conductor_textures()
                 self.app.canvas_renderer.mark_dirty()
                 self.app.conductor_controls.rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")

@@ -148,8 +148,7 @@ class CacheManagementPanel:
             self.app.state.view_mode = "render"
 
         self.app._update_control_visibility()
-        self.app.canvas_renderer.mark_dirty()
-        self.app.texture_manager.refresh_render_texture()
+        self.app.display_pipeline.refresh_display()
         dpg.set_value("status_text", "Viewing cached render")
 
     def rebuild_cache_display_fields(self) -> None:
@@ -160,12 +159,10 @@ class CacheManagementPanel:
         """
         import numpy as np
 
-        print("DEBUG rebuild_cache_display_fields: CALLED")
 
         with self.app.state_lock:
             cache = self.app.state.render_cache
             if cache is None or cache.result is None:
-                print("DEBUG rebuild_cache_display_fields: cache or result is None, returning")
                 return
 
             # Load or rebuild masks at full render resolution
@@ -190,28 +187,18 @@ class CacheManagementPanel:
 
             # Recompute LIC percentiles for smear (critical for loaded caches!)
             # ALWAYS compute if missing - don't check smear_enabled, user may enable it later
-            print(f"DEBUG rebuild: cache.lic_percentiles = {cache.lic_percentiles}")
-            print(f"DEBUG rebuild: conductors = {len(self.app.state.project.conductors)}")
 
             if cache.lic_percentiles is None:
-                print("DEBUG rebuild: Computing lic_percentiles...")
                 vmin = float(np.percentile(cache.result.array, 0.5))
                 vmax = float(np.percentile(cache.result.array, 99.5))
                 cache.lic_percentiles = (vmin, vmax)
-                print(f"DEBUG rebuild: Computed lic_percentiles = {cache.lic_percentiles}")
-            else:
-                print(f"DEBUG rebuild: lic_percentiles already set: {cache.lic_percentiles}")
 
             # Upload to GPU for fast postprocessing (if available)
             try:
                 from flowcol.gpu import GPUContext
-                print(f"DEBUG rebuild: GPU available? {GPUContext.is_available()}")
                 if GPUContext.is_available():
-                    print("DEBUG rebuild: Uploading tensors to GPU...")
                     cache.result_gpu = GPUContext.to_gpu(cache.result.array)
                     cache.ex_gpu = GPUContext.to_gpu(cache.result.ex)
                     cache.ey_gpu = GPUContext.to_gpu(cache.result.ey)
-                    print(f"DEBUG rebuild: GPU upload complete (result_gpu={cache.result_gpu is not None})")
             except Exception as e:
-                print(f"DEBUG rebuild: GPU upload failed: {e}")
                 pass  # Graceful fallback if GPU upload fails
