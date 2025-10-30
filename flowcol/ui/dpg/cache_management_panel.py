@@ -134,7 +134,7 @@ class CacheManagementPanel:
             self.app.state.view_mode = "edit"
 
         self.app._update_control_visibility()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         self.update_cache_status_display()
         dpg.set_value("status_text", "Render cache discarded")
 
@@ -150,7 +150,7 @@ class CacheManagementPanel:
             self.app.state.view_mode = "render"
 
         self.app._update_control_visibility()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         self.app.texture_manager.refresh_render_texture()
         dpg.set_value("status_text", "Viewing cached render")
 

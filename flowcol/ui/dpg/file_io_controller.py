@@ -159,7 +159,7 @@ class FileIOController:
             actions.add_conductor(self.app.state, conductor)
             self.app.state.view_mode = "edit"
 
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         self.app._update_control_visibility()
         self.app.conductor_controls.rebuild_conductor_controls()
         self.app.conductor_controls.update_conductor_slider_labels()
@@ -324,7 +324,7 @@ class FileIOController:
                 self.app.cache_panel.rebuild_cache_display_fields()
 
             # Update UI to reflect loaded state
-            self.app._mark_canvas_dirty()
+            self.app.canvas_renderer.mark_dirty()
             self.app._update_canvas_scale()  # Recalculate scale for new canvas resolution
             self.app._update_control_visibility()
             self.app.conductor_controls.rebuild_conductor_controls()

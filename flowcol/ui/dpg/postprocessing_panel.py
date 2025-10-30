@@ -319,7 +319,7 @@ class PostprocessingPanel:
 
         # Clip is display-only, just refresh texture
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
         """Handle brightness slider change (real-time with GPU acceleration)."""
@@ -333,7 +333,7 @@ class PostprocessingPanel:
 
         # GPU is fast enough for real-time updates - no debouncing needed!
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
         """Handle contrast slider change (real-time with GPU acceleration)."""
@@ -347,7 +347,7 @@ class PostprocessingPanel:
 
         # GPU is fast enough for real-time updates - no debouncing needed!
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
         """Handle gamma slider change (real-time with GPU acceleration)."""
@@ -361,7 +361,7 @@ class PostprocessingPanel:
 
         # GPU is fast enough for real-time updates - no debouncing needed!
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     # ------------------------------------------------------------------
     # Color and palette callbacks
@@ -376,7 +376,7 @@ class PostprocessingPanel:
             actions.set_color_enabled(self.app.state, app_data)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_global_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle global colormap button click."""
@@ -392,7 +392,7 @@ class PostprocessingPanel:
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_surface_enabled(self, sender=None, app_data=None) -> None:
         """Handle surface custom palette checkbox."""
@@ -405,7 +405,7 @@ class PostprocessingPanel:
                 actions.set_region_style_enabled(self.app.state, selected.id, "surface", app_data)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_surface_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle surface colormap button click."""
@@ -423,7 +423,7 @@ class PostprocessingPanel:
         dpg.configure_item("surface_palette_popup", show=False)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_interior_enabled(self, sender=None, app_data=None) -> None:
         """Handle interior custom color checkbox."""
@@ -436,7 +436,7 @@ class PostprocessingPanel:
                 actions.set_region_style_enabled(self.app.state, selected.id, "interior", app_data)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_interior_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle interior colormap button click."""
@@ -454,7 +454,7 @@ class PostprocessingPanel:
         dpg.configure_item("interior_palette_popup", show=False)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     # ------------------------------------------------------------------
     # Smear callbacks
@@ -472,7 +472,7 @@ class PostprocessingPanel:
 
         self.update_region_properties_panel()
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
         """Adjust smear blur sigma for selected conductor."""
@@ -485,4 +485,4 @@ class PostprocessingPanel:
                 self.app.state.project.conductors[idx].smear_sigma = float(app_data)
 
         self.app.texture_manager.refresh_render_texture()
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
