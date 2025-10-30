@@ -151,7 +151,7 @@ class CacheManagementPanel:
 
         self.app._update_control_visibility()
         self.app._mark_canvas_dirty()
-        self.app._refresh_render_texture()
+        self.app.texture_manager.refresh_render_texture()
         dpg.set_value("status_text", "Viewing cached render")
 
     def rebuild_cache_display_fields(self) -> None:

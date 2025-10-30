@@ -1,0 +1,164 @@
+"""Texture management for Dear PyGui rendering."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, Dict, Tuple
+import numpy as np
+from PIL import Image
+
+if TYPE_CHECKING:
+    from flowcol.ui.dpg.app import FlowColApp
+
+try:
+    import dearpygui.dearpygui as dpg  # type: ignore
+except ImportError:
+    dpg = None
+
+
+def _mask_to_rgba(mask: np.ndarray, color: Tuple[float, float, float, float]) -> np.ndarray:
+    """Convert mask to RGBA float texture."""
+    h, w = mask.shape
+    rgba = np.zeros((h, w, 4), dtype=np.float32)
+    rgba[..., :3] = color[:3]
+    rgba[..., 3] = mask.astype(np.float32) * color[3]
+    return rgba.reshape(-1)
+
+
+def _image_to_texture_data(img: Image.Image) -> Tuple[int, int, np.ndarray]:
+    """Convert PIL image to float RGBA data."""
+    img = img.convert("RGBA")
+    width, height = img.size
+    rgba = np.asarray(img, dtype=np.float32) / 255.0
+    return width, height, rgba.reshape(-1)
+
+
+class TextureManager:
+    """Manages DearPyGui textures for conductor overlays and rendered images."""
+
+    def __init__(self, app: "FlowColApp"):
+        self.app = app
+        self.texture_registry_id: Optional[int] = None
+        self.colormap_registry_id: Optional[int] = None
+        self.palette_colormaps: Dict[str, int] = {}  # palette_name -> colormap_tag
+        self.render_texture_id: Optional[int] = None
+        self.render_texture_size: Optional[Tuple[int, int]] = None
+        self.conductor_textures: Dict[int, int] = {}  # conductor_idx -> texture_id
+        self.conductor_texture_shapes: Dict[int, Tuple[int, int]] = {}  # conductor_idx -> (height, width)
+
+    def create_registries(self) -> None:
+        """Create texture and colormap registries in DPG."""
+        if dpg is None:
+            return
+
+        # Create texture registry for dynamic textures
+        self.texture_registry_id = dpg.add_texture_registry()
+
+        # Create colormap registry and convert our palettes to DPG colormaps
+        from flowcol.render import COLOR_PALETTES
+        self.colormap_registry_id = dpg.add_colormap_registry()
+        for palette_name, colors_normalized in COLOR_PALETTES.items():
+            # DPG expects colors as [R, G, B, A] with values 0-255
+            colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
+            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
+            dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
+            self.palette_colormaps[palette_name] = tag
+
+    def ensure_conductor_texture(self, idx: int, mask: np.ndarray, conductor_colors: list) -> int:
+        """Create or update conductor texture, returns texture ID.
+
+        Args:
+            idx: Conductor index
+            mask: Conductor mask array (height, width)
+            conductor_colors: List of RGBA colors for conductors
+
+        Returns:
+            DPG texture ID
+        """
+        assert dpg is not None and self.texture_registry_id is not None
+
+        tex_id = self.conductor_textures.get(idx)
+        width = mask.shape[1]
+        height = mask.shape[0]
+        existing_shape = self.conductor_texture_shapes.get(idx)
+
+        # Check if texture needs recreation (doesn't exist or size changed)
+        if tex_id is not None:
+            exists = dpg.does_item_exist(tex_id)
+            if not exists or existing_shape != (height, width):
+                if exists:
+                    dpg.delete_item(tex_id)
+                tex_id = None
+                self.conductor_textures.pop(idx, None)
+
+        # Convert mask to RGBA texture data
+        rgba_flat = _mask_to_rgba(mask, conductor_colors[idx % len(conductor_colors)])
+
+        # Create or update texture
+        if tex_id is None:
+            tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
+            self.conductor_textures[idx] = tex_id
+        else:
+            dpg.set_value(tex_id, rgba_flat)
+
+        self.conductor_texture_shapes[idx] = (height, width)
+        return tex_id
+
+    def refresh_render_texture(self) -> None:
+        """Update render texture with postprocessed image from cache."""
+        from PIL import Image
+
+        if dpg is None or self.texture_registry_id is None:
+            return
+
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            if cache is None or cache.display_array is None:
+                # Fallback to grayscale if no render
+                from flowcol.render import array_to_pil
+                arr = np.zeros((32, 32), dtype=np.float32)
+                pil_img = array_to_pil(arr, use_color=False)
+            else:
+                # Use unified GPU postprocessing pipeline (much faster!)
+                from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
+
+                final_rgb = apply_full_postprocess_hybrid(
+                    scalar_array=cache.display_array,
+                    conductor_masks=cache.conductor_masks,
+                    interior_masks=cache.interior_masks,
+                    conductor_color_settings=self.app.state.conductor_color_settings,
+                    conductors=self.app.state.project.conductors,
+                    render_shape=cache.display_array.shape,
+                    canvas_resolution=self.app.state.project.canvas_resolution,
+                    clip_percent=self.app.state.display_settings.clip_percent,
+                    brightness=self.app.state.display_settings.brightness,
+                    contrast=self.app.state.display_settings.contrast,
+                    gamma=self.app.state.display_settings.gamma,
+                    color_enabled=self.app.state.display_settings.color_enabled,
+                    palette=self.app.state.display_settings.palette,
+                    lic_percentiles=cache.lic_percentiles,
+                    use_gpu=True,
+                    scalar_tensor=cache.display_array_gpu,  # Use pre-uploaded tensor if available
+                )
+
+                pil_img = Image.fromarray(final_rgb, mode='RGB')
+
+        width, height, data = _image_to_texture_data(pil_img)
+
+        # Create or update texture
+        if self.render_texture_id is None or self.render_texture_size != (width, height):
+            if self.render_texture_id is not None:
+                dpg.delete_item(self.render_texture_id)
+            self.render_texture_id = dpg.add_dynamic_texture(width, height, data, parent=self.texture_registry_id)
+            self.render_texture_size = (width, height)
+        else:
+            dpg.set_value(self.render_texture_id, data)
+
+    def clear_conductor_texture(self, idx: int) -> None:
+        """Clear cached conductor texture (forces recreation on next draw)."""
+        self.conductor_textures.pop(idx, None)
+        self.conductor_texture_shapes.pop(idx, None)
+
+    def clear_all_conductor_textures(self) -> None:
+        """Clear all conductor textures."""
+        self.conductor_textures.clear()
+        self.conductor_texture_shapes.clear()
