@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import threading
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -21,7 +22,7 @@ from flowcol.ui.dpg.display_pipeline_controller import DisplayPipelineController
 from flowcol.ui.dpg.image_export_controller import ImageExportController
 from flowcol.ui.dpg.canvas_controller import CanvasController
 from flowcol.ui.dpg.canvas_renderer import CanvasRenderer
-from flowcol.types import Conductor
+from flowcol.types import Conductor, Project
 from flowcol import defaults
 
 

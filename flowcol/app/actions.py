@@ -7,9 +7,9 @@ from scipy.ndimage import zoom
 
 from flowcol.pipeline import perform_render
 from flowcol.types import Conductor
-from flowcol.app.core import AppState, RenderCache
+from flowcol.app.core import AppState, RenderCache, ConductorColorSettings
 from flowcol.postprocess.masks import derive_interior
-from flowcol.app.core import ConductorColorSettings
+from flowcol.postprocess.color import build_base_rgb
 from flowcol.gpu import GPUContext
 
 MAX_CONDUCTOR_DIM = 32768
@@ -303,8 +303,6 @@ def ensure_base_rgb(state: AppState) -> bool:
 
     Returns True on success, False if no render available.
     """
-    from flowcol.postprocess.color import build_base_rgb
-
     cache = state.render_cache
     if cache is None or cache.result is None:
         return False

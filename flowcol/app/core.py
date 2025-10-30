@@ -9,7 +9,9 @@ import numpy as np
 import torch
 
 from flowcol import defaults
+from flowcol.gpu import GPUContext
 from flowcol.pipeline import RenderResult
+from flowcol.postprocess.color import ColorParams
 from flowcol.types import Project, Conductor
 
 
@@ -55,7 +57,6 @@ class DisplaySettings:
 
     def to_color_params(self):
         """Convert to pure ColorParams for backend functions."""
-        from flowcol.postprocess.color import ColorParams
         return ColorParams(
             clip_percent=self.clip_percent,
             brightness=self.brightness,
@@ -149,7 +150,6 @@ class AppState:
             self.render_cache.ex_gpu = None
             self.render_cache.ey_gpu = None
             # Release GPU memory back to system
-            from flowcol.gpu import GPUContext
             GPUContext.empty_cache()
         self.render_cache = None
         self.render_dirty = True

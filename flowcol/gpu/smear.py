@@ -7,6 +7,7 @@ from scipy.ndimage import zoom
 
 from flowcol.gpu import GPUContext
 from flowcol.gpu.ops import gaussian_blur_gpu, percentile_clip_gpu, apply_palette_lut_gpu, grayscale_to_rgb_gpu
+from flowcol.render import _get_palette_lut
 
 
 def apply_conductor_smear_gpu(
@@ -103,7 +104,6 @@ def apply_conductor_smear_gpu(
             if settings.surface.enabled:
                 if settings.surface.use_palette:
                     # Custom palette: apply that palette to normalized LIC
-                    from flowcol.render import _get_palette_lut
                     custom_lut = _get_palette_lut(settings.surface.palette)
                     custom_lut_tensor = GPUContext.to_gpu(custom_lut)
                     rgb_blur = apply_palette_lut_gpu(norm, custom_lut_tensor)

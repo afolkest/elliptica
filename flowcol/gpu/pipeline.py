@@ -3,6 +3,7 @@
 import torch
 import numpy as np
 from typing import Tuple
+from scipy.ndimage import gaussian_filter, zoom
 
 from flowcol.gpu import GPUContext
 from flowcol.gpu.ops import (
@@ -123,8 +124,6 @@ def downsample_lic_hybrid(
         return GPUContext.to_cpu(result_tensor)
     else:
         # CPU fallback
-        from scipy.ndimage import gaussian_filter, zoom
-
         sigma = max(sigma, 0.0)
         filtered = gaussian_filter(arr, sigma=sigma) if sigma > 0 else arr
 

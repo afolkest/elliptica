@@ -3,6 +3,7 @@
 import numpy as np
 import torch
 from typing import Optional
+from torchvision.transforms.functional import gaussian_blur
 
 
 class GPUContext:
@@ -43,7 +44,6 @@ class GPUContext:
         dummy = torch.randn(1024, 1024, device=device, dtype=torch.float32)
 
         # Gaussian blur warmup (torchvision will compile shaders)
-        from torchvision.transforms.functional import gaussian_blur
         _ = gaussian_blur(dummy.unsqueeze(0).unsqueeze(0), kernel_size=5, sigma=2.0)
 
         # Percentile/quantile warmup

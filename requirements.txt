@@ -4,7 +4,6 @@ rLIC
 numba
 scipy
 pyamg
-pygame
 pillow
 scikit-image
 dearpygui
