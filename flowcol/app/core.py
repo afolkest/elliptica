@@ -87,6 +87,8 @@ class RenderCache:
         ex_gpu: Optional[torch.Tensor] = None,
         ey_gpu: Optional[torch.Tensor] = None,
         lic_percentiles: Optional[tuple[float, float]] = None,
+        conductor_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
+        interior_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
     ):
         self.result = result  # Full resolution RenderResult
         self.multiplier = multiplier
@@ -105,6 +107,10 @@ class RenderCache:
         self.ey_gpu = ey_gpu  # Electric field Y component on GPU
 
         self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
+
+        # GPU mask tensors (cached to avoid repeated CPU→GPU transfers)
+        self.conductor_masks_gpu = conductor_masks_gpu
+        self.interior_masks_gpu = interior_masks_gpu
 
 
 @dataclass
@@ -149,6 +155,8 @@ class AppState:
             self.render_cache.result_gpu = None
             self.render_cache.ex_gpu = None
             self.render_cache.ey_gpu = None
+            self.render_cache.conductor_masks_gpu = None
+            self.render_cache.interior_masks_gpu = None
             # Release GPU memory back to system
             GPUContext.empty_cache()
         self.render_cache = None

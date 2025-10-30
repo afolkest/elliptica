@@ -26,6 +26,8 @@ def apply_full_postprocess_gpu(
     color_enabled: bool,
     palette: str,
     lic_percentiles: Tuple[float, float] | None = None,
+    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    interior_masks_gpu: list[torch.Tensor | None] | None = None,
 ) -> torch.Tensor:
     """Apply full postprocessing pipeline on GPU.
 
@@ -51,6 +53,8 @@ def apply_full_postprocess_gpu(
         color_enabled: Whether to use color palette
         palette: Color palette name
         lic_percentiles: Precomputed (vmin, vmax) for smear normalization
+        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
+        interior_masks_gpu: Optional pre-uploaded GPU interior masks
 
     Returns:
         Final RGB tensor (H, W, 3) in [0, 1] on GPU
@@ -79,21 +83,23 @@ def apply_full_postprocess_gpu(
     )
 
     if has_overlays and conductor_masks_cpu is not None and interior_masks_cpu is not None:
-        # Upload masks to GPU once
-        conductor_masks_gpu = []
-        interior_masks_gpu = []
+        # Upload masks to GPU (or use pre-uploaded masks if available)
+        if conductor_masks_gpu is None or interior_masks_gpu is None:
+            conductor_masks_gpu = []
+            interior_masks_gpu = []
 
-        for mask_cpu in conductor_masks_cpu:
-            if mask_cpu is not None:
-                conductor_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
-            else:
-                conductor_masks_gpu.append(None)
+            for mask_cpu in conductor_masks_cpu:
+                if mask_cpu is not None:
+                    conductor_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
+                else:
+                    conductor_masks_gpu.append(None)
 
-        for mask_cpu in interior_masks_cpu:
-            if mask_cpu is not None:
-                interior_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
-            else:
-                interior_masks_gpu.append(None)
+            for mask_cpu in interior_masks_cpu:
+                if mask_cpu is not None:
+                    interior_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
+                else:
+                    interior_masks_gpu.append(None)
+        # else: use the pre-uploaded GPU masks (avoids repeated transfers!)
 
         base_rgb = apply_region_overlays_gpu(
             base_rgb,
@@ -122,6 +128,7 @@ def apply_full_postprocess_gpu(
             lut_tensor,
             lic_percentiles,
             conductor_color_settings,
+            conductor_masks_gpu,  # Pass pre-uploaded GPU masks
         )
 
     return torch.clamp(base_rgb, 0.0, 1.0)
@@ -144,6 +151,8 @@ def apply_full_postprocess_hybrid(
     lic_percentiles: Tuple[float, float] | None = None,
     use_gpu: bool = True,
     scalar_tensor: torch.Tensor | None = None,
+    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    interior_masks_gpu: list[torch.Tensor | None] | None = None,
 ) -> np.ndarray:
     """Hybrid postprocessing pipeline with automatic GPU/CPU fallback.
 
@@ -164,6 +173,8 @@ def apply_full_postprocess_hybrid(
         lic_percentiles: Precomputed (vmin, vmax) for smear normalization
         use_gpu: Whether to attempt GPU acceleration
         scalar_tensor: Optional pre-uploaded scalar tensor on GPU (saves upload time)
+        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
+        interior_masks_gpu: Optional pre-uploaded GPU interior masks
 
     Returns:
         Final RGB array (H, W, 3) uint8 on CPU
@@ -189,6 +200,8 @@ def apply_full_postprocess_hybrid(
                 color_enabled,
                 palette,
                 lic_percentiles,
+                conductor_masks_gpu,
+                interior_masks_gpu,
             )
 
             # Convert to uint8 and download
@@ -224,6 +237,8 @@ def apply_full_postprocess_hybrid(
                 color_enabled,
                 palette,
                 lic_percentiles,
+                None,  # GPU masks not available in fallback
+                None,
             )
 
             # Convert to uint8 and return (already on CPU)
