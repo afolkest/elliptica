@@ -112,22 +112,27 @@ class TextureManager:
 
         with self.app.state_lock:
             cache = self.app.state.render_cache
-            if cache is None or cache.display_array is None:
+            if cache is None or cache.result is None:
                 # Fallback to grayscale if no render
                 from flowcol.render import array_to_pil
                 arr = np.zeros((32, 32), dtype=np.float32)
                 pil_img = array_to_pil(arr, use_color=False)
             else:
-                # Use unified GPU postprocessing pipeline (much faster!)
+                # Apply postprocessing at FULL render resolution
+                # DearPyGUI will scale it for display
                 from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
+                print(f"DEBUG texture_manager: About to apply postprocessing")
+                print(f"DEBUG texture_manager: cache.lic_percentiles = {cache.lic_percentiles}")
+                print(f"DEBUG texture_manager: cache.result_gpu = {cache.result_gpu is not None}")
+
                 final_rgb = apply_full_postprocess_hybrid(
-                    scalar_array=cache.display_array,
-                    conductor_masks=cache.conductor_masks,
-                    interior_masks=cache.interior_masks,
+                    scalar_array=cache.result.array,  # Full resolution!
+                    conductor_masks=cache.conductor_masks,  # Full resolution!
+                    interior_masks=cache.interior_masks,  # Full resolution!
                     conductor_color_settings=self.app.state.conductor_color_settings,
                     conductors=self.app.state.project.conductors,
-                    render_shape=cache.display_array.shape,
+                    render_shape=cache.result.array.shape,  # Full resolution shape
                     canvas_resolution=self.app.state.project.canvas_resolution,
                     clip_percent=self.app.state.display_settings.clip_percent,
                     brightness=self.app.state.display_settings.brightness,
@@ -137,7 +142,7 @@ class TextureManager:
                     palette=self.app.state.display_settings.palette,
                     lic_percentiles=cache.lic_percentiles,
                     use_gpu=True,
-                    scalar_tensor=cache.display_array_gpu,  # Use pre-uploaded tensor if available
+                    scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
                 )
 
                 pil_img = Image.fromarray(final_rgb, mode='RGB')

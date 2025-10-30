@@ -119,7 +119,8 @@ def test_compositor_integration():
 
     cache = state.render_cache
     assert cache is not None
-    assert cache.display_array is not None
+    assert cache.result is not None
+    assert cache.result.array is not None
     assert cache.conductor_masks is not None
     assert cache.interior_masks is not None
 
@@ -135,10 +136,10 @@ def test_compositor_integration():
     set_region_style_enabled(state, c2.id, "interior", True)
     set_region_solid_color(state, c2.id, "interior", (0.5, 0.5, 1.0))
 
-    # Apply compositor
+    # Apply compositor (use full-res result.array)
     final_rgb = apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,

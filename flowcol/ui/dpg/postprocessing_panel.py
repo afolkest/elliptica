@@ -465,10 +465,18 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
+        print(f"DEBUG on_smear_enabled: CALLED with app_data={app_data}")
         with self.app.state_lock:
             idx = self.app.state.selected_idx
+            print(f"DEBUG on_smear_enabled: selected_idx={idx}, num_conductors={len(self.app.state.project.conductors)}")
             if idx >= 0 and idx < len(self.app.state.project.conductors):
                 self.app.state.project.conductors[idx].smear_enabled = bool(app_data)
+                print(f"DEBUG on_smear_enabled: Set conductor[{idx}].smear_enabled = {bool(app_data)}")
+                # Verify all conductor smear states after update
+                all_smear = [c.smear_enabled for c in self.app.state.project.conductors]
+                print(f"DEBUG on_smear_enabled: All conductor smear_enabled states = {all_smear}")
+            else:
+                print(f"DEBUG on_smear_enabled: INVALID idx, not updating")
 
         self.update_region_properties_panel()
         self.app.texture_manager.refresh_render_texture()

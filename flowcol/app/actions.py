@@ -251,13 +251,11 @@ def ensure_render(state: AppState) -> bool:
         vmax = float(np.percentile(result.array, 99.5))
         lic_percentiles = (vmin, vmax)
 
-    # Initialize display_array as reference to result.array for backend tests
-    # UI layer will replace this with downsampled version during postprocessing
+    # Cache everything at full render resolution
     state.render_cache = RenderCache(
         result=result,
         multiplier=settings.multiplier,
         supersample=settings.supersample,
-        display_array=result.array,  # Reference (not copy!) - UI layer will replace
         base_rgb=None,  # Will be built on-demand
         conductor_masks=conductor_masks,
         interior_masks=interior_masks,
@@ -308,15 +306,16 @@ def ensure_base_rgb(state: AppState) -> bool:
     from flowcol.postprocess.color import build_base_rgb
 
     cache = state.render_cache
-    if cache is None or cache.display_array is None:
+    if cache is None or cache.result is None:
         return False
 
     if cache.base_rgb is None:
         # Use GPU tensor if available (much faster!)
+        # Work at full render resolution
         cache.base_rgb = build_base_rgb(
-            cache.display_array,
+            cache.result.array,
             state.display_settings.to_color_params(),
-            display_array_gpu=cache.display_array_gpu,
+            display_array_gpu=cache.result_gpu,
         )
 
     return True

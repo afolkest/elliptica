@@ -69,10 +69,8 @@ class DisplaySettings:
 class RenderCache:
     """Latest render output retained for display/export.
 
-    Single source of truth pattern:
-    - GPU tensor (display_array_gpu) is primary when available
-    - CPU array (_display_array_cpu) is fallback when GPU unavailable
-    - display_array property provides cached lazy download from GPU
+    All data kept at full render resolution - DearPyGUI handles scaling for display.
+    GPU tensors used when available for fast postprocessing.
     """
 
     def __init__(
@@ -80,80 +78,32 @@ class RenderCache:
         result: RenderResult,
         multiplier: float,
         supersample: float,
-        display_array: Optional[np.ndarray] = None,
         base_rgb: Optional[np.ndarray] = None,
         conductor_masks: Optional[list[np.ndarray]] = None,
         interior_masks: Optional[list[np.ndarray]] = None,
-        full_res_conductor_masks: Optional[list[np.ndarray]] = None,
-        full_res_interior_masks: Optional[list[np.ndarray]] = None,
         project_fingerprint: str = "",
         result_gpu: Optional[torch.Tensor] = None,
-        display_array_gpu: Optional[torch.Tensor] = None,
         ex_gpu: Optional[torch.Tensor] = None,
         ey_gpu: Optional[torch.Tensor] = None,
         lic_percentiles: Optional[tuple[float, float]] = None,
     ):
-        self.result = result
+        self.result = result  # Full resolution RenderResult
         self.multiplier = multiplier
         self.supersample = supersample
-        self.base_rgb = base_rgb
+        self.base_rgb = base_rgb  # Cached RGB at full resolution
+
+        # Masks at full render resolution (for region overlays and smear)
         self.conductor_masks = conductor_masks
         self.interior_masks = interior_masks
-        self.full_res_conductor_masks = full_res_conductor_masks
-        self.full_res_interior_masks = full_res_interior_masks
+
         self.project_fingerprint = project_fingerprint
-        self.result_gpu = result_gpu
-        self.ex_gpu = ex_gpu
-        self.ey_gpu = ey_gpu
+
+        # GPU tensors at full resolution for fast postprocessing
+        self.result_gpu = result_gpu  # Full-res LIC on GPU
+        self.ex_gpu = ex_gpu  # Electric field X component on GPU
+        self.ey_gpu = ey_gpu  # Electric field Y component on GPU
+
         self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
-
-        # Single source of truth: GPU when available, CPU when not
-        self.display_array_gpu = display_array_gpu
-        self._display_array_cpu: Optional[np.ndarray] = None if display_array_gpu is not None else display_array
-
-        # Cached CPU copy for lazy download from GPU
-        self._display_array_cpu_cache: Optional[np.ndarray] = None
-        self._cpu_cache_valid: bool = False
-
-    @property
-    def display_array(self) -> Optional[np.ndarray]:
-        """Lazy CPU access - downloads from GPU if needed, cached."""
-        if self.display_array_gpu is not None:
-            # GPU is source of truth - use cached download
-            if not self._cpu_cache_valid:
-                from flowcol.gpu import GPUContext
-                self._display_array_cpu_cache = GPUContext.to_cpu(self.display_array_gpu)
-                self._cpu_cache_valid = True
-            return self._display_array_cpu_cache
-        # CPU is source of truth
-        return self._display_array_cpu
-
-    @display_array.setter
-    def display_array(self, value: Optional[np.ndarray]) -> None:
-        """Set CPU array directly (for CPU-only code paths)."""
-        if self.display_array_gpu is not None:
-            # If GPU exists, don't allow direct CPU writes
-            raise ValueError("Cannot set display_array when GPU tensor is primary. Clear GPU first.")
-        self._display_array_cpu = value
-        self._cpu_cache_valid = False
-
-    def set_display_array_cpu(self, arr: np.ndarray) -> None:
-        """Set CPU as primary source (clears GPU tensor)."""
-        self.display_array_gpu = None
-        self._display_array_cpu = arr
-        self._display_array_cpu_cache = None
-        self._cpu_cache_valid = False
-
-    def set_display_array_gpu(self, tensor: torch.Tensor) -> None:
-        """Set GPU as primary source (invalidates CPU cache)."""
-        self.display_array_gpu = tensor
-        self._display_array_cpu = None
-        self._display_array_cpu_cache = None
-        self._cpu_cache_valid = False
-
-    def invalidate_cpu_cache(self) -> None:
-        """Mark CPU cache invalid. Call this when GPU tensor is modified."""
-        self._cpu_cache_valid = False
 
 
 @dataclass
@@ -196,7 +146,6 @@ class AppState:
         if self.render_cache:
             # Clear GPU tensors to free VRAM
             self.render_cache.result_gpu = None
-            self.render_cache.display_array_gpu = None
             self.render_cache.ex_gpu = None
             self.render_cache.ey_gpu = None
             # Release GPU memory back to system
