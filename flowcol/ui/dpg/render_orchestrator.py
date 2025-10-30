@@ -9,6 +9,7 @@ import numpy as np
 
 from flowcol.app.core import RenderCache
 from flowcol.pipeline import perform_render
+from flowcol.render import downsample_lic
 from flowcol.serialization import compute_project_fingerprint
 
 if TYPE_CHECKING:
@@ -108,6 +109,23 @@ class RenderOrchestrator:
                     cache.result_gpu = GPUContext.to_gpu(result.array)
                     cache.ex_gpu = GPUContext.to_gpu(result.ex)
                     cache.ey_gpu = GPUContext.to_gpu(result.ey)
+
+                    # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
+                    if conductor_masks is not None:
+                        cache.conductor_masks_gpu = []
+                        for mask in conductor_masks:
+                            if mask is not None:
+                                cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
+                            else:
+                                cache.conductor_masks_gpu.append(None)
+
+                    if interior_masks is not None:
+                        cache.interior_masks_gpu = []
+                        for mask in interior_masks:
+                            if mask is not None:
+                                cache.interior_masks_gpu.append(GPUContext.to_gpu(mask))
+                            else:
+                                cache.interior_masks_gpu.append(None)
             except Exception as e:
                 pass  # Graceful fallback if GPU upload fails
 

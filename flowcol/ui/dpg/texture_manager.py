@@ -140,6 +140,8 @@ class TextureManager:
                     lic_percentiles=cache.lic_percentiles,
                     use_gpu=True,
                     scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
+                    conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
+                    interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
                 )
 
                 pil_img = Image.fromarray(final_rgb, mode='RGB')

@@ -230,13 +230,14 @@ def ensure_render(state: AppState) -> bool:
         if (old_cache.result_gpu is not None or
             old_cache.ex_gpu is not None or
             old_cache.ey_gpu is not None or
-            old_cache.display_array_gpu is not None):
-            # Clear all GPU tensors including display_array_gpu (largest one!)
+            old_cache.conductor_masks_gpu is not None or
+            old_cache.interior_masks_gpu is not None):
+            # Clear all GPU tensors
             old_cache.result_gpu = None
             old_cache.ex_gpu = None
             old_cache.ey_gpu = None
-            old_cache.display_array_gpu = None
-            old_cache.invalidate_cpu_cache()
+            old_cache.conductor_masks_gpu = None
+            old_cache.interior_masks_gpu = None
             GPUContext.empty_cache()
 
     # Use pre-computed conductor masks from RenderResult (avoids redundant rasterization)
@@ -274,6 +275,23 @@ def ensure_render(state: AppState) -> bool:
             print(f"DEBUG render: result_gpu = {state.render_cache.result_gpu is not None}")
             print(f"DEBUG render: ex_gpu = {state.render_cache.ex_gpu is not None}")
             print(f"DEBUG render: ey_gpu = {state.render_cache.ey_gpu is not None}")
+
+            # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
+            if conductor_masks is not None:
+                state.render_cache.conductor_masks_gpu = []
+                for mask in conductor_masks:
+                    if mask is not None:
+                        state.render_cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
+                    else:
+                        state.render_cache.conductor_masks_gpu.append(None)
+
+            if interior_masks is not None:
+                state.render_cache.interior_masks_gpu = []
+                for mask in interior_masks:
+                    if mask is not None:
+                        state.render_cache.interior_masks_gpu.append(GPUContext.to_gpu(mask))
+                    else:
+                        state.render_cache.interior_masks_gpu.append(None)
     except Exception as e:
         print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
         pass  # Graceful fallback if GPU upload fails

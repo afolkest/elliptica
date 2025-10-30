@@ -20,6 +20,7 @@ def apply_conductor_smear_gpu(
     lut_tensor: torch.Tensor | None,
     lic_percentiles: Tuple[float, float] | None = None,
     conductor_color_settings: dict | None = None,
+    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
 ) -> torch.Tensor:
     """Apply smear effect to texture inside conductor masks on GPU.
 
@@ -33,6 +34,7 @@ def apply_conductor_smear_gpu(
         lut_tensor: Color palette LUT on GPU, or None for grayscale
         lic_percentiles: Precomputed (vmin, vmax) for normalization
         conductor_color_settings: Per-conductor color settings dict (to detect custom colors)
+        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
 
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
@@ -63,11 +65,15 @@ def apply_conductor_smear_gpu(
         if idx >= len(conductor_masks) or conductor_masks[idx] is None:
             continue
 
-        # Use pre-rasterized mask passed in (already at correct resolution)
-        mask_cpu = conductor_masks[idx]
+        # Use pre-uploaded GPU mask if available, otherwise upload from CPU
+        if conductor_masks_gpu is not None and idx < len(conductor_masks_gpu) and conductor_masks_gpu[idx] is not None:
+            # Use pre-uploaded GPU mask (fast path!)
+            full_mask = conductor_masks_gpu[idx]
+        else:
+            # Upload mask to GPU (fallback path)
+            mask_cpu = conductor_masks[idx]
+            full_mask = GPUContext.to_gpu(mask_cpu)
 
-        # Upload mask to GPU
-        full_mask = GPUContext.to_gpu(mask_cpu)
         mask_bool = full_mask > 0.5
 
         if not torch.any(mask_bool):
