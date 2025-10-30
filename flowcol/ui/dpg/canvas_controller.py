@@ -168,7 +168,7 @@ class CanvasController:
             dpg.set_value("status_text", "Scaling limit reached.")
             return False
 
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         self.app.conductor_controls.update_conductor_slider_labels()
         self.app.postprocess_panel.update_region_properties_panel()
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
@@ -236,7 +236,7 @@ class CanvasController:
                     self.drag_active = False
             self.app.conductor_controls.update_conductor_slider_labels()
             self.app.postprocess_panel.update_region_properties_panel()
-            self.app._mark_canvas_dirty()
+            self.app.canvas_renderer.mark_dirty()
 
         # Drag conductor
         if self.drag_active and mouse_down:
@@ -249,7 +249,7 @@ class CanvasController:
                     if 0 <= idx < len(self.app.state.project.conductors):
                         actions.move_conductor(self.app.state, idx, dx, dy)
                 self.drag_last_pos = (x, y)
-                self.app._mark_canvas_dirty()
+                self.app.canvas_renderer.mark_dirty()
 
         if self.drag_active and released:
             self.drag_active = False
@@ -283,7 +283,7 @@ class CanvasController:
                 with self.app.state_lock:
                     actions.remove_conductor(self.app.state, idx)
                     self.app.texture_manager.clear_all_conductor_textures()
-                self.app._mark_canvas_dirty()
+                self.app.canvas_renderer.mark_dirty()
                 self.app.conductor_controls.rebuild_conductor_controls()
                 dpg.set_value("status_text", "Conductor deleted")
         self.backspace_down_last = backspace_down
@@ -324,7 +324,7 @@ class CanvasController:
                         actions.add_conductor(self.app.state, pasted)
                         new_idx = len(self.app.state.project.conductors) - 1
                         self.app.state.set_selected(new_idx)
-                    self.app._mark_canvas_dirty()
+                    self.app.canvas_renderer.mark_dirty()
                     self.app.conductor_controls.rebuild_conductor_controls()
                     self.app.conductor_controls.update_conductor_slider_labels()
                     dpg.set_value("status_text", f"Pasted as C{new_idx + 1}")

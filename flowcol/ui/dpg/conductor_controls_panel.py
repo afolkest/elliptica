@@ -147,7 +147,7 @@ class ConductorControlsPanel:
         with self.app.state_lock:
             actions.set_conductor_voltage(self.app.state, idx, value)
 
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
         self.update_conductor_slider_labels(skip_idx=idx)
 
@@ -165,7 +165,7 @@ class ConductorControlsPanel:
                 self.app.state.field_cache = None
                 is_frac = self.app.state.project.conductors[idx].blur_is_fractional
 
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
         if is_frac:
             dpg.set_value("status_text", f"C{idx + 1} blur = {value:.3f} (fraction)")
         else:
@@ -203,4 +203,4 @@ class ConductorControlsPanel:
                 if idx < len(self.app.state.project.conductors):
                     dpg.set_value(slider_id, self.app.state.project.conductors[idx].blur_sigma)
 
-        self.app._mark_canvas_dirty()
+        self.app.canvas_renderer.mark_dirty()
