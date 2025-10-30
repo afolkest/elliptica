@@ -71,7 +71,8 @@ def test_colorization_settings():
 
     cache = state.render_cache
     assert cache is not None, "No render cache created"
-    assert cache.display_array is not None, "No display array"
+    assert cache.result is not None, "No render result"
+    assert cache.result.array is not None, "No result array"
     assert cache.base_rgb is None, "base_rgb should start None"
     assert cache.conductor_masks is not None, "No conductor masks generated"
     assert cache.interior_masks is not None, "No interior masks generated"

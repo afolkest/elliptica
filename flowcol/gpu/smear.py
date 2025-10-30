@@ -36,6 +36,12 @@ def apply_conductor_smear_gpu(
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
     """
+    print(f"DEBUG smear: lic_percentiles = {lic_percentiles}")
+    print(f"DEBUG smear: conductor_color_settings = {conductor_color_settings is not None}")
+    print(f"DEBUG smear: num conductors = {len(conductors)}")
+    smear_enabled_list = [c.smear_enabled for c in conductors]
+    print(f"DEBUG smear: smear_enabled = {smear_enabled_list}")
+
     out = rgb_tensor.clone()
 
     render_h, render_w = render_shape

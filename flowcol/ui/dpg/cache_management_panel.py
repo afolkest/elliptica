@@ -1,7 +1,5 @@
 """Cache management panel controller for FlowCol UI."""
-from flowcol.render import downsample_lic
 from flowcol.postprocess.masks import rasterize_conductor_masks
-from scipy.ndimage import zoom
 from typing import Optional, TYPE_CHECKING
 
 from flowcol.serialization import compute_project_fingerprint
@@ -155,39 +153,31 @@ class CacheManagementPanel:
         dpg.set_value("status_text", "Viewing cached render")
 
     def rebuild_cache_display_fields(self) -> None:
-        """Rebuild display_array and masks from loaded cache RenderResult.
+        """Rebuild masks and percentiles from loaded cache RenderResult.
 
         This is called after loading a project with a cached render to reconstruct
-        the display arrays and masks needed for postprocessing.
+        the masks and percentiles needed for postprocessing. All kept at full render resolution.
         """
+        import numpy as np
+
+        print("DEBUG rebuild_cache_display_fields: CALLED")
 
         with self.app.state_lock:
             cache = self.app.state.render_cache
             if cache is None or cache.result is None:
+                print("DEBUG rebuild_cache_display_fields: cache or result is None, returning")
                 return
 
-            # Recompute display_array
-            canvas_w, canvas_h = self.app.state.project.canvas_resolution
-            target_shape = (canvas_h, canvas_w)
-            display_array = downsample_lic(
-                cache.result.array,
-                target_shape,
-                cache.supersample,
-                self.app.state.display_settings.downsample_sigma,
-            )
-            # Set CPU as primary source (this is CPU-only path)
-            cache.set_display_array_cpu(display_array)
-
-            # Use cached masks from RenderResult if available (avoids redundant rasterization)
+            # Load or rebuild masks at full render resolution
             if self.app.state.project.conductors:
                 if cache.result.conductor_masks_canvas is not None:
                     # Use pre-computed masks from render
-                    full_res_conductor_masks = cache.result.conductor_masks_canvas
-                    full_res_interior_masks = cache.result.interior_masks_canvas
+                    cache.conductor_masks = cache.result.conductor_masks_canvas
+                    cache.interior_masks = cache.result.interior_masks_canvas
                 else:
                     # Fallback: rasterize masks (for compatibility with older cached renders)
                     scale = cache.multiplier * cache.supersample
-                    full_res_conductor_masks, full_res_interior_masks = rasterize_conductor_masks(
+                    conductor_masks, interior_masks = rasterize_conductor_masks(
                         self.app.state.project.conductors,
                         cache.result.canvas_scaled_shape,
                         cache.result.margin,
@@ -195,27 +185,33 @@ class CacheManagementPanel:
                         cache.result.offset_x,
                         cache.result.offset_y,
                     )
+                    cache.conductor_masks = conductor_masks
+                    cache.interior_masks = interior_masks
 
-                # Store full-resolution masks (for edge blur)
-                cache.full_res_conductor_masks = full_res_conductor_masks
-                cache.full_res_interior_masks = full_res_interior_masks
+            # Recompute LIC percentiles for smear (critical for loaded caches!)
+            # ALWAYS compute if missing - don't check smear_enabled, user may enable it later
+            print(f"DEBUG rebuild: cache.lic_percentiles = {cache.lic_percentiles}")
+            print(f"DEBUG rebuild: conductors = {len(self.app.state.project.conductors)}")
 
-                # Downsample masks to match display_array resolution (for region overlays)
-                if cache.result.array.shape != display_array.shape:
-                    scale_y = display_array.shape[0] / cache.result.array.shape[0]
-                    scale_x = display_array.shape[1] / cache.result.array.shape[1]
-                    conductor_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_conductor_masks
-                    ]
-                    interior_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_interior_masks
-                    ]
-                else:
-                    # Same resolution - reuse full-res masks
-                    conductor_masks = full_res_conductor_masks
-                    interior_masks = full_res_interior_masks
+            if cache.lic_percentiles is None:
+                print("DEBUG rebuild: Computing lic_percentiles...")
+                vmin = float(np.percentile(cache.result.array, 0.5))
+                vmax = float(np.percentile(cache.result.array, 99.5))
+                cache.lic_percentiles = (vmin, vmax)
+                print(f"DEBUG rebuild: Computed lic_percentiles = {cache.lic_percentiles}")
+            else:
+                print(f"DEBUG rebuild: lic_percentiles already set: {cache.lic_percentiles}")
 
-                cache.conductor_masks = conductor_masks
-                cache.interior_masks = interior_masks
+            # Upload to GPU for fast postprocessing (if available)
+            try:
+                from flowcol.gpu import GPUContext
+                print(f"DEBUG rebuild: GPU available? {GPUContext.is_available()}")
+                if GPUContext.is_available():
+                    print("DEBUG rebuild: Uploading tensors to GPU...")
+                    cache.result_gpu = GPUContext.to_gpu(cache.result.array)
+                    cache.ex_gpu = GPUContext.to_gpu(cache.result.ex)
+                    cache.ey_gpu = GPUContext.to_gpu(cache.result.ey)
+                    print(f"DEBUG rebuild: GPU upload complete (result_gpu={cache.result_gpu is not None})")
+            except Exception as e:
+                print(f"DEBUG rebuild: GPU upload failed: {e}")
+                pass  # Graceful fallback if GPU upload fails

@@ -66,13 +66,13 @@ def test_palette_caching_with_shared_palettes():
     # Apply overlays
     final_rgb = apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
         state.display_settings.to_color_params(),
-        cache.display_array_gpu,
+        cache.result.array_gpu,
     )
 
     assert final_rgb is not None, "apply_region_overlays returned None"
@@ -113,13 +113,13 @@ def test_visual_consistency():
     # Apply overlays
     final_rgb = apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
         state.display_settings.to_color_params(),
-        cache.display_array_gpu,
+        cache.result.array_gpu,
     )
 
     # Verify output is reasonable
@@ -183,13 +183,13 @@ def benchmark_overlay_performance():
     # Warmup
     apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
         state.display_settings.to_color_params(),
-        cache.display_array_gpu,
+        cache.result.array_gpu,
     )
 
     # Benchmark
@@ -200,13 +200,13 @@ def benchmark_overlay_performance():
         start = time.perf_counter()
         apply_region_overlays(
             cache.base_rgb,
-            cache.display_array,
+            cache.result.array,
             cache.conductor_masks,
             cache.interior_masks,
             state.conductor_color_settings,
             state.project.conductors,
             state.display_settings.to_color_params(),
-            cache.display_array_gpu,
+            cache.result.array_gpu,
         )
         elapsed = time.perf_counter() - start
         times.append(elapsed)
@@ -215,14 +215,14 @@ def benchmark_overlay_performance():
     std_time = np.std(times) * 1000
 
     print(f"✓ Overlay recolor performance:")
-    print(f"  Resolution: {cache.display_array.shape}")
+    print(f"  Resolution: {cache.result.array.shape}")
     print(f"  Conductors: 5 (with 2 unique palettes)")
     print(f"  Average time: {avg_time:.1f}ms ± {std_time:.1f}ms")
     print(f"  Expected: < 100ms for optimized version")
     print(f"  Old version: would be ~500ms+ (5x slower)")
 
     # Complexity analysis
-    total_pixels = cache.display_array.shape[0] * cache.display_array.shape[1]
+    total_pixels = cache.result.array.shape[0] * cache.result.array.shape[1]
     print(f"\n  Complexity Analysis:")
     print(f"  - Total pixels: {total_pixels:,}")
     print(f"  - Old: O(R·total_pixels) = 5 × {total_pixels:,} = {5*total_pixels:,} ops")
@@ -257,13 +257,13 @@ def test_solid_color_fills():
 
     final_rgb = apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
         state.display_settings.to_color_params(),
-        cache.display_array_gpu,
+        cache.result.array_gpu,
     )
 
     # Verify solid color was applied
@@ -302,13 +302,13 @@ def test_empty_case():
     start = time.perf_counter()
     final_rgb = apply_region_overlays(
         cache.base_rgb,
-        cache.display_array,
+        cache.result.array,
         cache.conductor_masks,
         cache.interior_masks,
         state.conductor_color_settings,
         state.project.conductors,
         state.display_settings.to_color_params(),
-        cache.display_array_gpu,
+        cache.result.array_gpu,
     )
     elapsed = (time.perf_counter() - start) * 1000
 

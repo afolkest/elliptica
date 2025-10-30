@@ -75,57 +75,27 @@ class RenderOrchestrator:
             if result is None:
                 return False
 
-            # Apply initial postprocessing to create display array
-            from flowcol.render import downsample_lic
+            # Keep masks at full render resolution (from RenderResult)
+            # No downsampling - DearPyGUI will handle display scaling
+            conductor_masks = result.conductor_masks_canvas
+            interior_masks = result.interior_masks_canvas
 
-            with self.app.state_lock:
-                postprocess = self.app.state.display_settings
-                # canvas_resolution is (width, height), but downsample_lic expects (height, width)
-                canvas_w, canvas_h = project_snapshot.canvas_resolution
-                target_shape = (canvas_h, canvas_w)
-                display_array = downsample_lic(
-                    result.array,
-                    target_shape,
-                    settings_snapshot.supersample,
-                    postprocess.downsample_sigma,
-                )
+            # Precompute LIC percentiles for smear normalization (needed for smear effect)
+            lic_percentiles = None
+            if any(c.smear_enabled for c in project_snapshot.conductors):
+                vmin = float(np.percentile(result.array, 0.5))
+                vmax = float(np.percentile(result.array, 99.5))
+                lic_percentiles = (vmin, vmax)
 
-            # Use cached masks from RenderResult (avoids redundant rasterization)
-            full_res_conductor_masks = result.conductor_masks_canvas
-            full_res_interior_masks = result.interior_masks_canvas
-            conductor_masks = None
-            interior_masks = None
-            if project_snapshot.conductors and full_res_conductor_masks is not None:
-                from scipy.ndimage import zoom
-
-                # Downsample masks to match display_array resolution
-                if result.array.shape != display_array.shape:
-                    scale_y = display_array.shape[0] / result.array.shape[0]
-                    scale_x = display_array.shape[1] / result.array.shape[1]
-                    conductor_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_conductor_masks
-                    ]
-                    interior_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in full_res_interior_masks
-                    ]
-                else:
-                    # Same resolution - reuse full-res masks
-                    conductor_masks = full_res_conductor_masks
-                    interior_masks = full_res_interior_masks
-
-            # Create render cache
+            # Create render cache (everything at full resolution)
             cache = RenderCache(
                 result=result,
                 multiplier=settings_snapshot.multiplier,
                 supersample=settings_snapshot.supersample,
-                display_array=display_array,
-                base_rgb=None,  # Will be built on-demand
+                base_rgb=None,  # Will be built on-demand during postprocessing
                 conductor_masks=conductor_masks,
                 interior_masks=interior_masks,
-                full_res_conductor_masks=full_res_conductor_masks,
-                full_res_interior_masks=full_res_interior_masks,
+                lic_percentiles=lic_percentiles,
             )
 
             # Set fingerprint for cache staleness detection

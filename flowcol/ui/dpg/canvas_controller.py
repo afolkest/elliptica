@@ -126,10 +126,11 @@ class CanvasController:
         if cache is None or cache.conductor_masks is None or cache.interior_masks is None:
             return -1, None
 
-        # Masks are at canvas_resolution (same as canvas), so coordinates map directly
-        # The render texture may be thumbnailed for display, but masks are full resolution
-        mask_x = int(canvas_x)
-        mask_y = int(canvas_y)
+        # Masks are at FULL RENDER RESOLUTION (canvas × multiplier × supersample)
+        # Scale canvas coordinates to match mask resolution
+        scale = cache.multiplier * cache.supersample
+        mask_x = int(canvas_x * scale)
+        mask_y = int(canvas_y * scale)
 
         # Check each conductor in reverse order (top to bottom)
         for idx in reversed(range(len(self.app.state.project.conductors))):

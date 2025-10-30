@@ -331,84 +331,19 @@ class FlowColApp:
         add_conductor(self.state, conductor)
 
     def _apply_postprocessing(self) -> None:
-        """Apply postprocessing settings to cached render and update display."""
-        from scipy.ndimage import zoom
+        """Apply postprocessing settings to cached render and update display.
 
+        No downsampling! Works at full render resolution - DearPyGUI handles display scaling.
+        """
         with self.state_lock:
             cache = self.state.render_cache
             if cache is None:
                 return
 
-            settings = self.state.display_settings
-            result = cache.result
-            canvas_w, canvas_h = self.state.project.canvas_resolution
-            target_shape = (canvas_h, canvas_w)
-
-            # Try GPU-accelerated path
-            use_gpu = False
-            try:
-                from flowcol.gpu import GPUContext
-                from flowcol.gpu.pipeline import downsample_lic_gpu
-
-                if GPUContext.is_available():
-                    use_gpu = True
-            except Exception:
-                pass
-
-            # Source for downsampling: result_gpu (GPU) or result.array (CPU)
-            lic_to_process = result.array
-            lic_to_process_gpu = cache.result_gpu if use_gpu else None
-
-            # Apply downsampling with blur (GPU-accelerated)
-            if use_gpu and lic_to_process_gpu is not None:
-                # GPU path - much faster!
-                import time
-                import torch
-                start = time.time()
-                downsampled_gpu = downsample_lic_gpu(
-                    lic_to_process_gpu,
-                    target_shape,
-                    settings.downsample_sigma,
-                )
-                torch.mps.synchronize()  # Wait for GPU work to complete
-                # Uncomment for performance debugging:
-                # elapsed = time.time() - start
-                # print(f"🚀 GPU downsample: {elapsed*1000:.1f}ms")
-
-                # Set GPU as primary source - CPU download happens lazily via property
-                cache.set_display_array_gpu(downsampled_gpu)
-            else:
-                # CPU fallback
-                from flowcol.render import downsample_lic
-                downsampled = downsample_lic(
-                    lic_to_process,
-                    target_shape,
-                    cache.supersample,
-                    settings.downsample_sigma,
-                )
-                # Set CPU as primary source (clears any GPU tensor)
-                cache.set_display_array_cpu(downsampled)
-
-            # Downsample masks to match display_array resolution if needed
-            if cache.conductor_masks:
-                # Check if masks need downsampling by comparing mask shape to target
-                first_mask = next((m for m in cache.conductor_masks if m is not None), None)
-                if first_mask is not None and first_mask.shape != target_shape:
-                    scale_y = target_shape[0] / first_mask.shape[0]
-                    scale_x = target_shape[1] / first_mask.shape[1]
-                    cache.conductor_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in cache.conductor_masks
-                    ]
-                    cache.interior_masks = [
-                        zoom(mask, (scale_y, scale_x), order=1) if mask is not None else None
-                        for mask in cache.interior_masks
-                    ]
-
-            # Changing display_array invalidates base_rgb
+            # Invalidate cached RGB so postprocessing is recomputed
             cache.base_rgb = None
 
-        # Update texture with new postprocessed display
+        # Refresh texture at full resolution with new postprocessing settings
         self.texture_manager.refresh_render_texture()
         self.canvas_renderer.mark_dirty()
 
