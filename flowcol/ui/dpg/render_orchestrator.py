@@ -230,7 +230,7 @@ class RenderOrchestrator:
             # Render succeeded - update UI
             self.app._mark_canvas_dirty()
             self.app.texture_manager.refresh_render_texture()
-            self.app.drag_active = False
+            self.app.canvas_controller.drag_active = False
             with self.app.state_lock:
                 self.app.state.view_mode = "render"
             self.app._update_control_visibility()

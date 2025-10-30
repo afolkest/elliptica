@@ -23,6 +23,7 @@ from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
 from flowcol.ui.dpg.postprocessing_panel import PostprocessingPanel
 from flowcol.ui.dpg.conductor_controls_panel import ConductorControlsPanel
 from flowcol.ui.dpg.texture_manager import TextureManager
+from flowcol.ui.dpg.canvas_controller import CanvasController
 from flowcol.types import Conductor, Project
 from flowcol.pipeline import perform_render
 from flowcol import defaults
@@ -62,19 +63,6 @@ if dpg is not None:
         CTRL_KEY = getattr(dpg, "mvKey_LControl", None)
     C_KEY = getattr(dpg, "mvKey_C", None)
     V_KEY = getattr(dpg, "mvKey_V", None)
-
-
-def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
-    """Test whether canvas coordinate lands inside conductor mask."""
-    cx, cy = conductor.position
-    local_x = int(round(x - cx))
-    local_y = int(round(y - cy))
-    mask = conductor.mask
-    if local_x < 0 or local_y < 0:
-        return False
-    if local_y >= mask.shape[0] or local_x >= mask.shape[1]:
-        return False
-    return mask[local_y, local_x] > 0.5
 
 
 def _clone_conductor(conductor: Conductor) -> Conductor:
@@ -136,24 +124,10 @@ class FlowColApp:
 
     canvas_dirty: bool = True
 
-    drag_active: bool = False
-    drag_last_pos: Tuple[float, float] = (0.0, 0.0)
-    mouse_down_last: bool = False
-    backspace_down_last: bool = False
-    ctrl_c_down_last: bool = False
-    ctrl_v_down_last: bool = False
-
     # Debouncing for expensive slider operations
     downsample_debounce_timer: Optional[threading.Timer] = None
     postprocess_debounce_timer: Optional[threading.Timer] = None
-    mouse_wheel_delta: float = 0.0
     mouse_handler_registry_id: Optional[int] = None
-
-    # Region selection for colorization
-    selected_region: Optional[str] = None  # "surface" or "interior"
-
-    # Clipboard for copy/paste
-    clipboard_conductor: Optional[Conductor] = None
 
     def __post_init__(self) -> None:
         # Create projects directory if it doesn't exist
@@ -168,6 +142,7 @@ class FlowColApp:
 
         # Initialize controllers
         self.texture_manager = TextureManager(self)
+        self.canvas_controller = CanvasController(self)
         self.render_modal = RenderModalController(self)
         self.render_orchestrator = RenderOrchestrator(self)
         self.file_io = FileIOController(self)
@@ -181,7 +156,7 @@ class FlowColApp:
 
     def _on_mouse_wheel(self, sender, app_data) -> None:
         """Capture mouse wheel delta from handler."""
-        self.mouse_wheel_delta = float(app_data)
+        self.canvas_controller.on_mouse_wheel(sender, app_data)
 
     def require_backend(self) -> None:
         if dpg is None:
@@ -356,39 +331,6 @@ class FlowColApp:
     def _mark_canvas_dirty(self) -> None:
         self.canvas_dirty = True
 
-    def _is_mouse_over_canvas(self) -> bool:
-        """Check if mouse is within canvas bounds."""
-        if dpg is None or self.canvas_id is None:
-            return False
-
-        # Use absolute coordinates for hit testing
-        mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-        rect_min = dpg.get_item_rect_min(self.canvas_id)
-        rect_max = dpg.get_item_rect_max(self.canvas_id)
-
-        return (rect_min[0] <= mouse_x <= rect_max[0] and
-                rect_min[1] <= mouse_y <= rect_max[1])
-
-    def _get_canvas_mouse_pos(self) -> Tuple[float, float]:
-        assert dpg is not None and self.canvas_id is not None
-        mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-        rect_min = dpg.get_item_rect_min(self.canvas_id)
-        # Get screen-space coordinates relative to canvas
-        screen_x = mouse_x - rect_min[0]
-        screen_y = mouse_y - rect_min[1]
-        # Apply inverse scale to get canvas-space coordinates
-        canvas_x = screen_x / self.display_scale if self.display_scale > 0 else screen_x
-        canvas_y = screen_y / self.display_scale if self.display_scale > 0 else screen_y
-        return canvas_x, canvas_y
-
-    def _find_hit_conductor(self, x: float, y: float) -> int:
-        with self.state_lock:
-            conductors = self.state.project.conductors
-            for idx in reversed(range(len(conductors))):
-                if _point_in_conductor(conductors[idx], x, y):
-                    return idx
-        return -1
-
     def _add_demo_conductor(self) -> None:
         """Populate state with a simple circular conductor for quick manual testing."""
         from flowcol.app.actions import add_conductor
@@ -495,214 +437,6 @@ class FlowColApp:
         if self.canvas_height_input_id is not None:
             dpg.set_value(self.canvas_height_input_id, int(height))
 
-    def _scale_conductor(self, idx: int, factor: float) -> bool:
-        if dpg is None:
-            return False
-        factor = max(float(factor), 0.05)
-        with self.state_lock:
-            self.state.set_selected(idx)
-            changed = actions.scale_conductor(self.state, idx, factor)
-            if changed:
-                self.texture_manager.clear_conductor_texture(idx)
-        if not changed:
-            dpg.set_value("status_text", "Scaling limit reached.")
-            return False
-
-        self._mark_canvas_dirty()
-        self.conductor_controls.update_conductor_slider_labels()
-        self.postprocess_panel.update_region_properties_panel()
-        dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
-        return True
-
-
-
-    # ------------------------------------------------------------------
-    # Canvas input processing
-    # ------------------------------------------------------------------
-    def _detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
-        """Detect which conductor region is at canvas point.
-
-        Returns (conductor_idx, region) where region is "surface" or "interior" or None.
-        """
-        cache = self.state.render_cache
-        if cache is None or cache.conductor_masks is None or cache.interior_masks is None:
-            return -1, None
-
-        # Masks are at canvas_resolution (same as canvas), so coordinates map directly
-        # The render texture may be thumbnailed for display, but masks are full resolution
-        mask_x = int(canvas_x)
-        mask_y = int(canvas_y)
-
-        # Check each conductor in reverse order (top to bottom)
-        for idx in reversed(range(len(self.state.project.conductors))):
-            if idx >= len(cache.interior_masks) or idx >= len(cache.conductor_masks):
-                continue
-
-            # Check interior first (it's inside, so higher priority)
-            interior_mask = cache.interior_masks[idx]
-            if interior_mask is not None:
-                h, w = interior_mask.shape
-                if 0 <= mask_y < h and 0 <= mask_x < w:
-                    if interior_mask[mask_y, mask_x] > 0.5:
-                        return idx, "interior"
-
-            # Check surface
-            surface_mask = cache.conductor_masks[idx]
-            if surface_mask is not None:
-                h, w = surface_mask.shape
-                if 0 <= mask_y < h and 0 <= mask_x < w:
-                    if surface_mask[mask_y, mask_x] > 0.5:
-                        return idx, "surface"
-
-        return -1, None
-
-    def _process_canvas_mouse(self) -> None:
-        if dpg is None or self.canvas_id is None:
-            return
-
-        mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
-        pressed = mouse_down and not self.mouse_down_last
-        released = (not mouse_down) and self.mouse_down_last
-
-        with self.state_lock:
-            mode = self.state.view_mode
-
-        wheel_delta = self.mouse_wheel_delta
-        self.mouse_wheel_delta = 0.0
-        over_canvas = self._is_mouse_over_canvas()
-
-        if mode == "edit" and over_canvas and abs(wheel_delta) > 1e-5:
-            with self.state_lock:
-                selected_idx = self.state.selected_idx
-            # Only scale if a conductor is selected
-            if selected_idx >= 0:
-                scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
-                scale_factor = max(0.05, min(scale_factor, 20.0))
-                if self._scale_conductor(selected_idx, scale_factor):
-                    x, y = self._get_canvas_mouse_pos()
-                    self.drag_last_pos = (x, y)
-
-        if mode != "edit":
-            if pressed and self._is_mouse_over_canvas():
-                x, y = self._get_canvas_mouse_pos()
-                with self.state_lock:
-                    # Use region detection in render mode for colorization
-                    hit_idx, hit_region = self._detect_region_at_point(x, y)
-                    self.state.set_selected(hit_idx)
-                    self.selected_region = hit_region
-                self.conductor_controls.update_conductor_slider_labels()
-                self.postprocess_panel.update_region_properties_panel()
-            self.mouse_down_last = mouse_down
-            return
-
-        if pressed and self._is_mouse_over_canvas():
-            x, y = self._get_canvas_mouse_pos()
-            with self.state_lock:
-                project = self.state.project
-                hit_idx = -1
-                for idx in reversed(range(len(project.conductors))):
-                    if _point_in_conductor(project.conductors[idx], x, y):
-                        hit_idx = idx
-                        break
-
-                self.state.set_selected(hit_idx)
-                self.selected_region = None  # Region detection only in render mode
-                if hit_idx >= 0:
-                    self.drag_active = True
-                    self.drag_last_pos = (x, y)
-                else:
-                    self.drag_active = False
-            self.conductor_controls.update_conductor_slider_labels()
-            self.postprocess_panel.update_region_properties_panel()
-            self._mark_canvas_dirty()
-
-        if self.drag_active and mouse_down:
-            x, y = self._get_canvas_mouse_pos()
-            dx = x - self.drag_last_pos[0]
-            dy = y - self.drag_last_pos[1]
-            if abs(dx) > 0.1 or abs(dy) > 0.1:
-                with self.state_lock:
-                    idx = self.state.selected_idx
-                    if 0 <= idx < len(self.state.project.conductors):
-                        actions.move_conductor(self.state, idx, dx, dy)
-                self.drag_last_pos = (x, y)
-                self._mark_canvas_dirty()
-
-        if self.drag_active and released:
-            self.drag_active = False
-
-        self.mouse_down_last = mouse_down
-
-    def _process_keyboard_shortcuts(self) -> None:
-        if dpg is None or BACKSPACE_KEY is None:
-            return
-
-        # Only process shortcuts when mouse is over canvas (not over UI controls)
-        # This prevents keyboard shortcuts from firing while typing in input fields
-        over_canvas = self._is_mouse_over_canvas()
-        if not over_canvas:
-            self.backspace_down_last = False
-            return
-
-        # Backspace to delete
-        backspace_down = dpg.is_key_down(BACKSPACE_KEY)
-        if backspace_down and not self.backspace_down_last:
-            with self.state_lock:
-                mode = self.state.view_mode
-                idx = self.state.selected_idx
-                conductor_count = len(self.state.project.conductors)
-                can_delete = (mode == "edit" and 0 <= idx < conductor_count)
-            if can_delete:
-                with self.state_lock:
-                    actions.remove_conductor(self.state, idx)
-                    self.texture_manager.clear_all_conductor_textures()
-                self._mark_canvas_dirty()
-                self.conductor_controls.rebuild_conductor_controls()
-                dpg.set_value("status_text", "Conductor deleted")
-        self.backspace_down_last = backspace_down
-
-        # Ctrl+C to copy
-        if CTRL_KEY and C_KEY:
-            ctrl_down = dpg.is_key_down(CTRL_KEY)
-            c_down = dpg.is_key_down(C_KEY)
-            ctrl_c_down = ctrl_down and c_down
-            if ctrl_c_down and not self.ctrl_c_down_last:
-                with self.state_lock:
-                    mode = self.state.view_mode
-                    idx = self.state.selected_idx
-                    conductor_count = len(self.state.project.conductors)
-                    can_copy = (mode == "edit" and 0 <= idx < conductor_count)
-                if can_copy:
-                    with self.state_lock:
-                        self.clipboard_conductor = _clone_conductor(self.state.project.conductors[idx])
-                    dpg.set_value("status_text", f"Copied C{idx + 1}")
-            self.ctrl_c_down_last = ctrl_c_down
-
-        # Ctrl+V to paste
-        if CTRL_KEY and V_KEY:
-            ctrl_down = dpg.is_key_down(CTRL_KEY)
-            v_down = dpg.is_key_down(V_KEY)
-            ctrl_v_down = ctrl_down and v_down
-            if ctrl_v_down and not self.ctrl_v_down_last:
-                with self.state_lock:
-                    mode = self.state.view_mode
-                    can_paste = (mode == "edit" and self.clipboard_conductor is not None)
-                if can_paste:
-                    with self.state_lock:
-                        # Clone the clipboard conductor and offset it
-                        pasted = _clone_conductor(self.clipboard_conductor)
-                        # Offset by 30px down-right so it's visible
-                        px, py = pasted.position
-                        pasted.position = (px + 30.0, py + 30.0)
-                        actions.add_conductor(self.state, pasted)
-                        new_idx = len(self.state.project.conductors) - 1
-                        self.state.set_selected(new_idx)
-                    self._mark_canvas_dirty()
-                    self.conductor_controls.rebuild_conductor_controls()
-                    self.conductor_controls.update_conductor_slider_labels()
-                    dpg.set_value("status_text", f"Pasted as C{new_idx + 1}")
-            self.ctrl_v_down_last = ctrl_v_down
-
     def _apply_canvas_size(self, sender=None, app_data=None) -> None:
         if dpg is None:
             return
@@ -733,7 +467,7 @@ class FlowColApp:
         with self.state_lock:
             if self.state.view_mode != "edit":
                 self.state.view_mode = "edit"
-                self.drag_active = False
+                self.canvas_controller.drag_active = False
                 self._mark_canvas_dirty()
         self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
@@ -1033,8 +767,8 @@ class FlowColApp:
 
         try:
             while dpg.is_dearpygui_running():
-                self._process_canvas_mouse()
-                self._process_keyboard_shortcuts()
+                self.canvas_controller.process_canvas_mouse()
+                self.canvas_controller.process_keyboard_shortcuts()
                 self.render_orchestrator.poll()
                 if self.canvas_dirty:
                     self._redraw_canvas()
