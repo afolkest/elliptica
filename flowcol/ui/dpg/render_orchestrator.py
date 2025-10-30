@@ -104,18 +104,11 @@ class RenderOrchestrator:
             # Upload render result to GPU for fast postprocessing
             try:
                 from flowcol.gpu import GPUContext
-                print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
-                print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
-                print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")
                 if GPUContext.is_available():
                     cache.result_gpu = GPUContext.to_gpu(result.array)
                     cache.ex_gpu = GPUContext.to_gpu(result.ex)
                     cache.ey_gpu = GPUContext.to_gpu(result.ey)
-                    print(f"DEBUG render: result_gpu = {cache.result_gpu is not None}")
-                    print(f"DEBUG render: ex_gpu = {cache.ex_gpu is not None}")
-                    print(f"DEBUG render: ey_gpu = {cache.ey_gpu is not None}")
             except Exception as e:
-                print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
                 pass  # Graceful fallback if GPU upload fails
 
             # Update app state with completed render
@@ -198,8 +191,7 @@ class RenderOrchestrator:
 
         if success:
             # Render succeeded - update UI
-            self.app.canvas_renderer.mark_dirty()
-            self.app.texture_manager.refresh_render_texture()
+            self.app.display_pipeline.refresh_display()
             self.app.canvas_controller.drag_active = False
             with self.app.state_lock:
                 self.app.state.view_mode = "render"

@@ -122,9 +122,6 @@ class TextureManager:
                 # DearPyGUI will scale it for display
                 from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
-                print(f"DEBUG texture_manager: About to apply postprocessing")
-                print(f"DEBUG texture_manager: cache.lic_percentiles = {cache.lic_percentiles}")
-                print(f"DEBUG texture_manager: cache.result_gpu = {cache.result_gpu is not None}")
 
                 final_rgb = apply_full_postprocess_hybrid(
                     scalar_array=cache.result.array,  # Full resolution!

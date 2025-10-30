@@ -110,10 +110,7 @@ def apply_full_postprocess_gpu(
 
     # Step 3: Apply conductor smear (if any conductors have smear enabled)
     # Comes AFTER region overlays so smear applies to custom colored regions
-    smear_states = [c.smear_enabled for c in conductors]
-    print(f"DEBUG postprocess: conductor smear_enabled states = {smear_states}")
     has_smear = any(c.smear_enabled for c in conductors)
-    print(f"DEBUG postprocess: has_smear = {has_smear}, conductor_masks = {conductor_masks_cpu is not None}")
     if has_smear and conductor_masks_cpu is not None:
         base_rgb = apply_conductor_smear_gpu(
             base_rgb,

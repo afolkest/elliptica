@@ -46,7 +46,7 @@ class CanvasRenderer:
             return
         self.canvas_dirty = False
 
-        self.app.texture_manager.refresh_render_texture()
+        self.app.display_pipeline.texture_manager.refresh_render_texture()
 
         with self.app.state_lock:
             project = self.app.state.project
@@ -89,14 +89,14 @@ class CanvasRenderer:
                 dpg.draw_line((0, y), (canvas_w, y), color=color, thickness=thickness, parent=self.app.canvas_layer_id)
                 y += grid_spacing_y
 
-        if view_mode == "render" and render_cache and self.app.texture_manager.render_texture_id is not None and self.app.texture_manager.render_texture_size:
-            tex_w, tex_h = self.app.texture_manager.render_texture_size
+        if view_mode == "render" and render_cache and self.app.display_pipeline.texture_manager.render_texture_id is not None and self.app.display_pipeline.texture_manager.render_texture_size:
+            tex_w, tex_h = self.app.display_pipeline.texture_manager.render_texture_size
             if tex_w > 0 and tex_h > 0:
                 scale_x = canvas_w / tex_w
                 scale_y = canvas_h / tex_h
                 pmax = (tex_w * scale_x, tex_h * scale_y)
                 dpg.draw_image(
-                    self.app.texture_manager.render_texture_id,
+                    self.app.display_pipeline.texture_manager.render_texture_id,
                     (0, 0),
                     pmax,
                     uv_min=(0.0, 0.0),
@@ -106,7 +106,7 @@ class CanvasRenderer:
 
         if view_mode == "edit" or render_cache is None:
             for idx, conductor in enumerate(conductors):
-                tex_id = self.app.texture_manager.ensure_conductor_texture(idx, conductor.mask, CONDUCTOR_COLORS)
+                tex_id = self.app.display_pipeline.texture_manager.ensure_conductor_texture(idx, conductor.mask, CONDUCTOR_COLORS)
                 x0, y0 = conductor.position
                 width = conductor.mask.shape[1]
                 height = conductor.mask.shape[0]
