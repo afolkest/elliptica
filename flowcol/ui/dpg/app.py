@@ -2,18 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
-from concurrent.futures import ThreadPoolExecutor, Future
+from dataclasses import dataclass, field
 import threading
-from typing import Optional, Dict, Tuple
+from typing import Optional
 
 import numpy as np
-
 import dearpygui.dearpygui as dpg  # type: ignore
 
-from flowcol.app.core import AppState, RenderCache, RenderSettings
-from pathlib import Path
-
+from flowcol.app.core import AppState
 from flowcol.app import actions
 from flowcol.ui.dpg.render_modal import RenderModalController
 from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
@@ -25,11 +21,8 @@ from flowcol.ui.dpg.display_pipeline_controller import DisplayPipelineController
 from flowcol.ui.dpg.image_export_controller import ImageExportController
 from flowcol.ui.dpg.canvas_controller import CanvasController
 from flowcol.ui.dpg.canvas_renderer import CanvasRenderer
-from flowcol.types import Conductor, Project
+from flowcol.types import Conductor
 from flowcol import defaults
-from flowcol.postprocess.masks import rasterize_conductor_masks
-from PIL import Image
-from datetime import datetime
 
 
 SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
