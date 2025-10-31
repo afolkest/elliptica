@@ -169,6 +169,45 @@ class FileIOController:
     # Project save/load
     # ------------------------------------------------------------------
 
+    def new_project(self, sender=None, app_data=None) -> None:
+        """Create a new project, resetting to default state with a demo conductor."""
+        if dpg is None:
+            return
+
+        with self.app.state_lock:
+            # Reset to default state
+            from flowcol.app.core import AppState
+            new_state = AppState()
+
+            # Copy over the new state
+            self.app.state.project = new_state.project
+            self.app.state.render_settings = new_state.render_settings
+            self.app.state.display_settings = new_state.display_settings
+            self.app.state.conductor_color_settings = new_state.conductor_color_settings
+            self.app.state.selected_idx = -1
+            self.app.state.view_mode = "edit"
+            self.app.state.field_dirty = True
+            self.app.state.render_dirty = True
+            self.app.state.render_cache = None
+
+        # Clear current project path
+        self.current_project_path = None
+
+        # Add demo conductor
+        self.app._add_demo_conductor()
+
+        # Update UI to reflect new state
+        self.app.canvas_renderer.mark_dirty()
+        self.app._update_canvas_inputs()
+        self.app._update_canvas_scale()
+        self.app._update_control_visibility()
+        self.app.conductor_controls.rebuild_conductor_controls()
+        self.app.conductor_controls.update_conductor_slider_labels()
+        self.sync_ui_from_state()
+        self.app.cache_panel.update_cache_status_display()
+
+        dpg.set_value("status_text", "New project created.")
+
     def ensure_save_project_dialog(self) -> None:
         """Create the save project dialog if it doesn't exist."""
         if dpg is None or self.save_project_dialog_id is not None:
