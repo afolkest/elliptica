@@ -6,7 +6,7 @@ from typing import Tuple
 from scipy.ndimage import zoom
 
 from flowcol.gpu import GPUContext
-from flowcol.gpu.ops import gaussian_blur_gpu, percentile_clip_gpu, apply_palette_lut_gpu, grayscale_to_rgb_gpu
+from flowcol.gpu.ops import gaussian_blur_gpu, percentile_clip_gpu, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
 from flowcol.render import _get_palette_lut
 
 
@@ -21,6 +21,9 @@ def apply_conductor_smear_gpu(
     lic_percentiles: Tuple[float, float] | None = None,
     conductor_color_settings: dict | None = None,
     conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    brightness: float = 0.0,
+    contrast: float = 1.0,
+    gamma: float = 1.0,
 ) -> torch.Tensor:
     """Apply smear effect to texture inside conductor masks on GPU.
 
@@ -35,6 +38,9 @@ def apply_conductor_smear_gpu(
         lic_percentiles: Precomputed (vmin, vmax) for normalization
         conductor_color_settings: Per-conductor color settings dict (to detect custom colors)
         conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
+        brightness: Brightness adjustment (additive, 0.0 = no change)
+        contrast: Contrast multiplier (1.0 = no change)
+        gamma: Gamma exponent (1.0 = no change)
 
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
@@ -96,6 +102,10 @@ def apply_conductor_smear_gpu(
             else:
                 norm = torch.zeros_like(lic_blur)
 
+        # Apply brightness/contrast/gamma adjustments (matches overlay behavior)
+        # This ensures smear colors match region overlay colors when using the same palette
+        adjusted = apply_contrast_gamma_gpu(norm, brightness, contrast, gamma)
+
         # Check if this conductor has custom color settings
         has_custom_settings = (
             conductor_color_settings is not None
@@ -109,36 +119,36 @@ def apply_conductor_smear_gpu(
             # Use surface settings for smear (surface is the conductor body)
             if settings.surface.enabled:
                 if settings.surface.use_palette:
-                    # Custom palette: apply that palette to normalized LIC
+                    # Custom palette: apply that palette to adjusted LIC
                     custom_lut = _get_palette_lut(settings.surface.palette)
                     custom_lut_tensor = GPUContext.to_gpu(custom_lut)
-                    rgb_blur = apply_palette_lut_gpu(norm, custom_lut_tensor)
+                    rgb_blur = apply_palette_lut_gpu(adjusted, custom_lut_tensor)
                 else:
-                    # Solid custom color: colorize the normalized LIC with the custom color
+                    # Solid custom color: colorize the adjusted LIC with the custom color
                     # This preserves the LIC texture while using the custom color
                     solid_color = settings.surface.solid_color  # (r, g, b) in [0, 1]
-                    color_tensor = torch.tensor(solid_color, dtype=torch.float32, device=norm.device)
+                    color_tensor = torch.tensor(solid_color, dtype=torch.float32, device=adjusted.device)
                     # Broadcast: (H, W) * (3,) -> (H, W, 3) with color modulated by intensity
-                    rgb_blur = norm.unsqueeze(-1) * color_tensor
+                    rgb_blur = adjusted.unsqueeze(-1) * color_tensor
             else:
                 # Custom settings exist but surface not enabled - fall back to global
                 if lut_tensor is not None:
-                    rgb_blur = apply_palette_lut_gpu(norm, lut_tensor)
+                    rgb_blur = apply_palette_lut_gpu(adjusted, lut_tensor)
                 else:
-                    rgb_blur = grayscale_to_rgb_gpu(norm)
+                    rgb_blur = grayscale_to_rgb_gpu(adjusted)
         else:
             # No custom settings - use global palette/grayscale
             if lut_tensor is not None:
-                rgb_blur = apply_palette_lut_gpu(norm, lut_tensor)
+                rgb_blur = apply_palette_lut_gpu(adjusted, lut_tensor)
             else:
-                rgb_blur = grayscale_to_rgb_gpu(norm)
+                rgb_blur = grayscale_to_rgb_gpu(adjusted)
 
         # Apply smear at full strength inside mask (no distance-based feathering)
         weight = full_mask.unsqueeze(-1)  # Broadcast mask to RGB channels (H, W, 1)
         out = out * (1.0 - weight) + rgb_blur * weight
 
         # Clean up large temporary tensors to avoid GPU memory accumulation
-        del full_mask, mask_bool, lic_blur, norm, rgb_blur, weight
+        del full_mask, mask_bool, lic_blur, norm, adjusted, rgb_blur, weight
 
     return torch.clamp(out, 0.0, 1.0)
 

@@ -129,6 +129,9 @@ def apply_full_postprocess_gpu(
             lic_percentiles,
             conductor_color_settings,
             conductor_masks_gpu,  # Pass pre-uploaded GPU masks
+            brightness,
+            contrast,
+            gamma,
         )
 
     return torch.clamp(base_rgb, 0.0, 1.0)
