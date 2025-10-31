@@ -157,6 +157,13 @@ class FlowColApp:
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
         self.viewport_created = True
 
+        # Add menu bar
+        with dpg.viewport_menu_bar():
+            with dpg.menu(label="File"):
+                dpg.add_menu_item(label="New Project", callback=self.file_io.new_project)
+                dpg.add_menu_item(label="Load Project...", callback=self.file_io.open_load_project_dialog)
+                dpg.add_menu_item(label="Save Project...", callback=self.file_io.open_save_project_dialog)
+
         with dpg.handler_registry() as handler_reg:
             self.mouse_handler_registry_id = handler_reg
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
@@ -168,11 +175,6 @@ class FlowColApp:
                        no_scroll_with_mouse=True):
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
-                dpg.add_text("Project")
-                dpg.add_button(label="Save Project...", callback=self.file_io.open_save_project_dialog, width=140)
-                dpg.add_button(label="Load Project...", callback=self.file_io.open_load_project_dialog, width=140)
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
                 dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
