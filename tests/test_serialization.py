@@ -71,7 +71,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         position=(10.0, 20.0),
         interior_mask=interior1,
         scale_factor=1.5,
-        blur_sigma=2.0,
+        edge_smooth_sigma=2.0,
         id=0,
     )
 
@@ -80,7 +80,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         mask=mask2,
         voltage=0.9,
         position=(100.0, 150.0),
-        blur_sigma=0.0,
+        edge_smooth_sigma=0.0,
         smear_enabled=True,
         smear_sigma=3.0,
         id=1,
@@ -106,7 +106,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         assert c1.voltage == 0.3
         assert c1.position == (10.0, 20.0)
         assert c1.scale_factor == 1.5
-        assert c1.blur_sigma == 2.0
+        assert c1.edge_smooth_sigma == 2.0
         assert c1.id == 0
         assert c1.mask.shape == mask1.shape
         assert c1.interior_mask is not None
@@ -117,7 +117,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         c2 = loaded_state.project.conductors[1]
         assert c2.voltage == 0.9
         assert c2.position == (100.0, 150.0)
-        assert c2.blur_sigma == 0.0
+        assert c2.edge_smooth_sigma == 0.0
         assert c2.smear_enabled is True
         assert c2.smear_sigma == 3.0
         assert c2.id == 1
@@ -316,7 +316,7 @@ def test_backward_compatibility_missing_fields():
         # Conductor defaults
         c = loaded_state.project.conductors[0]
         assert c.smear_enabled is False
-        assert c.blur_sigma == 0.0
+        assert c.edge_smooth_sigma == 1.5  # New default value
         assert c.scale_factor == 1.0
 
 

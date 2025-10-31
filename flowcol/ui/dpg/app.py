@@ -68,8 +68,7 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
         original_mask=original,
         original_interior_mask=original_interior,
         scale_factor=conductor.scale_factor,
-        blur_sigma=conductor.blur_sigma,
-        blur_is_fractional=conductor.blur_is_fractional,
+        edge_smooth_sigma=conductor.edge_smooth_sigma,
         smear_enabled=conductor.smear_enabled,
         smear_sigma=conductor.smear_sigma,
     )
