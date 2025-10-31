@@ -79,32 +79,18 @@ class ConductorControlsPanel:
             )
             self.conductor_slider_ids[idx] = slider_id
 
-            # Add blur slider with fractional toggle
-            with dpg.group(horizontal=True, parent=self.conductor_controls_container_id):
-                if conductor.blur_is_fractional:
-                    max_val = 0.1
-                    fmt = "%.3f"
-                else:
-                    max_val = 20.0
-                    fmt = "%.1f px"
-                dpg.add_slider_float(
-                    label=f"  Blur {idx + 1}",
-                    default_value=float(conductor.blur_sigma),
-                    min_value=0.0,
-                    max_value=max_val,
-                    format=fmt,
-                    callback=self.on_conductor_blur_slider,
-                    user_data=idx,
-                    width=200,
-                    tag=f"blur_slider_{idx}",
-                )
-                dpg.add_checkbox(
-                    label="Frac",
-                    default_value=conductor.blur_is_fractional,
-                    callback=self.on_blur_fractional_toggle,
-                    user_data=idx,
-                    tag=f"blur_frac_checkbox_{idx}",
-                )
+            # Add edge smoothing slider
+            dpg.add_slider_float(
+                label=f"  Smooth {idx + 1}",
+                default_value=float(conductor.edge_smooth_sigma),
+                min_value=0.0,
+                max_value=5.0,
+                format="%.1f px",
+                callback=self.on_conductor_edge_smooth_slider,
+                user_data=idx,
+                parent=self.conductor_controls_container_id,
+                tag=f"edge_smooth_slider_{idx}",
+            )
 
     def update_conductor_slider_labels(self, skip_idx: Optional[int] = None) -> None:
         """Update conductor slider labels and values to reflect current state.
@@ -151,8 +137,8 @@ class ConductorControlsPanel:
         dpg.set_value("status_text", f"C{idx + 1} voltage = {value:.3f}")
         self.update_conductor_slider_labels(skip_idx=idx)
 
-    def on_conductor_blur_slider(self, sender=None, app_data=None, user_data=None) -> None:
-        """Handle conductor blur slider change."""
+    def on_conductor_edge_smooth_slider(self, sender=None, app_data=None, user_data=None) -> None:
+        """Handle conductor edge smoothing slider change."""
         if dpg is None or user_data is None:
             return
 
@@ -161,46 +147,8 @@ class ConductorControlsPanel:
 
         with self.app.state_lock:
             if idx < len(self.app.state.project.conductors):
-                self.app.state.project.conductors[idx].blur_sigma = value
-                self.app.state.field_cache = None
-                is_frac = self.app.state.project.conductors[idx].blur_is_fractional
-
-        self.app.canvas_renderer.mark_dirty()
-        if is_frac:
-            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.3f} (fraction)")
-        else:
-            dpg.set_value("status_text", f"C{idx + 1} blur = {value:.1f} px")
-
-    def on_blur_fractional_toggle(self, sender=None, app_data=None, user_data=None) -> None:
-        """Handle blur fractional/pixels toggle."""
-        if dpg is None or user_data is None:
-            return
-
-        idx = int(user_data)
-        is_fractional = bool(app_data)
-
-        with self.app.state_lock:
-            if idx < len(self.app.state.project.conductors):
-                conductor = self.app.state.project.conductors[idx]
-                conductor.blur_is_fractional = is_fractional
-                # Convert value when switching modes
-                if is_fractional:
-                    # Convert from pixels to fraction (assume ~1000px reference)
-                    conductor.blur_sigma = min(conductor.blur_sigma / 1000.0, 0.1)
-                else:
-                    # Convert from fraction to pixels
-                    conductor.blur_sigma = conductor.blur_sigma * 1000.0
+                self.app.state.project.conductors[idx].edge_smooth_sigma = value
                 self.app.state.field_cache = None
 
-        # Update slider range and format
-        slider_id = f"blur_slider_{idx}"
-        if dpg.does_item_exist(slider_id):
-            if is_fractional:
-                dpg.configure_item(slider_id, max_value=0.1, format="%.3f")
-            else:
-                dpg.configure_item(slider_id, max_value=20.0, format="%.1f px")
-            with self.app.state_lock:
-                if idx < len(self.app.state.project.conductors):
-                    dpg.set_value(slider_id, self.app.state.project.conductors[idx].blur_sigma)
-
         self.app.canvas_renderer.mark_dirty()
+        dpg.set_value("status_text", f"C{idx + 1} edge smoothing = {value:.1f} px")

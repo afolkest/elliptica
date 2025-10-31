@@ -16,8 +16,7 @@ class Conductor:
     original_mask: Optional[np.ndarray] = None
     original_interior_mask: Optional[np.ndarray] = None
     scale_factor: float = 1.0  # Current scale relative to original
-    blur_sigma: float = 0.0  # Gaussian blur sigma (pixels or fraction)
-    blur_is_fractional: bool = False  # If True, blur_sigma is fraction of canvas size
+    edge_smooth_sigma: float = 1.5  # Edge anti-aliasing blur in pixels (0-5px range)
     smear_enabled: bool = False  # Enable texture smearing inside conductor
     smear_sigma: float = 2.0  # Gaussian blur for LIC texture in pixels
     id: Optional[int] = None  # Assigned when added to project

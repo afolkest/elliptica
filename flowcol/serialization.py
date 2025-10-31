@@ -207,8 +207,7 @@ def _conductor_to_dict(conductor: Conductor, index: int) -> dict[str, Any]:
         'voltage': conductor.voltage,
         'position': list(conductor.position),
         'scale_factor': conductor.scale_factor,
-        'blur_sigma': conductor.blur_sigma,
-        'blur_is_fractional': conductor.blur_is_fractional,
+        'edge_smooth_sigma': conductor.edge_smooth_sigma,
         'smear_enabled': conductor.smear_enabled,
         'smear_sigma': conductor.smear_sigma,
         'id': conductor.id,
@@ -218,6 +217,22 @@ def _conductor_to_dict(conductor: Conductor, index: int) -> dict[str, Any]:
 
 def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Conductor:
     """Reconstruct Conductor from dict + loaded masks."""
+    # Migrate old blur_sigma/blur_is_fractional to edge_smooth_sigma for backward compatibility
+    if 'edge_smooth_sigma' in data:
+        edge_smooth_sigma = data['edge_smooth_sigma']
+    elif 'blur_sigma' in data:
+        # Legacy migration
+        blur_sigma = data.get('blur_sigma', 0.0)
+        blur_is_fractional = data.get('blur_is_fractional', False)
+        if blur_is_fractional:
+            # Convert from fraction to pixels (assuming 1000px reference)
+            edge_smooth_sigma = min(blur_sigma * 1000.0, 5.0)
+        else:
+            # Clamp pixel value to new 0-5 range
+            edge_smooth_sigma = min(blur_sigma, 5.0)
+    else:
+        edge_smooth_sigma = 1.5
+
     return Conductor(
         mask=masks['mask'],
         voltage=data.get('voltage', 0.5),
@@ -226,8 +241,7 @@ def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Co
         original_mask=masks.get('original_mask'),
         original_interior_mask=masks.get('original_interior_mask'),
         scale_factor=data.get('scale_factor', 1.0),
-        blur_sigma=data.get('blur_sigma', 0.0),
-        blur_is_fractional=data.get('blur_is_fractional', False),
+        edge_smooth_sigma=edge_smooth_sigma,
         smear_enabled=data.get('smear_enabled', False),
         smear_sigma=data.get('smear_sigma', 2.0),
         id=data.get('id'),
@@ -384,7 +398,7 @@ def compute_project_fingerprint(project: Project) -> str:
         parts.append(f"c{i}:v={c.voltage}")
         parts.append(f"c{i}:pos={c.position[0]:.2f},{c.position[1]:.2f}")
         parts.append(f"c{i}:scale={c.scale_factor}")
-        parts.append(f"c{i}:blur={c.blur_sigma},{c.blur_is_fractional}")
+        parts.append(f"c{i}:edge_smooth={c.edge_smooth_sigma}")
 
         # Mask data hash (expensive but necessary)
         mask_hash = hashlib.md5(c.mask.tobytes()).hexdigest()[:8]

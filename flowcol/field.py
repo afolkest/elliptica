@@ -40,15 +40,10 @@ def compute_field(
         else:
             scaled_mask = conductor.mask
 
-        # Apply blur AFTER scaling at field resolution
-        if conductor.blur_is_fractional:
-            # Fractional: blur_sigma is fraction of field size (resolution-independent)
-            avg_field_size = (field_w + field_h) / 2.0
-            scaled_sigma = conductor.blur_sigma * avg_field_size
-        else:
-            # Pixel-based: scale sigma proportionally to field resolution
-            scale_factor = (scale_x + scale_y) / 2.0
-            scaled_sigma = conductor.blur_sigma * scale_factor
+        # Apply edge smoothing AFTER scaling at field resolution
+        # Scale sigma proportionally to field resolution
+        scale_factor = (scale_x + scale_y) / 2.0
+        scaled_sigma = conductor.edge_smooth_sigma * scale_factor
         scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
         mask_h, mask_w = scaled_mask.shape
