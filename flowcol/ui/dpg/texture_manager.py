@@ -54,10 +54,29 @@ class TextureManager:
         self.texture_registry_id = dpg.add_texture_registry()
 
         # Create colormap registry and convert our palettes to DPG colormaps
-        from flowcol.render import COLOR_PALETTES
+        from flowcol.render import _RUNTIME_PALETTES
         self.colormap_registry_id = dpg.add_colormap_registry()
-        for palette_name, colors_normalized in COLOR_PALETTES.items():
+        for palette_name, colors_normalized in _RUNTIME_PALETTES.items():
             # DPG expects colors as [R, G, B, A] with values 0-255
+            colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
+            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
+            dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
+            self.palette_colormaps[palette_name] = tag
+
+    def rebuild_colormaps(self) -> None:
+        """Rebuild all colormaps after palette changes."""
+        if dpg is None:
+            return
+
+        # Clear existing colormap registry
+        if hasattr(self, 'colormap_registry_id') and dpg.does_item_exist(self.colormap_registry_id):
+            dpg.delete_item(self.colormap_registry_id, children_only=True)
+
+        # Rebuild colormaps from current runtime palettes
+        from flowcol.render import _RUNTIME_PALETTES
+        self.palette_colormaps.clear()
+
+        for palette_name, colors_normalized in _RUNTIME_PALETTES.items():
             colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
             tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)

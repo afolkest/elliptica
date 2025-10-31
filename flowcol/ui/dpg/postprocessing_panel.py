@@ -41,6 +41,10 @@ class PostprocessingPanel:
         self.smear_enabled_checkbox_id: Optional[int] = None
         self.smear_sigma_slider_id: Optional[int] = None
 
+        # Delete confirmation modal
+        self.delete_confirmation_modal_id: Optional[int] = None
+        self.pending_delete_palette: Optional[str] = None
+
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
 
@@ -159,20 +163,32 @@ class PostprocessingPanel:
 
         # Popup menu for global palette selection
         with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
-            dpg.add_text("Select a palette:")
+            dpg.add_text("Select a palette (right-click to delete):")
             dpg.add_separator()
-            with dpg.child_window(width=380, height=300):
+            with dpg.child_window(width=380, height=300, tag="global_palette_scrolling_window"):
                 for palette_name in palette_names:
                     colormap_tag = palette_colormaps[palette_name]
-                    btn = dpg.add_colormap_button(
-                        label=palette_name,
-                        width=350,
-                        height=25,
-                        callback=self.on_global_palette_button,
-                        user_data=palette_name,
-                        tag=f"global_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                    )
-                    dpg.bind_colormap(btn, colormap_tag)
+
+                    # Create a group for each palette entry (colormap button + delete button)
+                    with dpg.group(horizontal=True):
+                        btn = dpg.add_colormap_button(
+                            label=palette_name,
+                            width=310,
+                            height=25,
+                            callback=self.on_global_palette_button,
+                            user_data=palette_name,
+                            tag=f"global_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                        )
+                        dpg.bind_colormap(btn, colormap_tag)
+
+                        # Add delete button that opens separate modal
+                        dpg.add_button(
+                            label="X",
+                            width=30,
+                            height=25,
+                            callback=lambda s, a, u: self._open_delete_confirmation(u),
+                            user_data=palette_name
+                        )
 
     def _build_region_properties_ui(self, parent, palette_colormaps: dict) -> None:
         """Build region properties UI (surface/interior palettes + smear).
@@ -387,6 +403,131 @@ class PostprocessingPanel:
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
+
+    def _ensure_delete_confirmation_modal(self) -> None:
+        """Create the delete confirmation modal if it doesn't exist."""
+        if dpg is None or self.delete_confirmation_modal_id is not None:
+            return
+
+        with dpg.window(
+            label="Delete Palette?",
+            modal=True,
+            show=False,
+            tag="delete_palette_modal",
+            no_resize=True,
+            no_move=False,
+            no_close=True,
+            no_collapse=True,
+            width=350,
+            height=150,
+            no_open_over_existing_popup=False,
+        ) as modal:
+            self.delete_confirmation_modal_id = modal
+
+            dpg.add_text("", tag="delete_palette_modal_text")
+            dpg.add_text("This cannot be undone.", color=(200, 200, 0))
+            dpg.add_spacer(height=10)
+            dpg.add_separator()
+            dpg.add_spacer(height=10)
+
+            with dpg.group(horizontal=True):
+                dpg.add_button(
+                    label="Delete",
+                    width=75,
+                    callback=self._confirm_delete_palette
+                )
+                dpg.add_button(
+                    label="Cancel",
+                    width=75,
+                    callback=self._cancel_delete_palette
+                )
+
+    def _open_delete_confirmation(self, palette_name: str) -> None:
+        """Open the delete confirmation modal for a specific palette."""
+        if dpg is None:
+            return
+
+        self._ensure_delete_confirmation_modal()
+        self.pending_delete_palette = palette_name
+
+        dpg.set_value("delete_palette_modal_text", f"Delete '{palette_name}'?")
+
+        # Center the modal on screen
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        modal_width = 350
+        modal_height = 150
+        pos_x = (viewport_width - modal_width) // 2
+        pos_y = (viewport_height - modal_height) // 2
+
+        dpg.configure_item(self.delete_confirmation_modal_id, pos=[pos_x, pos_y])
+        dpg.configure_item(self.delete_confirmation_modal_id, show=True)
+
+    def _cancel_delete_palette(self, sender=None, app_data=None) -> None:
+        """Cancel palette deletion."""
+        if dpg is None or self.delete_confirmation_modal_id is None:
+            return
+        dpg.configure_item(self.delete_confirmation_modal_id, show=False)
+        self.pending_delete_palette = None
+
+    def _confirm_delete_palette(self, sender=None, app_data=None, user_data=None) -> None:
+        """Actually delete the palette after confirmation."""
+        if dpg is None or self.pending_delete_palette is None:
+            return
+
+        from flowcol.render import delete_palette
+
+        palette_name = self.pending_delete_palette
+        delete_palette(palette_name)
+
+        # Rebuild DPG colormaps to reflect deletion
+        self.app.display_pipeline.texture_manager.rebuild_colormaps()
+
+        # Rebuild the palette popup menu
+        self._rebuild_palette_popup()
+
+        # Close the confirmation modal
+        dpg.configure_item(self.delete_confirmation_modal_id, show=False)
+        self.pending_delete_palette = None
+
+    def _rebuild_palette_popup(self) -> None:
+        """Rebuild palette popup after deletion."""
+        if dpg is None:
+            return
+
+        # Delete old scrolling window content
+        if dpg.does_item_exist("global_palette_scrolling_window"):
+            dpg.delete_item("global_palette_scrolling_window", children_only=True)
+
+        # Rebuild colormap buttons
+        from flowcol.render import list_color_palettes
+        palette_names = list(list_color_palettes())
+
+        for palette_name in palette_names:
+            colormap_tag = self.app.display_pipeline.texture_manager.palette_colormaps.get(palette_name)
+            if not colormap_tag:
+                continue
+
+            # Create a group for each palette entry (colormap button + delete button)
+            with dpg.group(horizontal=True, parent="global_palette_scrolling_window"):
+                btn = dpg.add_colormap_button(
+                    label=palette_name,
+                    width=310,
+                    height=25,
+                    callback=self.on_global_palette_button,
+                    user_data=palette_name,
+                    tag=f"global_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                )
+                dpg.bind_colormap(btn, colormap_tag)
+
+                # Add delete button that opens separate modal
+                dpg.add_button(
+                    label="X",
+                    width=30,
+                    height=25,
+                    callback=lambda s, a, u: self._open_delete_confirmation(u),
+                    user_data=palette_name
+                )
 
     def on_surface_enabled(self, sender=None, app_data=None) -> None:
         """Handle surface custom palette checkbox."""

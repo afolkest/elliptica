@@ -234,7 +234,7 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
     ),
 }
 
-DEFAULT_COLOR_PALETTE_NAME = "Ink & Gold"
+DEFAULT_COLOR_PALETTE_NAME = "Ink Wash"
 
 
 def _build_palette_lut(colors: np.ndarray, size: int = 256) -> np.ndarray:
@@ -247,8 +247,56 @@ def _build_palette_lut(colors: np.ndarray, size: int = 256) -> np.ndarray:
     return lut
 
 
+# User palette persistence
+USER_PALETTES_PATH = Path(__file__).parent / "palettes_user.json"
+
+
+def _load_user_palettes() -> dict[str, np.ndarray]:
+    """Load user palette library from JSON (additions/overrides)."""
+    if not USER_PALETTES_PATH.exists():
+        return {}
+
+    import json
+    with open(USER_PALETTES_PATH) as f:
+        data = json.load(f)
+
+    # Convert lists back to numpy arrays
+    return {name: np.array(colors, dtype=np.float32) for name, colors in data.items()}
+
+
+def _save_user_palettes(palettes: dict[str, np.ndarray]):
+    """Save user palette library to JSON."""
+    import json
+    # Convert numpy arrays to lists for JSON serialization
+    data = {name: colors.tolist() for name, colors in palettes.items()}
+    with open(USER_PALETTES_PATH, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def _build_runtime_palettes() -> dict[str, np.ndarray]:
+    """Build runtime palette dict: defaults + user overrides - user deletions."""
+    user_palettes = _load_user_palettes()
+
+    # Start with defaults
+    merged = dict(COLOR_PALETTES)
+
+    # Apply user additions/overrides (deleted palettes marked with None)
+    for name, colors in user_palettes.items():
+        if colors is None or (isinstance(colors, np.ndarray) and colors.size == 0):
+            # User deleted this palette
+            merged.pop(name, None)
+        else:
+            # User added/overrode this palette
+            merged[name] = colors
+
+    return merged
+
+
+# Runtime palettes (defaults + user modifications)
+_RUNTIME_PALETTES = _build_runtime_palettes()
+
 PALETTE_LUTS: dict[str, np.ndarray] = {
-    name: _build_palette_lut(colors) for name, colors in COLOR_PALETTES.items()
+    name: _build_palette_lut(colors) for name, colors in _RUNTIME_PALETTES.items()
 }
 
 
@@ -259,7 +307,58 @@ def list_color_palettes() -> tuple[str, ...]:
 def _get_palette_lut(name: str | None) -> np.ndarray:
     if name and name in PALETTE_LUTS:
         return PALETTE_LUTS[name]
-    return PALETTE_LUTS[DEFAULT_COLOR_PALETTE_NAME]
+    # Fallback: if default was deleted, use first available palette
+    if DEFAULT_COLOR_PALETTE_NAME in PALETTE_LUTS:
+        return PALETTE_LUTS[DEFAULT_COLOR_PALETTE_NAME]
+    # If even default is gone, use any available palette
+    if PALETTE_LUTS:
+        return next(iter(PALETTE_LUTS.values()))
+    # If no palettes at all, create a simple grayscale fallback
+    return _build_palette_lut(np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32))
+
+
+def delete_palette(name: str):
+    """Permanently delete a palette from user library.
+
+    Note: You can delete default palettes, but they'll reappear if you delete
+    the palettes_user.json file. The app will gracefully handle missing defaults.
+    """
+    global _RUNTIME_PALETTES, PALETTE_LUTS
+
+    # Load current user palettes
+    user_palettes = _load_user_palettes()
+
+    # Mark as deleted (store empty array as tombstone)
+    user_palettes[name] = np.array([], dtype=np.float32)
+
+    # Save to disk
+    _save_user_palettes(user_palettes)
+
+    # Update runtime state
+    _RUNTIME_PALETTES.pop(name, None)
+    PALETTE_LUTS.pop(name, None)
+
+
+def add_palette(name: str, colors: list[tuple[float, float, float]] | np.ndarray):
+    """Add or update a palette in user library."""
+    global _RUNTIME_PALETTES, PALETTE_LUTS
+
+    # Convert to numpy array if needed
+    if not isinstance(colors, np.ndarray):
+        colors = np.array(colors, dtype=np.float32)
+
+    # Load current user palettes
+    user_palettes = _load_user_palettes()
+
+    # Add/update
+    user_palettes[name] = colors
+
+    # Save to disk
+    _save_user_palettes(user_palettes)
+
+    # Update runtime state
+    _RUNTIME_PALETTES[name] = colors
+    PALETTE_LUTS[name] = _build_palette_lut(colors)
 
 
 def generate_noise(
