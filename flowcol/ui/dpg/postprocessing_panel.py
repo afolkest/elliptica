@@ -62,7 +62,7 @@ class PostprocessingPanel:
             label="Downsampling Blur",
             default_value=self.app.state.display_settings.downsample_sigma,
             min_value=0.0,
-            max_value=2.0,
+            max_value=defaults.MAX_DOWNSAMPLE_SIGMA,
             format="%.2f",
             callback=self.on_downsample_slider,
             width=200,
@@ -83,8 +83,8 @@ class PostprocessingPanel:
         self.postprocess_brightness_slider_id = dpg.add_slider_float(
             label="Brightness",
             default_value=self.app.state.display_settings.brightness,
-            min_value=-0.5,
-            max_value=0.5,
+            min_value=defaults.MIN_BRIGHTNESS,
+            max_value=defaults.MAX_BRIGHTNESS,
             format="%.2f",
             callback=self.on_brightness_slider,
             width=200,
@@ -94,8 +94,8 @@ class PostprocessingPanel:
         self.postprocess_contrast_slider_id = dpg.add_slider_float(
             label="Contrast",
             default_value=self.app.state.display_settings.contrast,
-            min_value=0.5,
-            max_value=2.0,
+            min_value=defaults.MIN_CONTRAST,
+            max_value=defaults.MAX_CONTRAST,
             format="%.2f",
             callback=self.on_contrast_slider,
             width=200,
@@ -105,8 +105,8 @@ class PostprocessingPanel:
         self.postprocess_gamma_slider_id = dpg.add_slider_float(
             label="Gamma",
             default_value=self.app.state.display_settings.gamma,
-            min_value=0.3,
-            max_value=3.0,
+            min_value=defaults.MIN_GAMMA,
+            max_value=defaults.MAX_GAMMA,
             format="%.2f",
             callback=self.on_gamma_slider,
             width=200,
@@ -279,8 +279,8 @@ class PostprocessingPanel:
             )
             self.smear_sigma_slider_id = dpg.add_slider_float(
                 label="Blur Sigma",
-                min_value=0.1,
-                max_value=10.0,
+                min_value=defaults.MIN_SMEAR_SIGMA,
+                max_value=defaults.MAX_SMEAR_SIGMA,
                 format="%.1f px",
                 callback=self.on_smear_sigma,
                 tag="smear_sigma_slider",
