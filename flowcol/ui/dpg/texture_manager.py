@@ -109,15 +109,12 @@ class TextureManager:
                 tex_id = None
                 self.conductor_textures.pop(idx, None)
 
-        # Convert mask to RGBA texture data
-        rgba_flat = _mask_to_rgba(mask, conductor_colors[idx % len(conductor_colors)])
-
-        # Create or update texture
+        # Only convert and upload if texture doesn't exist (avoids 45 GB/sec bandwidth waste)
         if tex_id is None:
+            # Convert mask to RGBA texture data
+            rgba_flat = _mask_to_rgba(mask, conductor_colors[idx % len(conductor_colors)])
             tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
             self.conductor_textures[idx] = tex_id
-        else:
-            dpg.set_value(tex_id, rgba_flat)
 
         self.conductor_texture_shapes[idx] = (height, width)
         return tex_id
