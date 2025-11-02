@@ -1,8 +1,42 @@
+import numba
 import numpy as np
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, binary_dilation
+from flowcol import defaults
 from flowcol.types import Project
 from flowcol.poisson import solve_poisson_system, DIRICHLET
 from flowcol.mask_utils import blur_mask
+
+
+@numba.njit(cache=True)
+def _relax_potential_band(phi: np.ndarray, relax_mask: np.ndarray, iterations: int, omega: float) -> None:
+    height, width = phi.shape
+    for it in range(iterations):
+        parity = it & 1
+        for i in range(height):
+            for j in range(width):
+                if not relax_mask[i, j]:
+                    continue
+                if ((i + j) & 1) != parity:
+                    continue
+
+                sum_val = 0.0
+                for di, dj in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                    ii = i + di
+                    jj = j + dj
+                    if 0 <= ii < height and 0 <= jj < width:
+                        sum_val += phi[ii, jj]
+                    else:
+                        sum_val += phi[i, j]
+                avg = 0.25 * sum_val
+                phi[i, j] = (1.0 - omega) * phi[i, j] + omega * avg
+
+
+def _build_relaxation_mask(dirichlet_mask: np.ndarray, band_width: int) -> np.ndarray:
+    if band_width <= 0:
+        return np.zeros_like(dirichlet_mask, dtype=bool)
+    structure = np.ones((3, 3), dtype=bool)
+    dilated = binary_dilation(dirichlet_mask, structure=structure, iterations=band_width)
+    return np.logical_and(dilated, ~dirichlet_mask)
 
 
 def compute_field(
@@ -109,7 +143,25 @@ def compute_field(
         if phi.shape != (field_h, field_w):
             phi = match_shape(phi, (field_h, field_w))
         phi = phi.astype(np.float64, copy=False)
+        phi = np.ascontiguousarray(phi)
         phi[dirichlet_mask] = dirichlet_values[dirichlet_mask]
+        if (
+            defaults.POISSON_PREVIEW_RELAX_ITERS > 0
+            and defaults.POISSON_PREVIEW_RELAX_BAND > 0
+        ):
+            relax_mask = _build_relaxation_mask(
+                dirichlet_mask,
+                defaults.POISSON_PREVIEW_RELAX_BAND,
+            )
+            if np.any(relax_mask):
+                relax_mask = np.ascontiguousarray(relax_mask)
+                _relax_potential_band(
+                    phi,
+                    relax_mask,
+                    defaults.POISSON_PREVIEW_RELAX_ITERS,
+                    float(defaults.POISSON_PREVIEW_RELAX_OMEGA),
+                )
+                phi[dirichlet_mask] = dirichlet_values[dirichlet_mask]
     else:
         phi = solve_poisson_system(
             dirichlet_mask,

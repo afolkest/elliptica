@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path to import flowcol
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from flowcol.poisson import solve_poisson_system, DIRICHLET, NEUMANN
-from flowcol.field import compute_field
+from flowcol.field import compute_field, _build_relaxation_mask, _relax_potential_band
 from flowcol.types import Project, Conductor
 
 
@@ -207,6 +207,28 @@ def test_compute_field_preview_scale_accuracy():
     )
     assert rms_error < 0.1, f"Preview field deviates too much (RMS={rms_error:.3f})"
 
+
+def test_relaxation_preserves_dirichlet_and_modifies_band():
+    """Relaxation should leave conductor values intact while smoothing the band."""
+
+    size = 32
+    phi = np.linspace(0, 1, size, dtype=np.float64)
+    phi = np.tile(phi, (size, 1))
+    dirichlet_mask = np.zeros((size, size), dtype=bool)
+    dirichlet_mask[12:20, 12:20] = True
+
+    phi[dirichlet_mask] = 1.0
+    relax_mask = _build_relaxation_mask(dirichlet_mask, band_width=2)
+    phi_before = phi.copy()
+
+    if relax_mask.any():
+        _relax_potential_band(phi, relax_mask, iterations=6, omega=0.8)
+
+    # Dirichlet region should remain fixed
+    assert np.allclose(phi[dirichlet_mask], phi_before[dirichlet_mask])
+    # Smoothing should change at least some band pixels
+    diff = np.abs(phi[relax_mask] - phi_before[relax_mask])
+    assert np.any(diff > 1e-6)
 
 def main():
     """Run all tests and generate visualizations."""
