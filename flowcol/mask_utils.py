@@ -2,7 +2,7 @@
 import numpy as np
 from pathlib import Path
 from PIL import Image
-from scipy.ndimage import distance_transform_edt, gaussian_filter
+from scipy.ndimage import distance_transform_edt, gaussian_filter, binary_closing, generate_binary_structure
 
 def load_alpha(path: str, threshold: float = 0.0):
     """Load PNG alpha channel as mask (preserves full alpha values by default)."""
@@ -47,3 +47,20 @@ def blur_mask(mask: np.ndarray, sigma: float) -> np.ndarray:
         return mask
     blurred = gaussian_filter(mask.astype(np.float32), sigma=sigma, mode='reflect')
     return np.clip(blurred, 0.0, 1.0).astype(np.float32)
+
+def smooth_mask_morphological(mask: np.ndarray, radius: int) -> np.ndarray:
+    """Smooth binary mask boundary using morphological closing.
+
+    Args:
+        mask: Binary mask array
+        radius: Structuring element radius in pixels (0 = no smoothing)
+
+    Returns:
+        Smoothed binary mask
+    """
+    if radius <= 0:
+        return mask
+    # Create circular structuring element
+    struct = generate_binary_structure(2, radius)
+    smoothed = binary_closing(mask > 0.5, structure=struct, iterations=1)
+    return smoothed.astype(np.float32)
