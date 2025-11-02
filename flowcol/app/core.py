@@ -42,6 +42,8 @@ class RenderSettings:
     noise_seed: int = defaults.DEFAULT_NOISE_SEED
     noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA
     use_mask: bool = defaults.DEFAULT_USE_MASK
+    edge_gain_strength: float = defaults.DEFAULT_EDGE_GAIN_STRENGTH
+    edge_gain_power: float = defaults.DEFAULT_EDGE_GAIN_POWER
 
 
 @dataclass

@@ -107,6 +107,8 @@ def perform_render(
     noise_sigma: float,
     streamlength_factor: float,
     use_mask: bool = True,
+    edge_gain_strength: float = 0.0,
+    edge_gain_power: float = 2.0,
 ) -> RenderResult | None:
     """Execute full render pipeline.
 
@@ -183,7 +185,8 @@ def perform_render(
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)
 
     mask_status = "with mask blocking" if lic_mask is not None else "no mask"
-    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels}, {mask_status})...")
+    halo_status = f", edge_gain={edge_gain_strength:.2f}" if edge_gain_strength > 0 else ""
+    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels}, {mask_status}{halo_status})...")
     t_lic_start = time.time()
     lic_array = compute_lic(
         ex,
@@ -193,6 +196,8 @@ def perform_render(
         seed=noise_seed,
         noise_sigma=noise_sigma,
         mask=lic_mask,
+        edge_gain_strength=edge_gain_strength,
+        edge_gain_power=edge_gain_power,
     )
     t_lic_end = time.time()
     print(f"  LIC completed in {t_lic_end - t_lic_start:.2f}s")

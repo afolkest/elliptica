@@ -258,6 +258,8 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
         'noise_seed': settings.noise_seed,
         'noise_sigma': settings.noise_sigma,
         'use_mask': settings.use_mask,
+        'edge_gain_strength': settings.edge_gain_strength,
+        'edge_gain_power': settings.edge_gain_power,
     }
 
 
@@ -271,6 +273,8 @@ def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
         noise_seed=data.get('noise_seed', defaults.DEFAULT_NOISE_SEED),
         noise_sigma=data.get('noise_sigma', defaults.DEFAULT_NOISE_SIGMA),
         use_mask=data.get('use_mask', defaults.DEFAULT_USE_MASK),
+        edge_gain_strength=data.get('edge_gain_strength', defaults.DEFAULT_EDGE_GAIN_STRENGTH),
+        edge_gain_power=data.get('edge_gain_power', defaults.DEFAULT_EDGE_GAIN_POWER),
     )
 
 
