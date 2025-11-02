@@ -12,6 +12,12 @@ DEFAULT_PADDING_MARGIN: float = 0.10
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.0
 
+# bryLIC tiling defaults (for performance)
+DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling
+DEFAULT_NUM_THREADS: int | None = None  # None = auto-detect from CPU count
+DEFAULT_EDGE_GAIN_STRENGTH: float = 0.0  # Disabled for now, creates halos around boundaries
+DEFAULT_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for edge gain effect
+
 # Post-processing defaults
 DEFAULT_HIGHPASS_SIGMA_FACTOR: float = 3.0 / 1024.0
 
