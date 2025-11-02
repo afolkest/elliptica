@@ -72,6 +72,7 @@ class RenderOrchestrator:
                 settings_snapshot.noise_seed,
                 settings_snapshot.noise_sigma,
                 project_snapshot.streamlength_factor,
+                settings_snapshot.use_mask,
             )
             if result is None:
                 return False
