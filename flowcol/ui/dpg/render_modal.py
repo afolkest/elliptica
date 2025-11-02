@@ -163,8 +163,8 @@ class RenderModalController:
             self.edge_gain_strength_slider_id = dpg.add_slider_float(
                 label="Edge Halo Strength",
                 default_value=defaults.DEFAULT_EDGE_GAIN_STRENGTH,
-                min_value=0.0,
-                max_value=3.0,
+                min_value=defaults.MIN_EDGE_GAIN_STRENGTH,
+                max_value=defaults.MAX_EDGE_GAIN_STRENGTH,
                 format="%.2f",
                 width=250,
             )
@@ -172,8 +172,8 @@ class RenderModalController:
             self.edge_gain_power_slider_id = dpg.add_slider_float(
                 label="Edge Halo Power",
                 default_value=defaults.DEFAULT_EDGE_GAIN_POWER,
-                min_value=0.1,
-                max_value=4.0,
+                min_value=defaults.MIN_EDGE_GAIN_POWER,
+                max_value=defaults.MAX_EDGE_GAIN_POWER,
                 format="%.2f",
                 width=250,
             )
@@ -327,8 +327,8 @@ class RenderModalController:
         streamlength = max(streamlength, 1e-6)
         margin = max(margin, 0.0)
         noise_sigma = max(noise_sigma, 0.0)
-        edge_gain_strength = max(0.0, min(3.0, edge_gain_strength))
-        edge_gain_power = max(0.1, min(4.0, edge_gain_power))
+        edge_gain_strength = max(defaults.MIN_EDGE_GAIN_STRENGTH, min(defaults.MAX_EDGE_GAIN_STRENGTH, edge_gain_strength))
+        edge_gain_power = max(defaults.MIN_EDGE_GAIN_POWER, min(defaults.MAX_EDGE_GAIN_POWER, edge_gain_power))
 
         # Update app state
         with self.app.state_lock:
