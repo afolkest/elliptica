@@ -260,6 +260,7 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
         'use_mask': settings.use_mask,
         'edge_gain_strength': settings.edge_gain_strength,
         'edge_gain_power': settings.edge_gain_power,
+        'poisson_scale': settings.poisson_scale,
     }
 
 
@@ -275,6 +276,10 @@ def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
         use_mask=data.get('use_mask', defaults.DEFAULT_USE_MASK),
         edge_gain_strength=data.get('edge_gain_strength', defaults.DEFAULT_EDGE_GAIN_STRENGTH),
         edge_gain_power=data.get('edge_gain_power', defaults.DEFAULT_EDGE_GAIN_POWER),
+        poisson_scale=max(
+            defaults.MIN_POISSON_SCALE,
+            min(defaults.MAX_POISSON_SCALE, data.get('poisson_scale', defaults.DEFAULT_POISSON_SCALE)),
+        ),
     )
 
 

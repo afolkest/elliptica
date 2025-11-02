@@ -3,6 +3,7 @@
 import numpy as np
 from dataclasses import dataclass
 import time
+import os
 from flowcol.types import Project
 from flowcol.field import compute_field
 from flowcol.postprocess.masks import rasterize_conductor_masks
@@ -27,6 +28,7 @@ class RenderResult:
     margin: float
     offset_x: int = 0  # Crop offset for mask alignment
     offset_y: int = 0  # Crop offset for mask alignment
+    poisson_scale: float = 1.0  # Poisson solve scale relative to render grid
     ex: np.ndarray | None = None  # Electric field X component (for anisotropic blur)
     ey: np.ndarray | None = None  # Electric field Y component (for anisotropic blur)
     # Cached conductor masks at canvas resolution (saves redundant rasterization)
@@ -109,6 +111,7 @@ def perform_render(
     use_mask: bool = True,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    poisson_scale: float = 1.0,
 ) -> RenderResult | None:
     """Execute full render pipeline.
 
@@ -130,7 +133,8 @@ def perform_render(
     if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return None
 
-    print(f"Starting Poisson solve ({compute_w}×{compute_h})...")
+    preview_note = "" if poisson_scale >= 0.999 else f" (preview scale {poisson_scale:.2f})"
+    print(f"Starting Poisson solve ({compute_w}×{compute_h}){preview_note}...")
     t_poisson_start = time.time()
     ex, ey = compute_field(
         project,
@@ -141,6 +145,7 @@ def perform_render(
         boundary_bottom=project.boundary_bottom,
         boundary_left=project.boundary_left,
         boundary_right=project.boundary_right,
+        poisson_scale=poisson_scale,
     )
     t_poisson_end = time.time()
     print(f"  Poisson solve completed in {t_poisson_end - t_poisson_start:.2f}s")
@@ -184,9 +189,13 @@ def perform_render(
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)
 
+    # Determine thread count (None means auto-detect from CPU count)
+    from flowcol import defaults
+    num_threads = defaults.DEFAULT_NUM_THREADS if defaults.DEFAULT_NUM_THREADS is not None else os.cpu_count()
+
     mask_status = "with mask blocking" if lic_mask is not None else "no mask"
     halo_status = f", edge_gain={edge_gain_strength:.2f}" if edge_gain_strength > 0 else ""
-    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels}, {mask_status}{halo_status})...")
+    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels}, {mask_status}{halo_status}, threads={num_threads})...")
     t_lic_start = time.time()
     lic_array = compute_lic(
         ex,
@@ -241,6 +250,7 @@ def perform_render(
         margin=margin_physical,
         offset_x=crop_x0,
         offset_y=crop_y0,
+        poisson_scale=poisson_scale,
         ex=ex_cropped,
         ey=ey_cropped,
         conductor_masks_canvas=conductor_masks_canvas,
