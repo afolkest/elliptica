@@ -404,8 +404,22 @@ def compute_lic(
     boundaries: str = "closed",
     noise_oversample: float = 1.5,
     noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA,
+    mask: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Compute LIC visualization. Returns array normalized to [-1, 1]."""
+    """Compute LIC visualization. Returns array normalized to [-1, 1].
+
+    Args:
+        ex: X component of electric field
+        ey: Y component of electric field
+        streamlength: Streamline length in pixels
+        num_passes: Number of LIC iterations
+        texture: Optional input texture (generates white noise if None)
+        seed: Random seed for noise generation
+        boundaries: Boundary conditions ("closed" or "periodic")
+        noise_oversample: Oversample factor for noise generation
+        noise_sigma: Low-pass filter sigma for noise
+        mask: Optional boolean mask to block streamlines (True = blocked)
+    """
     field_h, field_w = ex.shape
 
     streamlength = max(int(streamlength), 1)
@@ -426,7 +440,15 @@ def compute_lic(
         return np.zeros_like(ex, dtype=np.float32)
 
     kernel = get_cosine_kernel(streamlength).astype(np.float32)
-    lic_result = convolve(texture, vx, vy, kernel, iterations=num_passes, boundaries=boundaries)
+    lic_result = convolve(
+        texture,
+        vx,
+        vy,
+        kernel,
+        iterations=num_passes,
+        boundaries=boundaries,
+        mask=mask,
+    )
 
     max_abs = np.max(np.abs(lic_result))
     if max_abs > 1e-12:

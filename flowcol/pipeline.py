@@ -106,6 +106,7 @@ def perform_render(
     noise_seed: int,
     noise_sigma: float,
     streamlength_factor: float,
+    use_mask: bool = True,
 ) -> RenderResult | None:
     """Execute full render pipeline.
 
@@ -142,11 +143,47 @@ def perform_render(
     t_poisson_end = time.time()
     print(f"  Poisson solve completed in {t_poisson_end - t_poisson_start:.2f}s")
 
+    # Generate conductor mask for LIC blocking if enabled
+    lic_mask = None
+    if use_mask and project.conductors:
+        from flowcol.mask_utils import blur_mask
+        from scipy.ndimage import zoom
+
+        lic_mask = np.zeros((compute_h, compute_w), dtype=bool)
+        scale_x = compute_w / domain_w if domain_w > 0 else 1.0
+        scale_y = compute_h / domain_h if domain_h > 0 else 1.0
+
+        for conductor in project.conductors:
+            x = (conductor.position[0] + margin_physical) * scale_x
+            y = (conductor.position[1] + margin_physical) * scale_y
+
+            # Scale and blur mask (same logic as field.py)
+            if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
+                scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=0)
+            else:
+                scaled_mask = conductor.mask
+
+            scale_factor = (scale_x + scale_y) / 2.0
+            scaled_sigma = conductor.edge_smooth_sigma * scale_factor
+            scaled_mask = blur_mask(scaled_mask, scaled_sigma)
+
+            mask_h, mask_w = scaled_mask.shape
+            ix, iy = int(round(x)), int(round(y))
+            x0, y0 = max(0, ix), max(0, iy)
+            x1, y1 = min(ix + mask_w, compute_w), min(iy + mask_h, compute_h)
+
+            mx0, my0 = max(0, -ix), max(0, -iy)
+            mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+
+            mask_slice = scaled_mask[my0:my1, mx0:mx1]
+            lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
+
     num_passes = max(1, num_passes)
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)
 
-    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels})...")
+    mask_status = "with mask blocking" if lic_mask is not None else "no mask"
+    print(f"Starting LIC ({num_passes} passes, streamlength={streamlength_pixels}, {mask_status})...")
     t_lic_start = time.time()
     lic_array = compute_lic(
         ex,
@@ -155,6 +192,7 @@ def perform_render(
         num_passes=num_passes,
         seed=noise_seed,
         noise_sigma=noise_sigma,
+        mask=lic_mask,
     )
     t_lic_end = time.time()
     print(f"  LIC completed in {t_lic_end - t_lic_start:.2f}s")

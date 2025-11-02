@@ -257,6 +257,7 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
         'margin': settings.margin,
         'noise_seed': settings.noise_seed,
         'noise_sigma': settings.noise_sigma,
+        'use_mask': settings.use_mask,
     }
 
 
@@ -269,6 +270,7 @@ def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
         margin=data.get('margin', defaults.DEFAULT_PADDING_MARGIN),
         noise_seed=data.get('noise_seed', defaults.DEFAULT_NOISE_SEED),
         noise_sigma=data.get('noise_sigma', defaults.DEFAULT_NOISE_SIGMA),
+        use_mask=data.get('use_mask', defaults.DEFAULT_USE_MASK),
     )
 
 

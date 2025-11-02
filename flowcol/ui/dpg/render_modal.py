@@ -66,6 +66,7 @@ class RenderModalController:
         self.margin_input_id: Optional[int] = None
         self.seed_input_id: Optional[int] = None
         self.sigma_input_id: Optional[int] = None
+        self.use_mask_checkbox_id: Optional[int] = None
 
         # Boundary condition checkboxes
         self.boundary_top_checkbox_id: Optional[int] = None
@@ -148,6 +149,12 @@ class RenderModalController:
                 min_clamped=True,
                 step=0.0,
                 width=200,
+            )
+
+            dpg.add_spacer(height=10)
+            self.use_mask_checkbox_id = dpg.add_checkbox(
+                label="Block streamlines at conductors",
+                default_value=defaults.DEFAULT_USE_MASK,
             )
 
             dpg.add_spacer(height=15)
@@ -242,6 +249,9 @@ class RenderModalController:
         if self.sigma_input_id is not None:
             dpg.set_value(self.sigma_input_id, float(settings.noise_sigma))
 
+        if self.use_mask_checkbox_id is not None:
+            dpg.set_value(self.use_mask_checkbox_id, bool(settings.use_mask))
+
         # Update boundary condition checkboxes
         from flowcol.poisson import NEUMANN
         if self.boundary_top_checkbox_id is not None:
@@ -274,6 +284,7 @@ class RenderModalController:
         margin = float(dpg.get_value(self.margin_input_id)) if self.margin_input_id is not None else defaults.DEFAULT_PADDING_MARGIN
         noise_seed = int(dpg.get_value(self.seed_input_id)) if self.seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
         noise_sigma = float(dpg.get_value(self.sigma_input_id)) if self.sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
+        use_mask = bool(dpg.get_value(self.use_mask_checkbox_id)) if self.use_mask_checkbox_id is not None else defaults.DEFAULT_USE_MASK
 
         # Read boundary condition checkboxes
         from flowcol.poisson import DIRICHLET, NEUMANN
@@ -297,6 +308,7 @@ class RenderModalController:
             actions.set_noise_seed(self.app.state, noise_seed)
             actions.set_noise_sigma(self.app.state, noise_sigma)
             actions.set_streamlength_factor(self.app.state, streamlength)
+            self.app.state.render_settings.use_mask = use_mask
             # Update boundary conditions
             self.app.state.project.boundary_top = boundary_top
             self.app.state.project.boundary_bottom = boundary_bottom

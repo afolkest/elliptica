@@ -220,6 +220,7 @@ def ensure_render(state: AppState) -> bool:
         settings.noise_seed,
         settings.noise_sigma,
         state.project.streamlength_factor,
+        settings.use_mask,
     )
     if result is None:
         return False

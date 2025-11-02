@@ -11,6 +11,7 @@ DEFAULT_STREAMLENGTH_FACTOR: float = 60.0 / 1024.0
 DEFAULT_PADDING_MARGIN: float = 0.10
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.0
+DEFAULT_USE_MASK: bool = True  # Block streamlines at conductor boundaries
 
 # bryLIC tiling defaults (for performance)
 DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling

@@ -41,6 +41,7 @@ class RenderSettings:
     margin: float = defaults.DEFAULT_PADDING_MARGIN
     noise_seed: int = defaults.DEFAULT_NOISE_SEED
     noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA
+    use_mask: bool = defaults.DEFAULT_USE_MASK
 
 
 @dataclass
