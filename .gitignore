@@ -15,9 +15,6 @@ candidates
 experiments
 rlic
 
-# User palette library (personal curation)
-flowcol/palettes_user.json
-
 # C extensions
 *.so
 
