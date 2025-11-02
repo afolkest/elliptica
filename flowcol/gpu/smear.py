@@ -6,7 +6,7 @@ from typing import Tuple
 from scipy.ndimage import zoom
 
 from flowcol.gpu import GPUContext
-from flowcol.gpu.ops import gaussian_blur_gpu, percentile_clip_gpu, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
+from flowcol.gpu.ops import gaussian_blur_gpu, quantile_safe, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
 from flowcol.render import _get_palette_lut
 
 
@@ -57,7 +57,7 @@ def apply_conductor_smear_gpu(
         # Use GPU quantile (much faster than CPU percentile!)
         flat = lic_gray_tensor.flatten()
         quantiles = torch.tensor([0.005, 0.995], device=lic_gray_tensor.device, dtype=lic_gray_tensor.dtype)
-        vmin_tensor, vmax_tensor = torch.quantile(flat, quantiles)
+        vmin_tensor, vmax_tensor = quantile_safe(flat, quantiles)
         vmin, vmax = vmin_tensor.item(), vmax_tensor.item()
     elif lic_percentiles is not None:
         vmin, vmax = lic_percentiles

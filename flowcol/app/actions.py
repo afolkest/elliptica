@@ -373,7 +373,7 @@ def set_region_style_enabled(state: AppState, conductor_id: int, region: str, en
 
 
 def set_region_palette(state: AppState, conductor_id: int, region: str, palette: str) -> None:
-    """Set palette for region (implies use_palette=True).
+    """Set palette for region (implies use_palette=True and enabled=True).
 
     Args:
         conductor_id: Conductor ID
@@ -385,15 +385,17 @@ def set_region_palette(state: AppState, conductor_id: int, region: str, palette:
         return
 
     if region == "surface":
+        settings.surface.enabled = True  # Auto-enable when palette is selected
         settings.surface.use_palette = True
         settings.surface.palette = palette
     elif region == "interior":
+        settings.interior.enabled = True  # Auto-enable when palette is selected
         settings.interior.use_palette = True
         settings.interior.palette = palette
 
 
 def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb: tuple[float, float, float]) -> None:
-    """Set solid color for region (implies use_palette=False).
+    """Set solid color for region (implies use_palette=False and enabled=True).
 
     Args:
         conductor_id: Conductor ID
@@ -405,8 +407,10 @@ def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb:
         return
 
     if region == "surface":
+        settings.surface.enabled = True  # Auto-enable when color is selected
         settings.surface.use_palette = False
         settings.surface.solid_color = rgb
     elif region == "interior":
+        settings.interior.enabled = True  # Auto-enable when color is selected
         settings.interior.use_palette = False
         settings.interior.solid_color = rgb
