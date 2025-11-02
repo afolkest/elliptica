@@ -15,6 +15,9 @@ DEFAULT_USE_MASK: bool = True  # Block streamlines at conductor boundaries
 DEFAULT_POISSON_SCALE: float = 1.0
 MIN_POISSON_SCALE: float = 0.1
 MAX_POISSON_SCALE: float = 1.0
+POISSON_PREVIEW_RELAX_BAND: int = 3
+POISSON_PREVIEW_RELAX_ITERS: int = 8
+POISSON_PREVIEW_RELAX_OMEGA: float = 0.8
 
 # bryLIC tiling defaults (for performance)
 DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling
