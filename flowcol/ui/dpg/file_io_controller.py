@@ -420,18 +420,19 @@ class FileIOController:
                 dpg.set_value(self.app.canvas_height_input_id, self.app.state.project.canvas_resolution[1])
 
             # Display settings
-            if self.app.postprocess_downsample_slider_id is not None:
-                dpg.set_value(self.app.postprocess_downsample_slider_id, self.app.state.display_settings.downsample_sigma)
-            if self.app.postprocess_clip_slider_id is not None:
-                dpg.set_value(self.app.postprocess_clip_slider_id, self.app.state.display_settings.clip_percent)
-            if self.app.postprocess_brightness_slider_id is not None:
-                dpg.set_value(self.app.postprocess_brightness_slider_id, self.app.state.display_settings.brightness)
-            if self.app.postprocess_contrast_slider_id is not None:
-                dpg.set_value(self.app.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
-            if self.app.postprocess_gamma_slider_id is not None:
-                dpg.set_value(self.app.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
-            if self.app.color_enabled_checkbox_id is not None:
-                dpg.set_value(self.app.color_enabled_checkbox_id, self.app.state.display_settings.color_enabled)
+            panel = self.app.postprocess_panel
+            if panel.postprocess_downsample_slider_id is not None:
+                dpg.set_value(panel.postprocess_downsample_slider_id, self.app.state.display_settings.downsample_sigma)
+            if panel.postprocess_clip_slider_id is not None:
+                dpg.set_value(panel.postprocess_clip_slider_id, self.app.state.display_settings.clip_percent)
+            if panel.postprocess_brightness_slider_id is not None:
+                dpg.set_value(panel.postprocess_brightness_slider_id, self.app.state.display_settings.brightness)
+            if panel.postprocess_contrast_slider_id is not None:
+                dpg.set_value(panel.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
+            if panel.postprocess_gamma_slider_id is not None:
+                dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
+            if panel.color_enabled_checkbox_id is not None:
+                dpg.set_value(panel.color_enabled_checkbox_id, self.app.state.display_settings.color_enabled)
 
     def auto_save_cache(self) -> None:
         """Auto-save render cache to disk (called after successful render)."""
