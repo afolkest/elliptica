@@ -11,6 +11,7 @@ from flowcol.app.core import AppState, RenderCache, ConductorColorSettings
 from flowcol.postprocess.masks import derive_interior
 from flowcol.postprocess.color import build_base_rgb
 from flowcol.gpu import GPUContext
+from flowcol import defaults
 
 MAX_CONDUCTOR_DIM = 32768
 
@@ -132,6 +133,18 @@ def set_noise_sigma(state: AppState, sigma: float) -> None:
         state.render_dirty = True
 
 
+def set_poisson_scale(state: AppState, scale: float) -> None:
+    """Update Poisson preview scale (0.1–1.0)."""
+    scale = float(scale)
+    if not np.isfinite(scale):
+        return
+    scale = max(defaults.MIN_POISSON_SCALE, min(defaults.MAX_POISSON_SCALE, scale))
+    if not np.isclose(state.render_settings.poisson_scale, scale):
+        state.render_settings.poisson_scale = scale
+        state.field_dirty = True
+        state.render_dirty = True
+
+
 def scale_conductor(state: AppState, idx: int, scale_delta: float) -> bool:
     """Scale a conductor mask by a delta factor around its center.
 
@@ -223,6 +236,7 @@ def ensure_render(state: AppState) -> bool:
         settings.use_mask,
         settings.edge_gain_strength,
         settings.edge_gain_power,
+        settings.poisson_scale,
     )
     if result is None:
         return False

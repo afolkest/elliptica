@@ -12,6 +12,9 @@ DEFAULT_PADDING_MARGIN: float = 0.10
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.5
 DEFAULT_USE_MASK: bool = True  # Block streamlines at conductor boundaries
+DEFAULT_POISSON_SCALE: float = 1.0
+MIN_POISSON_SCALE: float = 0.1
+MAX_POISSON_SCALE: float = 1.0
 
 # bryLIC tiling defaults (for performance)
 DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling

@@ -66,6 +66,7 @@ class RenderModalController:
         self.margin_input_id: Optional[int] = None
         self.seed_input_id: Optional[int] = None
         self.sigma_input_id: Optional[int] = None
+        self.poisson_scale_slider_id: Optional[int] = None
         self.use_mask_checkbox_id: Optional[int] = None
         self.edge_gain_strength_slider_id: Optional[int] = None
         self.edge_gain_power_slider_id: Optional[int] = None
@@ -136,6 +137,17 @@ class RenderModalController:
                 step=0.0,
                 width=200,
             )
+
+            dpg.add_spacer(height=8)
+            self.poisson_scale_slider_id = dpg.add_slider_float(
+                label="Poisson Preview Scale",
+                default_value=defaults.DEFAULT_POISSON_SCALE,
+                min_value=defaults.MIN_POISSON_SCALE,
+                max_value=defaults.MAX_POISSON_SCALE,
+                format="%.2f",
+                width=250,
+            )
+            dpg.add_text("Set <1.0 for faster preview solves (bilinear upsample).")
 
             self.seed_input_id = dpg.add_input_int(
                 label="Noise Seed",
@@ -264,6 +276,9 @@ class RenderModalController:
         if self.margin_input_id is not None:
             dpg.set_value(self.margin_input_id, float(settings.margin))
 
+        if self.poisson_scale_slider_id is not None:
+            dpg.set_value(self.poisson_scale_slider_id, float(settings.poisson_scale))
+
         if self.seed_input_id is not None:
             dpg.set_value(self.seed_input_id, int(settings.noise_seed))
 
@@ -309,6 +324,7 @@ class RenderModalController:
         passes = int(dpg.get_value(self.passes_input_id)) if self.passes_input_id is not None else defaults.DEFAULT_RENDER_PASSES
         streamlength = float(dpg.get_value(self.streamlength_input_id)) if self.streamlength_input_id is not None else defaults.DEFAULT_STREAMLENGTH_FACTOR
         margin = float(dpg.get_value(self.margin_input_id)) if self.margin_input_id is not None else defaults.DEFAULT_PADDING_MARGIN
+        poisson_scale = float(dpg.get_value(self.poisson_scale_slider_id)) if self.poisson_scale_slider_id is not None else defaults.DEFAULT_POISSON_SCALE
         noise_seed = int(dpg.get_value(self.seed_input_id)) if self.seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
         noise_sigma = float(dpg.get_value(self.sigma_input_id)) if self.sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
         use_mask = bool(dpg.get_value(self.use_mask_checkbox_id)) if self.use_mask_checkbox_id is not None else defaults.DEFAULT_USE_MASK
@@ -326,6 +342,7 @@ class RenderModalController:
         passes = max(passes, 1)
         streamlength = max(streamlength, 1e-6)
         margin = max(margin, 0.0)
+        poisson_scale = max(defaults.MIN_POISSON_SCALE, min(defaults.MAX_POISSON_SCALE, poisson_scale))
         noise_sigma = max(noise_sigma, 0.0)
         edge_gain_strength = max(defaults.MIN_EDGE_GAIN_STRENGTH, min(defaults.MAX_EDGE_GAIN_STRENGTH, edge_gain_strength))
         edge_gain_power = max(defaults.MIN_EDGE_GAIN_POWER, min(defaults.MAX_EDGE_GAIN_POWER, edge_gain_power))
@@ -339,6 +356,7 @@ class RenderModalController:
             actions.set_noise_seed(self.app.state, noise_seed)
             actions.set_noise_sigma(self.app.state, noise_sigma)
             actions.set_streamlength_factor(self.app.state, streamlength)
+            actions.set_poisson_scale(self.app.state, poisson_scale)
             self.app.state.render_settings.use_mask = use_mask
             self.app.state.render_settings.edge_gain_strength = edge_gain_strength
             self.app.state.render_settings.edge_gain_power = edge_gain_power

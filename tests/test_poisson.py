@@ -13,6 +13,8 @@ from pathlib import Path
 # Add parent directory to path to import flowcol
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from flowcol.poisson import solve_poisson_system, DIRICHLET, NEUMANN
+from flowcol.field import compute_field
+from flowcol.types import Project, Conductor
 
 
 def create_annulus_conductor(size, outer_radius=0.4, inner_radius=0.2, center=(0.5, 0.5)):
@@ -186,6 +188,24 @@ def validate_parallel_plates():
     print(f"✓ Parallel plates test {'PASSED' if error < 0.01 else 'FAILED'}")
 
     return error < 0.01
+
+
+def test_compute_field_preview_scale_accuracy():
+    """Ensure coarse Poisson preview stays close to full-resolution field."""
+
+    project = Project(canvas_resolution=(64, 64))
+    mask = np.zeros((16, 16), dtype=bool)
+    mask[4:12, 4:12] = True
+    conductor = Conductor(mask=mask, voltage=1.0, position=(24, 24))
+    project.conductors.append(conductor)
+
+    ex_full, ey_full = compute_field(project, poisson_scale=1.0)
+    ex_preview, ey_preview = compute_field(project, poisson_scale=0.5)
+
+    rms_error = np.sqrt(
+        np.mean((ex_full - ex_preview) ** 2 + (ey_full - ey_preview) ** 2)
+    )
+    assert rms_error < 0.1, f"Preview field deviates too much (RMS={rms_error:.3f})"
 
 
 def main():

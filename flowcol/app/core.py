@@ -44,6 +44,7 @@ class RenderSettings:
     use_mask: bool = defaults.DEFAULT_USE_MASK
     edge_gain_strength: float = defaults.DEFAULT_EDGE_GAIN_STRENGTH
     edge_gain_power: float = defaults.DEFAULT_EDGE_GAIN_POWER
+    poisson_scale: float = defaults.DEFAULT_POISSON_SCALE
 
 
 @dataclass
