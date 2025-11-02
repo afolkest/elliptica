@@ -556,6 +556,9 @@ class PostprocessingPanel:
         dpg.set_value("surface_palette_current_text", f"Current: {palette_name}")
         dpg.configure_item("surface_palette_popup", show=False)
 
+        # Sync checkbox state (set_region_palette auto-enables the region)
+        self.update_region_properties_panel()
+
         self.app.display_pipeline.refresh_display()
 
     def on_interior_enabled(self, sender=None, app_data=None) -> None:
@@ -584,6 +587,9 @@ class PostprocessingPanel:
         # Update current palette display
         dpg.set_value("interior_palette_current_text", f"Current: {palette_name}")
         dpg.configure_item("interior_palette_popup", show=False)
+
+        # Sync checkbox state (set_region_palette auto-enables the region)
+        self.update_region_properties_panel()
 
         self.app.display_pipeline.refresh_display()
 

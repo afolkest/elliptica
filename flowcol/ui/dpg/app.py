@@ -71,6 +71,7 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
         edge_smooth_sigma=conductor.edge_smooth_sigma,
         smear_enabled=conductor.smear_enabled,
         smear_sigma=conductor.smear_sigma,
+        id=conductor.id,  # Critical for conductor_color_settings lookup!
     )
 
 

@@ -6,6 +6,39 @@ from torchvision.transforms.functional import gaussian_blur
 from typing import Tuple
 
 
+def quantile_safe(tensor: torch.Tensor, quantiles: torch.Tensor) -> torch.Tensor:
+    """Compute torch.quantile with GPU-friendly fallback.
+
+    Torch's MPS backend currently raises a RuntimeError when quantile inputs
+    exceed an internal size limit. When that happens we fall back to performing
+    the computation on CPU and move the small result tensor back to the original
+    device.
+    """
+    try:
+        return torch.quantile(tensor, quantiles)
+    except RuntimeError as error:
+        message = str(error).lower()
+        if "tensor is too large" in message:
+            tensor_cpu = tensor.detach().to('cpu')
+            quantiles_cpu = quantiles.detach().to('cpu')
+
+            try:
+                result_cpu = torch.quantile(tensor_cpu, quantiles_cpu)
+            except RuntimeError as cpu_error:
+                if "tensor is too large" not in str(cpu_error).lower():
+                    raise
+                # Final fallback: use NumPy which handles large reductions fine.
+                result_np = np.quantile(
+                    tensor_cpu.numpy(),
+                    quantiles_cpu.numpy(),
+                    method='linear',
+                )
+                result_cpu = torch.tensor(result_np, dtype=tensor_cpu.dtype)
+
+            return result_cpu.to(tensor.device)
+        raise
+
+
 def gaussian_blur_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
     """Apply Gaussian blur on GPU using torchvision.
 
@@ -49,7 +82,7 @@ def percentile_clip_gpu(tensor: torch.Tensor, clip_percent: float) -> Tuple[torc
         lower = clip_percent / 100.0
         upper = 1.0 - lower
         quantiles = torch.tensor([lower, upper], device=tensor.device, dtype=tensor.dtype)
-        vmin_tensor, vmax_tensor = torch.quantile(tensor.flatten(), quantiles)
+        vmin_tensor, vmax_tensor = quantile_safe(tensor.flatten(), quantiles)
         vmin = vmin_tensor.item()
         vmax = vmax_tensor.item()
 
@@ -167,4 +200,5 @@ __all__ = [
     'apply_palette_lut_gpu',
     'grayscale_to_rgb_gpu',
     'apply_highpass_gpu',
+    'quantile_safe',
 ]

@@ -61,6 +61,25 @@ class ImageExportController:
             conductor_color_settings = {k: v for k, v in self.app.state.conductor_color_settings.items()}
             multiplier = cache.multiplier
             supersample = cache.supersample
+            # Snapshot cached masks (these are correct - don't regenerate!)
+            cached_conductor_masks = [m.copy() if m is not None else None for m in cache.conductor_masks] if cache.conductor_masks else None
+            cached_interior_masks = [m.copy() if m is not None else None for m in cache.interior_masks] if cache.interior_masks else None
+
+            # DEBUG: Print conductor color settings
+            print("\n=== EXPORT DEBUG ===")
+            print(f"Total conductors in project: {len(project.conductors)}")
+            print(f"conductor_color_settings keys: {list(conductor_color_settings.keys())}")
+            for conductor in project.conductors:
+                print(f"Conductor ID: {conductor.id} (type: {type(conductor.id)})")
+                if conductor.id in conductor_color_settings:
+                    cs = conductor_color_settings[conductor.id]
+                    print(f"  Interior enabled: {cs.interior.enabled}")
+                    print(f"  Interior palette: {cs.interior.palette}")
+                    print(f"  Interior use_palette: {cs.interior.use_palette}")
+                    print(f"  Surface enabled: {cs.surface.enabled}")
+                else:
+                    print(f"  ⚠️  NOT FOUND in conductor_color_settings!")
+            print("===================\n")
 
         canvas_w, canvas_h = project.canvas_resolution
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -84,6 +103,8 @@ class ImageExportController:
                 render_scale,
                 result.offset_x,
                 result.offset_y,
+                cached_conductor_masks,
+                cached_interior_masks,
             )
 
             h_super, w_super = final_rgb_super.shape[:2]
@@ -109,6 +130,7 @@ class ImageExportController:
             output_offset_x = int(round(result.offset_x / supersample))
             output_offset_y = int(round(result.offset_y / supersample))
 
+            # For downsampled version, regenerate masks at output resolution
             final_rgb_output = self._apply_postprocessing_at_resolution(
                 downsampled_lic,
                 project,
@@ -119,6 +141,8 @@ class ImageExportController:
                 output_scale,
                 output_offset_x,
                 output_offset_y,
+                None,  # Regenerate masks for downsampled resolution
+                None,
             )
 
             h_output, w_output = final_rgb_output.shape[:2]
@@ -140,6 +164,8 @@ class ImageExportController:
                 render_scale,
                 result.offset_x,
                 result.offset_y,
+                cached_conductor_masks,
+                cached_interior_masks,
             )
 
             h, w = final_rgb.shape[:2]
@@ -160,6 +186,8 @@ class ImageExportController:
         scale: float,
         offset_x: int,
         offset_y: int,
+        cached_conductor_masks: list = None,
+        cached_interior_masks: list = None,
     ) -> np.ndarray:
         """Apply full post-processing pipeline to LIC array at any resolution.
 
@@ -177,18 +205,22 @@ class ImageExportController:
         Returns:
             Final RGB array with all post-processing applied
         """
-        # Generate masks at this resolution
-        conductor_masks = None
-        interior_masks = None
-        if project.conductors:
-            conductor_masks, interior_masks = rasterize_conductor_masks(
-                project.conductors,
-                lic_array.shape,
-                margin_physical,
-                scale,
-                offset_x,
-                offset_y,
-            )
+        # Use cached masks if available (avoids regeneration errors), otherwise generate at this resolution
+        if cached_conductor_masks is not None and cached_interior_masks is not None:
+            conductor_masks = cached_conductor_masks
+            interior_masks = cached_interior_masks
+        else:
+            conductor_masks = None
+            interior_masks = None
+            if project.conductors:
+                conductor_masks, interior_masks = rasterize_conductor_masks(
+                    project.conductors,
+                    lic_array.shape,
+                    margin_physical,
+                    scale,
+                    offset_x,
+                    offset_y,
+                )
 
         # Compute percentiles for smear (if needed at export resolution)
         lic_percentiles = None
