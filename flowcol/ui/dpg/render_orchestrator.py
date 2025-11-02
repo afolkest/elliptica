@@ -73,6 +73,8 @@ class RenderOrchestrator:
                 settings_snapshot.noise_sigma,
                 project_snapshot.streamlength_factor,
                 settings_snapshot.use_mask,
+                settings_snapshot.edge_gain_strength,
+                settings_snapshot.edge_gain_power,
             )
             if result is None:
                 return False

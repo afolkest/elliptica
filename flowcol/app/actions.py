@@ -221,6 +221,8 @@ def ensure_render(state: AppState) -> bool:
         settings.noise_sigma,
         state.project.streamlength_factor,
         settings.use_mask,
+        settings.edge_gain_strength,
+        settings.edge_gain_power,
     )
     if result is None:
         return False
