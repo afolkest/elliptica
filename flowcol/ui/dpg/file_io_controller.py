@@ -310,7 +310,7 @@ class FileIOController:
         if sender is not None:
             dpg.configure_item(sender, show=False)
 
-        path_str = self._extract_file_path(app_data)
+        path_str = self._extract_file_path(app_data, prefer_typed_name=True)
         if not path_str:
             dpg.set_value("status_text", "No file selected.")
             return
@@ -404,26 +404,49 @@ class FileIOController:
     # Helper methods
     # ------------------------------------------------------------------
 
-    def _extract_file_path(self, app_data) -> Optional[str]:
-        """Extract file path from DPG file dialog callback data."""
+    def _extract_file_path(self, app_data, prefer_typed_name: bool = False) -> Optional[str]:
+        """Extract file path from DPG file dialog callback data.
+
+        Args:
+            app_data: Callback data from DPG file dialog
+            prefer_typed_name: If True, prioritize file_name field over selections.
+                              Use True for save dialogs, False for load dialogs.
+        """
         if not isinstance(app_data, dict):
             return None
 
-        # Try selections dict first
-        selections = app_data.get("selections", {})
-        if selections:
-            return next(iter(selections.values()))
+        if prefer_typed_name:
+            # For save dialogs: prioritize the typed filename over clicked file
+            current_path = app_data.get("current_path", "")
+            file_name = app_data.get("file_name", "")
+            if current_path and file_name:
+                return str(Path(current_path) / file_name)
 
-        # Fallback: file_path_name
-        path_str = app_data.get("file_path_name")
-        if path_str:
-            return path_str
+            # Fallback: file_path_name
+            path_str = app_data.get("file_path_name")
+            if path_str:
+                return path_str
 
-        # Fallback: combine current_path + file_name
-        current_path = app_data.get("current_path", "")
-        file_name = app_data.get("file_name", "")
-        if current_path and file_name:
-            return str(Path(current_path) / file_name)
+            # Last resort: selections
+            selections = app_data.get("selections", {})
+            if selections:
+                return next(iter(selections.values()))
+        else:
+            # For load dialogs: prioritize selections (clicked file)
+            selections = app_data.get("selections", {})
+            if selections:
+                return next(iter(selections.values()))
+
+            # Fallback: file_path_name
+            path_str = app_data.get("file_path_name")
+            if path_str:
+                return path_str
+
+            # Fallback: combine current_path + file_name
+            current_path = app_data.get("current_path", "")
+            file_name = app_data.get("file_name", "")
+            if current_path and file_name:
+                return str(Path(current_path) / file_name)
 
         return None
 
