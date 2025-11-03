@@ -85,10 +85,38 @@ def apply_conductor_smear_gpu(
         if not torch.any(mask_bool):
             continue
 
-        sigma_px = max(conductor.smear_sigma, 0.1)
+        # Convert fractional sigma to pixels based on render resolution
+        # smear_sigma is stored as fraction of canvas width (e.g., 0.002 = 0.2%)
+        # This makes the effect resolution-independent
+        sigma_px = max(conductor.smear_sigma * render_w, 0.1)
 
-        # ALWAYS blur the LIC grayscale to get the field texture (never blur RGB globally!)
-        lic_blur = gaussian_blur_gpu(lic_gray_tensor, sigma_px)
+        # OPTIMIZATION: Extract bounding box of conductor region to blur only that area
+        # This is MUCH faster than blurring the entire 7k image!
+        mask_coords = torch.nonzero(mask_bool)
+        if mask_coords.numel() == 0:
+            continue
+
+        y_min = mask_coords[:, 0].min().item()
+        y_max = mask_coords[:, 0].max().item()
+        x_min = mask_coords[:, 1].min().item()
+        x_max = mask_coords[:, 1].max().item()
+
+        # Add padding for blur kernel (3*sigma on each side is sufficient)
+        pad = int(3 * sigma_px) + 1
+        y_min_pad = max(0, y_min - pad)
+        y_max_pad = min(render_h, y_max + pad + 1)
+        x_min_pad = max(0, x_min - pad)
+        x_max_pad = min(render_w, x_max + pad + 1)
+
+        # Extract region
+        lic_region = lic_gray_tensor[y_min_pad:y_max_pad, x_min_pad:x_max_pad]
+
+        # Blur ONLY the conductor region (not the entire 7k image!)
+        lic_blur_region = gaussian_blur_gpu(lic_region, sigma_px)
+
+        # Create full-size blur tensor (only populated in conductor region)
+        lic_blur = torch.zeros_like(lic_gray_tensor)
+        lic_blur[y_min_pad:y_max_pad, x_min_pad:x_max_pad] = lic_blur_region
 
         # Normalize the blurred LIC
         if vmax > vmin:

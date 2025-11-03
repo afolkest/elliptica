@@ -69,6 +69,7 @@ def apply_region_overlays_gpu(
     brightness: float,
     contrast: float,
     gamma: float,
+    normalized_tensor: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Composite per-region color overrides over base RGB on GPU.
 
@@ -83,6 +84,7 @@ def apply_region_overlays_gpu(
         brightness: Brightness adjustment
         contrast: Contrast adjustment
         gamma: Gamma correction
+        normalized_tensor: Optional pre-normalized tensor (avoids recomputing percentiles)
 
     Returns:
         Final composited RGB tensor (H, W, 3) in [0, 1] on GPU
@@ -107,6 +109,7 @@ def apply_region_overlays_gpu(
             unique_palettes.add(settings.surface.palette)
 
     # Pre-compute RGB for each unique palette on GPU
+    # OPTIMIZATION: Reuse normalized_tensor to skip redundant percentile computation
     for palette_name in unique_palettes:
         lut_numpy = _get_palette_lut(palette_name)
         lut_tensor = GPUContext.to_gpu(lut_numpy)
@@ -120,6 +123,7 @@ def apply_region_overlays_gpu(
             gamma,
             color_enabled=True,
             lut=lut_tensor,
+            normalized_tensor=normalized_tensor,  # Skip percentile if already computed
         )
 
     # Blend each region using cached palette RGB
