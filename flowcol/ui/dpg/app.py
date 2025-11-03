@@ -205,7 +205,9 @@ class FlowColApp:
                         step=0,
                         width=120,
                     )
-                dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size, width=180)
+                    dpg.add_button(label="Fit Display", callback=self._fit_canvas_to_window, width=140)
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
                 self.conductor_controls.build_conductor_controls_container(edit_group)
@@ -367,6 +369,14 @@ class FlowColApp:
         self._resize_canvas_window()  # Ensure window stays within viewport bounds
         self._update_canvas_scale()  # Recalculate display scale for new canvas size
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
+
+    def _fit_canvas_to_window(self, sender=None, app_data=None) -> None:
+        """Recalculate display scale to fit canvas in window (useful after moving to another screen)."""
+        if dpg is None:
+            return
+        self._resize_canvas_window()
+        self._update_canvas_scale()
+        dpg.set_value("status_text", f"Display scale adjusted to {self.display_scale:.2f}×")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:

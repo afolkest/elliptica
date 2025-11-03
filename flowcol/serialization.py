@@ -342,6 +342,8 @@ def _region_style_to_dict(style: RegionStyle) -> dict[str, Any]:
         'use_palette': style.use_palette,
         'palette': style.palette,
         'solid_color': list(style.solid_color),
+        'brightness': style.brightness,  # None or float
+        'contrast': style.contrast,      # None or float
     }
 
 
@@ -352,6 +354,8 @@ def _dict_to_region_style(data: dict[str, Any]) -> RegionStyle:
         use_palette=data.get('use_palette', True),
         palette=data.get('palette', defaults.DEFAULT_COLOR_PALETTE),
         solid_color=tuple(data.get('solid_color', [0.5, 0.5, 0.5])),
+        brightness=data.get('brightness'),  # None by default (backward compatible)
+        contrast=data.get('contrast'),      # None by default (backward compatible)
     )
 
 
