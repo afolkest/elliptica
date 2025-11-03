@@ -23,6 +23,28 @@ class RegionStyle:
     palette: str = defaults.DEFAULT_COLOR_PALETTE
     solid_color: tuple[float, float, float] = (0.5, 0.5, 0.5)  # RGB [0,1]
 
+    # Postprocessing overrides (None = inherit from global DisplaySettings)
+    brightness: Optional[float] = None
+    contrast: Optional[float] = None
+
+
+def resolve_region_postprocess_params(
+    region: RegionStyle,
+    global_settings: DisplaySettings,
+) -> tuple[float, float]:
+    """Resolve per-region postprocessing params, falling back to global settings.
+
+    Args:
+        region: Region-specific settings (may have None for params)
+        global_settings: Global display settings
+
+    Returns:
+        (brightness, contrast) with global fallback applied
+    """
+    brightness = region.brightness if region.brightness is not None else global_settings.brightness
+    contrast = region.contrast if region.contrast is not None else global_settings.contrast
+    return brightness, contrast
+
 
 @dataclass
 class ConductorColorSettings:

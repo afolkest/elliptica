@@ -33,14 +33,17 @@ class PostprocessingPanel:
         self.postprocess_contrast_slider_id: Optional[int] = None
         self.postprocess_gamma_slider_id: Optional[int] = None
 
-        # Widget IDs for color controls
-        self.color_enabled_checkbox_id: Optional[int] = None
-
         # Widget IDs for region properties
-        self.surface_enabled_checkbox_id: Optional[int] = None
-        self.interior_enabled_checkbox_id: Optional[int] = None
         self.smear_enabled_checkbox_id: Optional[int] = None
         self.smear_sigma_slider_id: Optional[int] = None
+
+        # Widget IDs for per-region postprocessing
+        self.surface_separate_processing_checkbox_id: Optional[int] = None
+        self.surface_brightness_slider_id: Optional[int] = None
+        self.surface_contrast_slider_id: Optional[int] = None
+        self.interior_separate_processing_checkbox_id: Optional[int] = None
+        self.interior_brightness_slider_id: Optional[int] = None
+        self.interior_contrast_slider_id: Optional[int] = None
 
         # Delete confirmation modal
         self.delete_confirmation_modal_id: Optional[int] = None
@@ -124,14 +127,7 @@ class PostprocessingPanel:
         dpg.add_text("Colorization", parent=parent)
         dpg.add_spacer(height=10, parent=parent)
 
-        self.color_enabled_checkbox_id = dpg.add_checkbox(
-            label="Enable Color",
-            default_value=self.app.state.display_settings.color_enabled,
-            callback=self.on_color_enabled,
-            parent=parent,
-        )
-
-        # Build global palette selection UI
+        # Build global palette selection UI (no checkbox - selecting palette enables color)
         self._build_global_palette_ui(parent, palette_colormaps)
 
         dpg.add_spacer(height=10, parent=parent)
@@ -161,8 +157,11 @@ class PostprocessingPanel:
             tag="global_palette_button",
             parent=parent,
         )
+
+        # Show current state (Grayscale or palette name)
+        initial_text = self.app.state.display_settings.palette if self.app.state.display_settings.color_enabled else "Grayscale"
         dpg.add_text(
-            f"Current: {self.app.state.display_settings.palette}",
+            f"Current: {initial_text}",
             tag="global_palette_current_text",
             parent=parent,
         )
@@ -171,6 +170,17 @@ class PostprocessingPanel:
         with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
             dpg.add_text("Select a palette (right-click to delete):")
             dpg.add_separator()
+
+            # Add "Grayscale (No Color)" option at top
+            dpg.add_button(
+                label="⊙ Grayscale (No Color)",
+                width=350,
+                height=30,
+                callback=self.on_global_grayscale,
+                tag="global_grayscale_btn",
+            )
+            dpg.add_separator()
+
             with dpg.child_window(width=380, height=300, tag="global_palette_scrolling_window"):
                 for palette_name in palette_names:
                     colormap_tag = palette_colormaps[palette_name]
@@ -214,23 +224,29 @@ class PostprocessingPanel:
             dpg.add_text("Select a conductor region to customize", tag="region_hint_text")
 
             dpg.add_spacer(height=5)
-            dpg.add_text("Surface (Field Lines)", tag="surface_label")
-            self.surface_enabled_checkbox_id = dpg.add_checkbox(
-                label="Enable Custom Palette",
-                callback=self.on_surface_enabled,
-                tag="surface_enabled_checkbox",
-            )
-            # Surface palette popup
+            dpg.add_text("Conductor", tag="surface_label")
+            # Surface palette selection (no checkbox - selecting palette enables it)
             surface_palette_button = dpg.add_button(
-                label="Choose Surface Palette...",
+                label="Choose palette...",
                 width=200,
                 tag="surface_palette_button",
             )
-            dpg.add_text("Current: None", tag="surface_palette_current_text")
+            dpg.add_text("Current: Global", tag="surface_palette_current_text")
 
             with dpg.popup(surface_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="surface_palette_popup"):
                 dpg.add_text("Select surface palette:")
                 dpg.add_separator()
+
+                # Add "Use Global Palette" option at top
+                dpg.add_button(
+                    label="⊙ Use Global Palette",
+                    width=350,
+                    height=30,
+                    callback=self.on_surface_use_global,
+                    tag="surface_use_global_btn",
+                )
+                dpg.add_separator()
+
                 with dpg.child_window(width=380, height=250):
                     for palette_name in palette_names:
                         colormap_tag = palette_colormaps[palette_name]
@@ -244,24 +260,60 @@ class PostprocessingPanel:
                         )
                         dpg.bind_colormap(btn, colormap_tag)
 
-            dpg.add_spacer(height=10)
-            dpg.add_text("Interior (Hollow Region)", tag="interior_label")
-            self.interior_enabled_checkbox_id = dpg.add_checkbox(
-                label="Enable Custom Palette",
-                callback=self.on_interior_enabled,
-                tag="interior_enabled_checkbox",
+            # Separate postprocessing controls for surface
+            dpg.add_spacer(height=5)
+            self.surface_separate_processing_checkbox_id = dpg.add_checkbox(
+                label="Separate processing",
+                callback=self.on_surface_separate_processing,
+                tag="surface_separate_processing_checkbox",
             )
-            # Interior palette popup
+            self.surface_brightness_slider_id = dpg.add_slider_float(
+                label="Conductor brightness",
+                default_value=defaults.DEFAULT_BRIGHTNESS,
+                min_value=defaults.MIN_BRIGHTNESS,
+                max_value=defaults.MAX_BRIGHTNESS,
+                format="%.2f",
+                callback=self.on_surface_brightness,
+                tag="surface_brightness_slider",
+                width=200,
+                show=False,  # Hidden by default
+            )
+            self.surface_contrast_slider_id = dpg.add_slider_float(
+                label="Conductor contrast",
+                default_value=defaults.DEFAULT_CONTRAST,
+                min_value=defaults.MIN_CONTRAST,
+                max_value=defaults.MAX_CONTRAST,
+                format="%.2f",
+                callback=self.on_surface_contrast,
+                tag="surface_contrast_slider",
+                width=200,
+                show=False,  # Hidden by default
+            )
+
+            dpg.add_spacer(height=10)
+            dpg.add_text("Conductor interior", tag="interior_label")
+            # Interior palette selection (no checkbox - selecting palette enables it)
             interior_palette_button = dpg.add_button(
-                label="Choose Interior Palette...",
+                label="Choose palette...",
                 width=200,
                 tag="interior_palette_button",
             )
-            dpg.add_text("Current: None", tag="interior_palette_current_text")
+            dpg.add_text("Current: Global", tag="interior_palette_current_text")
 
             with dpg.popup(interior_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="interior_palette_popup"):
                 dpg.add_text("Select interior palette:")
                 dpg.add_separator()
+
+                # Add "Use Global Palette" option at top
+                dpg.add_button(
+                    label="⊙ Use Global Palette",
+                    width=350,
+                    height=30,
+                    callback=self.on_interior_use_global,
+                    tag="interior_use_global_btn",
+                )
+                dpg.add_separator()
+
                 with dpg.child_window(width=380, height=250):
                     for palette_name in palette_names:
                         colormap_tag = palette_colormaps[palette_name]
@@ -275,16 +327,46 @@ class PostprocessingPanel:
                         )
                         dpg.bind_colormap(btn, colormap_tag)
 
+            # Separate postprocessing controls for interior
+            dpg.add_spacer(height=5)
+            self.interior_separate_processing_checkbox_id = dpg.add_checkbox(
+                label="Separate processing",
+                callback=self.on_interior_separate_processing,
+                tag="interior_separate_processing_checkbox",
+            )
+            self.interior_brightness_slider_id = dpg.add_slider_float(
+                label="Interior brightness",
+                default_value=defaults.DEFAULT_BRIGHTNESS,
+                min_value=defaults.MIN_BRIGHTNESS,
+                max_value=defaults.MAX_BRIGHTNESS,
+                format="%.2f",
+                callback=self.on_interior_brightness,
+                tag="interior_brightness_slider",
+                width=200,
+                show=False,  # Hidden by default
+            )
+            self.interior_contrast_slider_id = dpg.add_slider_float(
+                label="Interior contrast",
+                default_value=defaults.DEFAULT_CONTRAST,
+                min_value=defaults.MIN_CONTRAST,
+                max_value=defaults.MAX_CONTRAST,
+                format="%.2f",
+                callback=self.on_interior_contrast,
+                tag="interior_contrast_slider",
+                width=200,
+                show=False,  # Hidden by default
+            )
+
             dpg.add_spacer(height=10)
             dpg.add_separator()
-            dpg.add_text("Interior Smear")
+            dpg.add_text("Conductor smear")
             self.smear_enabled_checkbox_id = dpg.add_checkbox(
-                label="Enable Interior Smear",
+                label="Enable smear",
                 callback=self.on_smear_enabled,
                 tag="smear_enabled_checkbox",
             )
             self.smear_sigma_slider_id = dpg.add_slider_float(
-                label="Blur Strength",
+                label="Blur strength",
                 min_value=defaults.MIN_SMEAR_SIGMA,
                 max_value=defaults.MAX_SMEAR_SIGMA,
                 format="%.4f",
@@ -304,9 +386,41 @@ class PostprocessingPanel:
             if selected and selected.id is not None:
                 settings = self.app.state.conductor_color_settings.get(selected.id)
                 if settings:
-                    # Update checkboxes only (colormap buttons are always visible)
-                    dpg.set_value("surface_enabled_checkbox", settings.surface.enabled)
-                    dpg.set_value("interior_enabled_checkbox", settings.interior.enabled)
+                    # Update palette current text based on enabled state
+                    if settings.surface.enabled:
+                        dpg.set_value("surface_palette_current_text", f"Current: {settings.surface.palette}")
+                    else:
+                        dpg.set_value("surface_palette_current_text", "Current: Global")
+
+                    if settings.interior.enabled:
+                        dpg.set_value("interior_palette_current_text", f"Current: {settings.interior.palette}")
+                    else:
+                        dpg.set_value("interior_palette_current_text", "Current: Global")
+
+                    # Update per-region postprocessing controls
+                    # Surface
+                    surface_has_overrides = (settings.surface.brightness is not None or
+                                            settings.surface.contrast is not None)
+                    dpg.set_value("surface_separate_processing_checkbox", surface_has_overrides)
+                    dpg.configure_item("surface_brightness_slider", show=surface_has_overrides)
+                    dpg.configure_item("surface_contrast_slider", show=surface_has_overrides)
+                    if surface_has_overrides:
+                        brightness_val = settings.surface.brightness if settings.surface.brightness is not None else self.app.state.display_settings.brightness
+                        contrast_val = settings.surface.contrast if settings.surface.contrast is not None else self.app.state.display_settings.contrast
+                        dpg.set_value("surface_brightness_slider", brightness_val)
+                        dpg.set_value("surface_contrast_slider", contrast_val)
+
+                    # Interior
+                    interior_has_overrides = (settings.interior.brightness is not None or
+                                             settings.interior.contrast is not None)
+                    dpg.set_value("interior_separate_processing_checkbox", interior_has_overrides)
+                    dpg.configure_item("interior_brightness_slider", show=interior_has_overrides)
+                    dpg.configure_item("interior_contrast_slider", show=interior_has_overrides)
+                    if interior_has_overrides:
+                        brightness_val = settings.interior.brightness if settings.interior.brightness is not None else self.app.state.display_settings.brightness
+                        contrast_val = settings.interior.contrast if settings.interior.contrast is not None else self.app.state.display_settings.contrast
+                        dpg.set_value("interior_brightness_slider", brightness_val)
+                        dpg.set_value("interior_contrast_slider", contrast_val)
 
                 # Update smear controls
                 dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
@@ -386,13 +500,17 @@ class PostprocessingPanel:
     # Color and palette callbacks
     # ------------------------------------------------------------------
 
-    def on_color_enabled(self, sender=None, app_data=None) -> None:
-        """Handle color enabled checkbox change."""
+    def on_global_grayscale(self, sender=None, app_data=None) -> None:
+        """Handle global 'Grayscale (No Color)' button."""
         if dpg is None:
             return
 
         with self.app.state_lock:
-            actions.set_color_enabled(self.app.state, app_data)
+            actions.set_color_enabled(self.app.state, False)
+
+        # Update display
+        dpg.set_value("global_palette_current_text", "Current: Grayscale")
+        dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
 
@@ -403,6 +521,8 @@ class PostprocessingPanel:
 
         palette_name = user_data
         with self.app.state_lock:
+            # Auto-enable color when a palette is selected
+            actions.set_color_enabled(self.app.state, True)
             actions.set_palette(self.app.state, palette_name)
 
         # Update current palette display
@@ -536,15 +656,19 @@ class PostprocessingPanel:
                     user_data=palette_name
                 )
 
-    def on_surface_enabled(self, sender=None, app_data=None) -> None:
-        """Handle surface custom palette checkbox."""
+    def on_surface_use_global(self, sender=None, app_data=None) -> None:
+        """Handle surface 'Use Global Palette' button."""
         if dpg is None:
             return
 
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             if selected and selected.id is not None:
-                actions.set_region_style_enabled(self.app.state, selected.id, "surface", app_data)
+                actions.set_region_style_enabled(self.app.state, selected.id, "surface", False)
+
+        # Update display
+        dpg.set_value("surface_palette_current_text", "Current: Global")
+        dpg.configure_item("surface_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
 
@@ -563,20 +687,22 @@ class PostprocessingPanel:
         dpg.set_value("surface_palette_current_text", f"Current: {palette_name}")
         dpg.configure_item("surface_palette_popup", show=False)
 
-        # Sync checkbox state (set_region_palette auto-enables the region)
-        self.update_region_properties_panel()
-
+        # Note: set_region_palette auto-enables the region
         self.app.display_pipeline.refresh_display()
 
-    def on_interior_enabled(self, sender=None, app_data=None) -> None:
-        """Handle interior custom color checkbox."""
+    def on_interior_use_global(self, sender=None, app_data=None) -> None:
+        """Handle interior 'Use Global Palette' button."""
         if dpg is None:
             return
 
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             if selected and selected.id is not None:
-                actions.set_region_style_enabled(self.app.state, selected.id, "interior", app_data)
+                actions.set_region_style_enabled(self.app.state, selected.id, "interior", False)
+
+        # Update display
+        dpg.set_value("interior_palette_current_text", "Current: Global")
+        dpg.configure_item("interior_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
 
@@ -595,8 +721,120 @@ class PostprocessingPanel:
         dpg.set_value("interior_palette_current_text", f"Current: {palette_name}")
         dpg.configure_item("interior_palette_popup", show=False)
 
-        # Sync checkbox state (set_region_palette auto-enables the region)
-        self.update_region_properties_panel()
+        # Note: set_region_palette auto-enables the region
+        self.app.display_pipeline.refresh_display()
+
+    # ------------------------------------------------------------------
+    # Per-region postprocessing callbacks
+    # ------------------------------------------------------------------
+
+    def on_surface_separate_processing(self, sender=None, app_data=None) -> None:
+        """Toggle separate postprocessing for surface region."""
+        if dpg is None:
+            return
+
+        is_enabled = bool(app_data)
+
+        # Show/hide brightness and contrast sliders
+        dpg.configure_item("surface_brightness_slider", show=is_enabled)
+        dpg.configure_item("surface_contrast_slider", show=is_enabled)
+
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                if is_enabled:
+                    # Initialize with global values
+                    global_brightness = self.app.state.display_settings.brightness
+                    global_contrast = self.app.state.display_settings.contrast
+                    dpg.set_value("surface_brightness_slider", global_brightness)
+                    dpg.set_value("surface_contrast_slider", global_contrast)
+                    actions.set_region_brightness(self.app.state, selected.id, "surface", global_brightness)
+                    actions.set_region_contrast(self.app.state, selected.id, "surface", global_contrast)
+                else:
+                    # Reset to None (inherit from global)
+                    actions.set_region_brightness(self.app.state, selected.id, "surface", None)
+                    actions.set_region_contrast(self.app.state, selected.id, "surface", None)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_surface_brightness(self, sender=None, app_data=None) -> None:
+        """Handle surface brightness slider change."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_brightness(self.app.state, selected.id, "surface", value)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_surface_contrast(self, sender=None, app_data=None) -> None:
+        """Handle surface contrast slider change."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_contrast(self.app.state, selected.id, "surface", value)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_interior_separate_processing(self, sender=None, app_data=None) -> None:
+        """Toggle separate postprocessing for interior region."""
+        if dpg is None:
+            return
+
+        is_enabled = bool(app_data)
+
+        # Show/hide brightness and contrast sliders
+        dpg.configure_item("interior_brightness_slider", show=is_enabled)
+        dpg.configure_item("interior_contrast_slider", show=is_enabled)
+
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                if is_enabled:
+                    # Initialize with global values
+                    global_brightness = self.app.state.display_settings.brightness
+                    global_contrast = self.app.state.display_settings.contrast
+                    dpg.set_value("interior_brightness_slider", global_brightness)
+                    dpg.set_value("interior_contrast_slider", global_contrast)
+                    actions.set_region_brightness(self.app.state, selected.id, "interior", global_brightness)
+                    actions.set_region_contrast(self.app.state, selected.id, "interior", global_contrast)
+                else:
+                    # Reset to None (inherit from global)
+                    actions.set_region_brightness(self.app.state, selected.id, "interior", None)
+                    actions.set_region_contrast(self.app.state, selected.id, "interior", None)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_interior_brightness(self, sender=None, app_data=None) -> None:
+        """Handle interior brightness slider change."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_brightness(self.app.state, selected.id, "interior", value)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_interior_contrast(self, sender=None, app_data=None) -> None:
+        """Handle interior contrast slider change."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_contrast(self.app.state, selected.id, "interior", value)
 
         self.app.display_pipeline.refresh_display()
 

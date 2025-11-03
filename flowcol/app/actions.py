@@ -414,3 +414,39 @@ def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb:
         settings.interior.enabled = True  # Auto-enable when color is selected
         settings.interior.use_palette = False
         settings.interior.solid_color = rgb
+
+
+def set_region_brightness(state: AppState, conductor_id: int, region: str, brightness: float | None) -> None:
+    """Set per-region brightness override (None = inherit from global).
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        brightness: Brightness value, or None to inherit from global
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.brightness = brightness
+    elif region == "interior":
+        settings.interior.brightness = brightness
+
+
+def set_region_contrast(state: AppState, conductor_id: int, region: str, contrast: float | None) -> None:
+    """Set per-region contrast override (None = inherit from global).
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        contrast: Contrast value, or None to inherit from global
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.contrast = contrast
+    elif region == "interior":
+        settings.interior.contrast = contrast

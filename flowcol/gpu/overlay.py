@@ -91,11 +91,12 @@ def apply_region_overlays_gpu(
     """
     result = base_rgb.clone()
 
-    # OPTIMIZATION: Pre-compute RGB for each unique palette ONCE on GPU
-    palette_cache: dict[str, torch.Tensor] = {}
+    # OPTIMIZATION: Pre-compute RGB for each unique (palette, brightness, contrast) combo ONCE on GPU
+    # Cache key: (palette_name, brightness, contrast)
+    palette_cache: dict[tuple, torch.Tensor] = {}
 
-    # Collect unique palettes needed
-    unique_palettes = set()
+    # Collect unique parameter combinations needed
+    unique_param_sets = set()
     for conductor in conductors:
         if conductor.id is None:
             continue
@@ -103,23 +104,34 @@ def apply_region_overlays_gpu(
         if settings is None:
             continue
 
+        # Interior region
         if settings.interior.enabled and settings.interior.use_palette:
-            unique_palettes.add(settings.interior.palette)
-        if settings.surface.enabled and settings.surface.use_palette:
-            unique_palettes.add(settings.surface.palette)
+            # Resolve per-region params (use region override if set, else global)
+            region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
+            region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
+            cache_key = (settings.interior.palette, region_brightness, region_contrast)
+            unique_param_sets.add(cache_key)
 
-    # Pre-compute RGB for each unique palette on GPU
+        # Surface region
+        if settings.surface.enabled and settings.surface.use_palette:
+            region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
+            region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
+            cache_key = (settings.surface.palette, region_brightness, region_contrast)
+            unique_param_sets.add(cache_key)
+
+    # Pre-compute RGB for each unique parameter combination on GPU
     # OPTIMIZATION: Reuse normalized_tensor to skip redundant percentile computation
-    for palette_name in unique_palettes:
+    for palette_name, region_brightness, region_contrast in unique_param_sets:
         lut_numpy = _get_palette_lut(palette_name)
         lut_tensor = GPUContext.to_gpu(lut_numpy)
 
-        # Build full RGB using GPU pipeline (stays on GPU!)
-        palette_cache[palette_name] = build_base_rgb_gpu(
+        # Build full RGB using GPU pipeline with per-region params (stays on GPU!)
+        cache_key = (palette_name, region_brightness, region_contrast)
+        palette_cache[cache_key] = build_base_rgb_gpu(
             scalar_tensor,
             clip_percent,
-            brightness,
-            contrast,
+            region_brightness,  # Per-region brightness
+            region_contrast,    # Per-region contrast
             gamma,
             color_enabled=True,
             lut=lut_tensor,
@@ -140,8 +152,11 @@ def apply_region_overlays_gpu(
             mask = interior_masks[idx]
             if torch.any(mask > 0):
                 if settings.interior.use_palette:
-                    # Use pre-computed palette RGB (stays on GPU!)
-                    region_rgb = palette_cache[settings.interior.palette]
+                    # Resolve per-region params and use cached RGB (stays on GPU!)
+                    region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
+                    region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
+                    cache_key = (settings.interior.palette, region_brightness, region_contrast)
+                    region_rgb = palette_cache[cache_key]
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:
                     # Solid color fill
@@ -152,8 +167,11 @@ def apply_region_overlays_gpu(
             mask = conductor_masks[idx]
             if torch.any(mask > 0):
                 if settings.surface.use_palette:
-                    # Use pre-computed palette RGB (stays on GPU!)
-                    region_rgb = palette_cache[settings.surface.palette]
+                    # Resolve per-region params and use cached RGB (stays on GPU!)
+                    region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
+                    region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
+                    cache_key = (settings.surface.palette, region_brightness, region_contrast)
+                    region_rgb = palette_cache[cache_key]
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:
                     # Solid color fill
