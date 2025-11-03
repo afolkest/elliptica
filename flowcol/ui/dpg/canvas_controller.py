@@ -174,9 +174,31 @@ class CanvasController:
         dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
         return True
 
+    def is_file_dialog_showing(self) -> bool:
+        """Check if any file dialog is currently showing."""
+        if dpg is None:
+            return False
+
+        file_io = self.app.file_io
+        dialogs = [
+            file_io.load_project_dialog_id,
+            file_io.save_project_dialog_id,
+            file_io.conductor_file_dialog_id,
+        ]
+
+        for dialog_id in dialogs:
+            if dialog_id is not None and dpg.does_item_exist(dialog_id):
+                if dpg.is_item_shown(dialog_id):
+                    return True
+        return False
+
     def process_canvas_mouse(self) -> None:
         """Process mouse input on canvas (clicks, drags, wheel)."""
         if dpg is None or self.app.canvas_id is None:
+            return
+
+        # Don't process canvas input when file dialogs are open
+        if self.is_file_dialog_showing():
             return
 
         mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
