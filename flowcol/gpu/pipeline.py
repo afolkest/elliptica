@@ -64,6 +64,7 @@ def build_base_rgb_gpu(
     gamma: float,
     color_enabled: bool,
     lut: torch.Tensor | None,
+    normalized_tensor: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """GPU-accelerated colorization pipeline.
 
@@ -75,12 +76,16 @@ def build_base_rgb_gpu(
         gamma: Gamma exponent
         color_enabled: Whether to apply color palette
         lut: Color lookup table (N, 3) on GPU, or None for grayscale
+        normalized_tensor: Optional pre-normalized tensor (skips expensive percentile computation)
 
     Returns:
         RGB tensor (H, W, 3) with values in [0, 1] on GPU
     """
-    # Percentile clip and normalize to [0, 1]
-    normalized, _, _ = percentile_clip_gpu(tensor, clip_percent)
+    # Percentile clip and normalize to [0, 1] (unless already provided)
+    if normalized_tensor is not None:
+        normalized = normalized_tensor
+    else:
+        normalized, _, _ = percentile_clip_gpu(tensor, clip_percent)
 
     # Apply brightness, contrast and gamma
     adjusted = apply_contrast_gamma_gpu(normalized, brightness, contrast, gamma)

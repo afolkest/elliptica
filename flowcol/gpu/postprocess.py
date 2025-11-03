@@ -59,6 +59,11 @@ def apply_full_postprocess_gpu(
     Returns:
         Final RGB tensor (H, W, 3) in [0, 1] on GPU
     """
+    # OPTIMIZATION: Compute percentile normalization ONCE and reuse
+    # This avoids redundant 6-second percentile computation for each palette
+    from flowcol.gpu.ops import percentile_clip_gpu
+    normalized_tensor, _, _ = percentile_clip_gpu(scalar_tensor, clip_percent)
+
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None
     if color_enabled:
@@ -73,6 +78,7 @@ def apply_full_postprocess_gpu(
         gamma,
         color_enabled,
         lut_tensor,
+        normalized_tensor=normalized_tensor,  # Reuse normalized tensor
     )
 
     # Step 2: Apply region overlays (if any conductors have custom colors)
@@ -112,6 +118,7 @@ def apply_full_postprocess_gpu(
             brightness,
             contrast,
             gamma,
+            normalized_tensor=normalized_tensor,  # Reuse normalized tensor
         )
 
     # Step 3: Apply conductor smear (if any conductors have smear enabled)

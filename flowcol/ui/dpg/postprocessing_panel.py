@@ -284,13 +284,14 @@ class PostprocessingPanel:
                 tag="smear_enabled_checkbox",
             )
             self.smear_sigma_slider_id = dpg.add_slider_float(
-                label="Blur Sigma",
+                label="Blur Strength",
                 min_value=defaults.MIN_SMEAR_SIGMA,
                 max_value=defaults.MAX_SMEAR_SIGMA,
-                format="%.1f px",
+                format="%.4f",
                 callback=self.on_smear_sigma,
                 tag="smear_sigma_slider",
                 width=200,
+                clamped=True,
             )
 
     def update_region_properties_panel(self) -> None:

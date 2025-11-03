@@ -53,10 +53,11 @@ MAX_GAMMA: float = 3.0
 DEFAULT_COLOR_ENABLED: bool = False
 DEFAULT_COLOR_PALETTE: str = "Ink Wash"
 
-# Smear defaults
-DEFAULT_SMEAR_SIGMA: float = 2.0
-MIN_SMEAR_SIGMA: float = 0.1
-MAX_SMEAR_SIGMA: float = 10.0
+# Smear defaults (stored as fraction of canvas width for resolution independence)
+# Example: 0.002 = 0.2% of canvas width (2px at 1k, 14px at 7k)
+DEFAULT_SMEAR_SIGMA: float = 0.0005  # 0.2% of canvas width
+MIN_SMEAR_SIGMA: float = 0.00001     # 0.01% (0.1px at 1k, 0.7px at 7k)
+MAX_SMEAR_SIGMA: float = 0.005       # 0.5% (5px at 1k, 35px at 7k)
 
 # UI interaction defaults
 SCROLL_SCALE_SENSITIVITY: float = 0.02

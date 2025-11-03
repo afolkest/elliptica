@@ -233,6 +233,16 @@ def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Co
     else:
         edge_smooth_sigma = 1.5
 
+    # Migrate old absolute pixel smear_sigma to fractional (backward compatibility)
+    smear_sigma_raw = data.get('smear_sigma', 0.002)
+    if smear_sigma_raw > 0.1:
+        # Old format: absolute pixels (range was 0.1-10.0)
+        # Convert to fractional: assume 1024px canvas reference
+        smear_sigma = smear_sigma_raw / 1024.0
+    else:
+        # New format: already fractional
+        smear_sigma = smear_sigma_raw
+
     return Conductor(
         mask=masks['mask'],
         voltage=data.get('voltage', 0.5),
@@ -243,7 +253,7 @@ def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Co
         scale_factor=data.get('scale_factor', 1.0),
         edge_smooth_sigma=edge_smooth_sigma,
         smear_enabled=data.get('smear_enabled', False),
-        smear_sigma=data.get('smear_sigma', 2.0),
+        smear_sigma=smear_sigma,
         id=data.get('id'),
     )
 

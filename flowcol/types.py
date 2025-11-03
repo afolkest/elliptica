@@ -18,7 +18,7 @@ class Conductor:
     scale_factor: float = 1.0  # Current scale relative to original
     edge_smooth_sigma: float = 1.5  # Edge anti-aliasing blur in pixels (0-5px range)
     smear_enabled: bool = False  # Enable texture smearing inside conductor
-    smear_sigma: float = 2.0  # Gaussian blur for LIC texture in pixels
+    smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA  # Gaussian blur strength as fraction of canvas width (resolution-independent)
     id: Optional[int] = None  # Assigned when added to project
 
 
