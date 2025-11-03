@@ -22,6 +22,7 @@ from flowcol.ui.dpg.display_pipeline_controller import DisplayPipelineController
 from flowcol.ui.dpg.image_export_controller import ImageExportController
 from flowcol.ui.dpg.canvas_controller import CanvasController
 from flowcol.ui.dpg.canvas_renderer import CanvasRenderer
+from flowcol.ui.dpg.shape_dialog import ShapeDialogController
 from flowcol.types import Conductor, Project
 from flowcol import defaults
 
@@ -130,6 +131,7 @@ class FlowColApp:
         self.render_modal = RenderModalController(self)
         self.render_orchestrator = RenderOrchestrator(self)
         self.file_io = FileIOController(self)
+        self.shape_dialog = ShapeDialogController(self)
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
         self.conductor_controls = ConductorControlsPanel(self)
@@ -178,6 +180,7 @@ class FlowColApp:
                 self.edit_controls_id = edit_group
                 dpg.add_text("Render Controls")
                 dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
+                dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
                 dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
                 self.cache_panel.build_view_postprocessing_button(edit_group)
                 dpg.add_spacer(height=10)
