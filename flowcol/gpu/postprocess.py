@@ -59,10 +59,20 @@ def apply_full_postprocess_gpu(
     Returns:
         Final RGB tensor (H, W, 3) in [0, 1] on GPU
     """
-    # OPTIMIZATION: Compute percentile normalization ONCE and reuse
-    # This avoids redundant 6-second percentile computation for each palette
+    # OPTIMIZATION: Use pre-cached percentiles if available, otherwise compute
+    # Pre-cached percentiles from render save 6+ seconds!
     from flowcol.gpu.ops import percentile_clip_gpu
-    normalized_tensor, _, _ = percentile_clip_gpu(scalar_tensor, clip_percent)
+
+    if lic_percentiles is not None:
+        # Use pre-cached percentiles (fast path!)
+        vmin, vmax = lic_percentiles
+        if vmax > vmin:
+            normalized_tensor = torch.clamp((scalar_tensor - vmin) / (vmax - vmin), 0.0, 1.0)
+        else:
+            normalized_tensor = torch.zeros_like(scalar_tensor)
+    else:
+        # Compute percentiles on-demand (slow path, 6+ seconds for 7k)
+        normalized_tensor, _, _ = percentile_clip_gpu(scalar_tensor, clip_percent)
 
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None
