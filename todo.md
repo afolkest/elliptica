@@ -1,6 +1,7 @@
 -add more noise types
--add curl noise 
 -make it easier to see what mask is chosen in postprocess mode
 -use gpu in edit mode for smoother experience
 -add zoom 
 -make it easier to see what voltage is use - color by voltage in edit mode
+-add better smear 
+-add custom postprocessing for the different regions

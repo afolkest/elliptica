@@ -1,5 +1,6 @@
 """Postprocessing panel controller for FlowCol UI - sliders, color, and region properties."""
 
+import time
 from typing import Optional, TYPE_CHECKING
 
 from flowcol import defaults
@@ -44,6 +45,11 @@ class PostprocessingPanel:
         # Delete confirmation modal
         self.delete_confirmation_modal_id: Optional[int] = None
         self.pending_delete_palette: Optional[str] = None
+
+        # Debouncing for expensive smear updates
+        self.smear_pending_value: Optional[float] = None
+        self.smear_last_update_time: float = 0.0
+        self.smear_debounce_delay: float = 0.3  # 300ms delay
 
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
@@ -611,13 +617,37 @@ class PostprocessingPanel:
         self.app.display_pipeline.refresh_display()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
-        """Adjust smear blur sigma for selected conductor."""
+        """Adjust smear blur sigma for selected conductor (debounced for performance)."""
         if dpg is None:
             return
 
+        # Always update the value immediately (for UI responsiveness)
         with self.app.state_lock:
             idx = self.app.state.selected_idx
             if idx >= 0 and idx < len(self.app.state.project.conductors):
                 self.app.state.project.conductors[idx].smear_sigma = float(app_data)
 
+        # Mark that we have a pending update (defers expensive render refresh)
+        self.smear_pending_value = float(app_data)
+
+        # Record the time of THIS slider change (not the last render)
+        # This ensures we wait 300ms after the LAST slider movement
+        self.smear_last_update_time = time.time()
+
+    def _apply_smear_update(self) -> None:
+        """Apply pending smear update (called after debounce delay)."""
+        if self.smear_pending_value is None:
+            return
+
+        self.smear_pending_value = None
         self.app.display_pipeline.refresh_display()
+
+    def check_smear_debounce(self) -> None:
+        """Check if smear update should be applied (called every frame)."""
+        if self.smear_pending_value is None:
+            return
+
+        current_time = time.time()
+        # Only apply if enough time has passed since the last slider movement
+        if current_time - self.smear_last_update_time >= self.smear_debounce_delay:
+            self._apply_smear_update()
