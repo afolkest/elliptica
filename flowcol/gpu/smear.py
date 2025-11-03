@@ -2,12 +2,42 @@
 
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple, Optional
 from scipy.ndimage import zoom
 
 from flowcol.gpu import GPUContext
 from flowcol.gpu.ops import gaussian_blur_gpu, quantile_safe, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
 from flowcol.render import _get_palette_lut
+
+
+def compute_mask_bbox_cpu(mask: np.ndarray, pad: int, max_h: int, max_w: int) -> Optional[Tuple[int, int, int, int]]:
+    """Compute bounding box of non-zero region in mask (CPU operation, no GPU sync).
+
+    Args:
+        mask: Binary mask array (H, W)
+        pad: Padding to add around bounding box
+        max_h: Maximum height (for clamping)
+        max_w: Maximum width (for clamping)
+
+    Returns:
+        (y_min, y_max, x_min, x_max) or None if mask is empty
+    """
+    coords = np.argwhere(mask > 0.5)
+    if coords.shape[0] == 0:
+        return None
+
+    y_min = int(coords[:, 0].min())
+    y_max = int(coords[:, 0].max())
+    x_min = int(coords[:, 1].min())
+    x_max = int(coords[:, 1].max())
+
+    # Add padding for blur kernel (3*sigma on each side is sufficient)
+    y_min_pad = max(0, y_min - pad)
+    y_max_pad = min(max_h, y_max + pad + 1)
+    x_min_pad = max(0, x_min - pad)
+    x_max_pad = min(max_w, x_max + pad + 1)
+
+    return (y_min_pad, y_max_pad, x_min_pad, x_max_pad)
 
 
 def apply_conductor_smear_gpu(
@@ -90,23 +120,15 @@ def apply_conductor_smear_gpu(
         # This makes the effect resolution-independent
         sigma_px = max(conductor.smear_sigma * render_w, 0.1)
 
-        # OPTIMIZATION: Extract bounding box of conductor region to blur only that area
-        # This is MUCH faster than blurring the entire 7k image!
-        mask_coords = torch.nonzero(mask_bool)
-        if mask_coords.numel() == 0:
+        # OPTIMIZATION: Compute bounding box on CPU to avoid GPU→CPU sync barrier
+        # torch.nonzero() + .item() causes expensive MPS synchronization!
+        pad = int(3 * sigma_px) + 1
+        mask_cpu = conductor_masks[idx]
+        bbox = compute_mask_bbox_cpu(mask_cpu, pad, render_h, render_w)
+        if bbox is None:
             continue
 
-        y_min = mask_coords[:, 0].min().item()
-        y_max = mask_coords[:, 0].max().item()
-        x_min = mask_coords[:, 1].min().item()
-        x_max = mask_coords[:, 1].max().item()
-
-        # Add padding for blur kernel (3*sigma on each side is sufficient)
-        pad = int(3 * sigma_px) + 1
-        y_min_pad = max(0, y_min - pad)
-        y_max_pad = min(render_h, y_max + pad + 1)
-        x_min_pad = max(0, x_min - pad)
-        x_max_pad = min(render_w, x_max + pad + 1)
+        y_min_pad, y_max_pad, x_min_pad, x_max_pad = bbox
 
         # Extract region
         lic_region = lic_gray_tensor[y_min_pad:y_max_pad, x_min_pad:x_max_pad]

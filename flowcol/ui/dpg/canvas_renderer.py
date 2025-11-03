@@ -54,10 +54,6 @@ class CanvasRenderer:
             render_cache = self.app.state.render_cache
             view_mode = self.app.state.view_mode
 
-        # Only refresh render texture in render mode (avoids 11 GB/sec bandwidth waste in edit mode)
-        if view_mode == "render":
-            self.app.display_pipeline.texture_manager.refresh_render_texture()
-
         # Clear the layer (transform persists on layer)
         dpg.delete_item(self.app.canvas_layer_id, children_only=True)
 
