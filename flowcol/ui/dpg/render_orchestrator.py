@@ -85,12 +85,11 @@ class RenderOrchestrator:
             conductor_masks = result.conductor_masks_canvas
             interior_masks = result.interior_masks_canvas
 
-            # Precompute LIC percentiles for smear normalization (needed for smear effect)
-            lic_percentiles = None
-            if any(c.smear_enabled for c in project_snapshot.conductors):
-                vmin = float(np.percentile(result.array, 0.5))
-                vmax = float(np.percentile(result.array, 99.5))
-                lic_percentiles = (vmin, vmax)
+            # Precompute LIC percentiles (used for both smear normalization and postprocessing)
+            # ALWAYS compute during render to avoid 6s delays later during postprocessing!
+            vmin = float(np.percentile(result.array, 0.5))
+            vmax = float(np.percentile(result.array, 99.5))
+            lic_percentiles = (vmin, vmax)
 
             # Create render cache (everything at full resolution)
             cache = RenderCache(

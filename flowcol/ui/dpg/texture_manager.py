@@ -32,6 +32,27 @@ def _image_to_texture_data(img: Image.Image) -> Tuple[int, int, np.ndarray]:
     return width, height, rgba.reshape(-1)
 
 
+def _rgb_array_to_texture_data(rgb: np.ndarray) -> Tuple[int, int, np.ndarray]:
+    """Convert RGB uint8 array to float RGBA data (fast path, no PIL roundtrip).
+
+    Args:
+        rgb: RGB array (H, W, 3) uint8
+
+    Returns:
+        (width, height, rgba_flat) where rgba_flat is flattened float32 RGBA
+    """
+    height, width = rgb.shape[:2]
+
+    # Add alpha channel (full opacity) - this is much faster than PIL convert
+    rgba = np.empty((height, width, 4), dtype=np.uint8)
+    rgba[:, :, :3] = rgb
+    rgba[:, :, 3] = 255
+
+    # Convert to float32 in [0, 1] and flatten
+    rgba_float = rgba.astype(np.float32) / 255.0
+    return width, height, rgba_float.reshape(-1)
+
+
 class TextureManager:
     """Manages DearPyGui textures for conductor overlays and rendered images."""
 
@@ -133,11 +154,12 @@ class TextureManager:
                 from flowcol.render import array_to_pil
                 arr = np.zeros((32, 32), dtype=np.float32)
                 pil_img = array_to_pil(arr, use_color=False)
+                # Convert PIL image to texture data
+                width, height, data = _image_to_texture_data(pil_img)
             else:
                 # Apply postprocessing at FULL render resolution
                 # DearPyGUI will scale it for display
                 from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
-
 
                 final_rgb = apply_full_postprocess_hybrid(
                     scalar_array=cache.result.array,  # Full resolution!
@@ -160,9 +182,8 @@ class TextureManager:
                     interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
                 )
 
-                pil_img = Image.fromarray(final_rgb, mode='RGB')
-
-        width, height, data = _image_to_texture_data(pil_img)
+                # Fast path: convert RGB→RGBA directly (no PIL roundtrip!)
+                width, height, data = _rgb_array_to_texture_data(final_rgb)
 
         # Create or update texture
         if self.render_texture_id is None or self.render_texture_size != (width, height):
