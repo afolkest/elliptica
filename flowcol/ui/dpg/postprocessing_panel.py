@@ -456,7 +456,13 @@ class PostprocessingPanel:
 
         value = float(app_data)
 
-        # Update pending value
+        # IMMEDIATELY update state so other refreshes use the correct value
+        # (otherwise other sliders would trigger refresh with stale clip%)
+        with self.app.state_lock:
+            self.app.state.display_settings.clip_percent = value
+            self.app.state.invalidate_base_rgb()
+
+        # Mark pending to trigger refresh after debounce delay
         self.clip_pending_value = value
 
         # Record the time of THIS slider change (not the last render)
@@ -880,10 +886,8 @@ class PostprocessingPanel:
         self.smear_last_update_time = time.time()
 
     def _apply_clip_update(self, value: float) -> None:
-        """Apply clip percent update immediately."""
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_percent = value
-            self.app.state.invalidate_base_rgb()
+        """Apply clip percent refresh (state already updated in on_clip_slider)."""
+        # State was already updated in on_clip_slider - just trigger the deferred refresh
         self.app.display_pipeline.refresh_display()
 
     def _apply_smear_update(self) -> None:

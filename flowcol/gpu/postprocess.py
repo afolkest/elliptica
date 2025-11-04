@@ -28,7 +28,7 @@ def apply_full_postprocess_gpu(
     lic_percentiles: Tuple[float, float] | None = None,
     conductor_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, Tuple[float, float]]:
     """Apply full postprocessing pipeline on GPU.
 
     This is the unified entry point that chains:
@@ -57,29 +57,45 @@ def apply_full_postprocess_gpu(
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
 
     Returns:
-        Final RGB tensor (H, W, 3) in [0, 1] on GPU
+        Tuple of:
+            - Final RGB tensor (H, W, 3) in [0, 1] on GPU
+            - Tuple (vmin, vmax) percentiles actually used for normalization
     """
-    # OPTIMIZATION: Use cached percentiles if they match current clip_percent, otherwise recompute
-    # Recomputing percentiles is slow (0.1s @ 1k, 0.5s @ 2k, 6s @ 7k) but necessary when clip% changes
+    # OPTIMIZATION: Reuse cached percentiles when they match the requested clip%.
+    # Percentile computation can be quite expensive at large resolutions.
     from flowcol.gpu.ops import percentile_clip_gpu
 
-    # Check if cached percentiles are valid for current clip_percent (within 0.01% tolerance)
-    use_cached = (lic_percentiles is not None and
-                  hasattr(scalar_tensor, '_lic_cached_clip_percent') and
-                  abs(getattr(scalar_tensor, '_lic_cached_clip_percent', -1.0) - clip_percent) < 0.01)
+    # Determine whether we already have percentiles that match the requested clip%.
+    cached_clip = getattr(scalar_tensor, '_lic_cached_clip_percent', None)
+    cached_percentiles_attr = getattr(scalar_tensor, '_lic_cached_percentiles', None)
+    percentiles_match_attr = (
+        cached_clip is not None and
+        cached_percentiles_attr is not None and
+        abs(float(cached_clip) - float(clip_percent)) < 0.01
+    )
 
-    if use_cached:
-        # Fast path: Use cached normalized tensor (avoids redundant percentile computation)
-        vmin, vmax = lic_percentiles
+    cached_percentiles: Tuple[float, float] | None = None
+    if percentiles_match_attr:
+        cached_percentiles = cached_percentiles_attr  # type: ignore[assignment]
+    elif lic_percentiles is not None:
+        # Caller-provided percentiles are assumed to match clip_percent (caller verifies this).
+        cached_percentiles = lic_percentiles
+
+    if cached_percentiles is not None:
+        vmin, vmax = cached_percentiles
         if vmax > vmin:
             normalized_tensor = torch.clamp((scalar_tensor - vmin) / (vmax - vmin), 0.0, 1.0)
         else:
             normalized_tensor = torch.zeros_like(scalar_tensor)
+        used_percentiles = (vmin, vmax)
     else:
-        # Slow path: Compute percentiles based on current clip_percent
-        normalized_tensor, _, _ = percentile_clip_gpu(scalar_tensor, clip_percent)
-        # Cache the clip_percent value used for this computation
-        scalar_tensor._lic_cached_clip_percent = clip_percent
+        # Slow path: compute fresh percentiles for this clip%.
+        normalized_tensor, vmin, vmax = percentile_clip_gpu(scalar_tensor, clip_percent)
+        used_percentiles = (vmin, vmax)
+
+    # Persist the latest clip% and percentile bounds directly on the tensor for future reuse.
+    scalar_tensor._lic_cached_clip_percent = float(clip_percent)
+    scalar_tensor._lic_cached_percentiles = used_percentiles
 
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None
@@ -150,7 +166,7 @@ def apply_full_postprocess_gpu(
             render_shape,
             canvas_resolution,
             lut_tensor,
-            lic_percentiles,
+            used_percentiles,
             conductor_color_settings,
             conductor_masks_gpu,  # Pass pre-uploaded GPU masks
             brightness,
@@ -158,7 +174,7 @@ def apply_full_postprocess_gpu(
             gamma,
         )
 
-    return torch.clamp(base_rgb, 0.0, 1.0)
+    return torch.clamp(base_rgb, 0.0, 1.0), used_percentiles
 
 
 def apply_full_postprocess_hybrid(
@@ -204,7 +220,9 @@ def apply_full_postprocess_hybrid(
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
 
     Returns:
-        Final RGB array (H, W, 3) uint8 on CPU
+        Tuple of:
+            - Final RGB array (H, W, 3) uint8 on CPU
+            - Tuple (vmin, vmax) percentiles used for normalization
     """
     if use_gpu and GPUContext.is_available():
         # GPU path with error handling
@@ -212,7 +230,7 @@ def apply_full_postprocess_hybrid(
             if scalar_tensor is None:
                 scalar_tensor = GPUContext.to_gpu(scalar_array)
 
-            rgb_tensor = apply_full_postprocess_gpu(
+            rgb_tensor, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor,
                 conductor_masks,
                 interior_masks,
@@ -240,7 +258,7 @@ def apply_full_postprocess_hybrid(
             elif torch.cuda.is_available():
                 torch.cuda.synchronize()
 
-            return GPUContext.to_cpu(rgb_uint8_tensor)
+            return GPUContext.to_cpu(rgb_uint8_tensor), used_percentiles
 
         except (RuntimeError, torch.cuda.OutOfMemoryError) as e:
             # GPU operation failed (OOM, unsupported op) - try CPU device
@@ -249,7 +267,7 @@ def apply_full_postprocess_hybrid(
             # Retry with CPU device (PyTorch operations work on CPU too!)
             scalar_tensor_cpu = scalar_tensor.to('cpu') if scalar_tensor.device.type != 'cpu' else scalar_tensor
 
-            rgb_tensor_cpu = apply_full_postprocess_gpu(
+            rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor_cpu,
                 conductor_masks,
                 interior_masks,
@@ -270,13 +288,13 @@ def apply_full_postprocess_hybrid(
 
             # Convert to uint8 and return (already on CPU)
             rgb_uint8_tensor = (rgb_tensor_cpu * 255.0).clamp(0, 255).to(torch.uint8)
-            return rgb_uint8_tensor.numpy()
+            return rgb_uint8_tensor.numpy(), used_percentiles
     else:
         # No GPU available - use CPU device with PyTorch
         # PyTorch operations work fine on CPU, often faster than NumPy!
         scalar_tensor_cpu = torch.from_numpy(scalar_array).to(dtype=torch.float32, device='cpu')
 
-        rgb_tensor_cpu = apply_full_postprocess_gpu(
+        rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
             scalar_tensor_cpu,
             conductor_masks,
             interior_masks,
@@ -295,7 +313,7 @@ def apply_full_postprocess_hybrid(
 
         # Convert to uint8 and return
         rgb_uint8_tensor = (rgb_tensor_cpu * 255.0).clamp(0, 255).to(torch.uint8)
-        return rgb_uint8_tensor.numpy()
+        return rgb_uint8_tensor.numpy(), used_percentiles
 
 
 __all__ = [

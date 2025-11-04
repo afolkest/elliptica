@@ -161,7 +161,16 @@ class TextureManager:
                 # DearPyGUI will scale it for display
                 from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
-                final_rgb = apply_full_postprocess_hybrid(
+                clip_percent = self.app.state.display_settings.clip_percent
+
+                # Only reuse cached percentiles if they were computed for the same clip%.
+                lic_percentiles = None
+                if cache.lic_percentiles is not None:
+                    cached_clip = cache.lic_percentiles_clip_percent
+                    if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
+                        lic_percentiles = cache.lic_percentiles
+
+                final_rgb, used_percentiles = apply_full_postprocess_hybrid(
                     scalar_array=cache.result.array,  # Full resolution!
                     conductor_masks=cache.conductor_masks,  # Full resolution!
                     interior_masks=cache.interior_masks,  # Full resolution!
@@ -169,18 +178,22 @@ class TextureManager:
                     conductors=self.app.state.project.conductors,
                     render_shape=cache.result.array.shape,  # Full resolution shape
                     canvas_resolution=self.app.state.project.canvas_resolution,
-                    clip_percent=self.app.state.display_settings.clip_percent,
+                    clip_percent=clip_percent,
                     brightness=self.app.state.display_settings.brightness,
                     contrast=self.app.state.display_settings.contrast,
                     gamma=self.app.state.display_settings.gamma,
                     color_enabled=self.app.state.display_settings.color_enabled,
                     palette=self.app.state.display_settings.palette,
-                    lic_percentiles=cache.lic_percentiles,
+                    lic_percentiles=lic_percentiles,
                     use_gpu=True,
                     scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
                     conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
                     interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
                 )
+
+                # Update cache so future refreshes reuse the correct clip percent bounds.
+                cache.lic_percentiles = used_percentiles
+                cache.lic_percentiles_clip_percent = clip_percent
 
                 # Fast path: convert RGB→RGBA directly (no PIL roundtrip!)
                 width, height, data = _rgb_array_to_texture_data(final_rgb)

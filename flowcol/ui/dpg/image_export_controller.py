@@ -225,14 +225,19 @@ class ImageExportController:
         # Compute percentiles for smear (if needed at export resolution)
         lic_percentiles = None
         if any(c.smear_enabled for c in project.conductors):
-            vmin = float(np.percentile(lic_array, 0.5))
-            vmax = float(np.percentile(lic_array, 99.5))
+            clip_percent = float(settings.clip_percent)
+            if clip_percent > 0.0:
+                vmin = float(np.percentile(lic_array, clip_percent))
+                vmax = float(np.percentile(lic_array, 100.0 - clip_percent))
+            else:
+                vmin = float(np.min(lic_array))
+                vmax = float(np.max(lic_array))
             lic_percentiles = (vmin, vmax)
 
         # Use unified GPU postprocessing pipeline (or CPU fallback)
         from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
 
-        final_rgb = apply_full_postprocess_hybrid(
+        final_rgb, _ = apply_full_postprocess_hybrid(
             scalar_array=lic_array,
             conductor_masks=conductor_masks,
             interior_masks=interior_masks,

@@ -192,6 +192,7 @@ class CacheManagementPanel:
                 vmin = float(np.percentile(cache.result.array, 0.5))
                 vmax = float(np.percentile(cache.result.array, 99.5))
                 cache.lic_percentiles = (vmin, vmax)
+                cache.lic_percentiles_clip_percent = 0.5
 
             # Upload to GPU for fast postprocessing (if available)
             try:

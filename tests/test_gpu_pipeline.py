@@ -47,7 +47,7 @@ def test_hybrid_cpu_fallback():
 
     # Run hybrid pipeline (will use GPU if available, CPU otherwise)
     try:
-        final_rgb = apply_full_postprocess_hybrid(
+        final_rgb, used_percentiles = apply_full_postprocess_hybrid(
             scalar_array=lic_array,
             conductor_masks=None,
             interior_masks=None,
@@ -69,6 +69,7 @@ def test_hybrid_cpu_fallback():
         assert final_rgb.shape == (100, 100, 3), f"Expected (100, 100, 3), got {final_rgb.shape}"
         assert final_rgb.dtype == np.uint8, f"Expected uint8, got {final_rgb.dtype}"
         assert np.all(final_rgb >= 0) and np.all(final_rgb <= 255), "RGB values out of range"
+        assert isinstance(used_percentiles, tuple) and len(used_percentiles) == 2, "Expected percentile tuple"
 
         print("✓ Hybrid pipeline works (GPU or CPU fallback)")
         return True
