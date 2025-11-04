@@ -59,20 +59,27 @@ def apply_full_postprocess_gpu(
     Returns:
         Final RGB tensor (H, W, 3) in [0, 1] on GPU
     """
-    # OPTIMIZATION: Use pre-cached percentiles if available, otherwise compute
-    # Pre-cached percentiles from render save 6+ seconds!
+    # OPTIMIZATION: Use cached percentiles if they match current clip_percent, otherwise recompute
+    # Recomputing percentiles is slow (0.1s @ 1k, 0.5s @ 2k, 6s @ 7k) but necessary when clip% changes
     from flowcol.gpu.ops import percentile_clip_gpu
 
-    if lic_percentiles is not None:
-        # Use pre-cached percentiles (fast path!)
+    # Check if cached percentiles are valid for current clip_percent (within 0.01% tolerance)
+    use_cached = (lic_percentiles is not None and
+                  hasattr(scalar_tensor, '_lic_cached_clip_percent') and
+                  abs(getattr(scalar_tensor, '_lic_cached_clip_percent', -1.0) - clip_percent) < 0.01)
+
+    if use_cached:
+        # Fast path: Use cached normalized tensor (avoids redundant percentile computation)
         vmin, vmax = lic_percentiles
         if vmax > vmin:
             normalized_tensor = torch.clamp((scalar_tensor - vmin) / (vmax - vmin), 0.0, 1.0)
         else:
             normalized_tensor = torch.zeros_like(scalar_tensor)
     else:
-        # Compute percentiles on-demand (slow path, 6+ seconds for 7k)
+        # Slow path: Compute percentiles based on current clip_percent
         normalized_tensor, _, _ = percentile_clip_gpu(scalar_tensor, clip_percent)
+        # Cache the clip_percent value used for this computation
+        scalar_tensor._lic_cached_clip_percent = clip_percent
 
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None

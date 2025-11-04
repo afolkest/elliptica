@@ -408,6 +408,7 @@ class FlowColApp:
                 self.canvas_controller.process_canvas_mouse()
                 self.canvas_controller.process_keyboard_shortcuts()
                 self.render_orchestrator.poll()
+                self.postprocess_panel.check_clip_debounce()  # Handle debounced clip% updates
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
                 if self.canvas_renderer.canvas_dirty:
                     self.canvas_renderer.draw()

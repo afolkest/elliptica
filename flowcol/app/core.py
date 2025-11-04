@@ -133,6 +133,7 @@ class RenderCache:
         self.ey_gpu = ey_gpu  # Electric field Y component on GPU
 
         self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
+        self.lic_percentiles_clip_percent: float | None = 0.5 if lic_percentiles is not None else None  # Clip% used for cached percentiles
 
         # GPU mask tensors (cached to avoid repeated CPU→GPU transfers)
         self.conductor_masks_gpu = conductor_masks_gpu
