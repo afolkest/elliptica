@@ -152,20 +152,28 @@ def apply_conductor_smear_gpu(
             else:
                 norm = torch.zeros_like(lic_blur)
 
-        # Apply brightness/contrast/gamma adjustments (matches overlay behavior)
-        # This ensures smear colors match region overlay colors when using the same palette
-        adjusted = apply_contrast_gamma_gpu(norm, brightness, contrast, gamma)
-
+        # Resolve per-region brightness/contrast (matches overlay behavior)
         # Check if this conductor has custom color settings
         has_custom_settings = (
             conductor_color_settings is not None
             and conductor.id in conductor_color_settings
         )
 
+        # Use per-region brightness/contrast if available, otherwise use global values
         if has_custom_settings:
-            # Get custom settings for this conductor
             settings = conductor_color_settings[conductor.id]
+            # Surface settings control smear appearance (smear affects conductor body)
+            region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
+            region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
+        else:
+            region_brightness = brightness
+            region_contrast = contrast
 
+        # Apply brightness/contrast/gamma adjustments (using per-region values!)
+        # This ensures smear colors match region overlay colors when using the same palette
+        adjusted = apply_contrast_gamma_gpu(norm, region_brightness, region_contrast, gamma)
+
+        if has_custom_settings:
             # Use surface settings for smear (surface is the conductor body)
             if settings.surface.enabled:
                 if settings.surface.use_palette:
