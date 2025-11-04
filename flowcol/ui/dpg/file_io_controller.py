@@ -474,8 +474,12 @@ class FileIOController:
                 dpg.set_value(panel.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
             if panel.postprocess_gamma_slider_id is not None:
                 dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
-            if panel.color_enabled_checkbox_id is not None:
-                dpg.set_value(panel.color_enabled_checkbox_id, self.app.state.display_settings.color_enabled)
+
+            # Sync global palette UI text
+            palette_text = (self.app.state.display_settings.palette
+                          if self.app.state.display_settings.color_enabled
+                          else "Grayscale")
+            dpg.set_value("global_palette_current_text", f"Current: {palette_text}")
 
     def auto_save_cache(self) -> None:
         """Auto-save render cache to disk (called after successful render)."""
