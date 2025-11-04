@@ -54,6 +54,11 @@ class PostprocessingPanel:
         self.smear_last_update_time: float = 0.0
         self.smear_debounce_delay: float = 0.3  # 300ms delay
 
+        # Debouncing for expensive clip% updates (percentile computation at high res)
+        self.clip_pending_value: Optional[float] = None
+        self.clip_last_update_time: float = 0.0
+        self.clip_debounce_delay: float = 0.3  # 300ms delay
+
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
 
@@ -445,17 +450,18 @@ class PostprocessingPanel:
         self.app.display_pipeline.invalidate_and_refresh()
 
     def on_clip_slider(self, sender=None, app_data=None) -> None:
-        """Handle clip percent slider change."""
+        """Handle clip percent slider change with debouncing (percentile computation is expensive at high res)."""
         if dpg is None:
             return
 
         value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_percent = value
-            self.app.state.invalidate_base_rgb()
 
-        # Clip is display-only, just refresh texture
-        self.app.display_pipeline.refresh_display()
+        # Update pending value
+        self.clip_pending_value = value
+
+        # Record the time of THIS slider change (not the last render)
+        # This ensures we wait 300ms after the LAST slider movement
+        self.clip_last_update_time = time.time()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
         """Handle brightness slider change (real-time with GPU acceleration)."""
@@ -873,6 +879,13 @@ class PostprocessingPanel:
         # This ensures we wait 300ms after the LAST slider movement
         self.smear_last_update_time = time.time()
 
+    def _apply_clip_update(self, value: float) -> None:
+        """Apply clip percent update immediately."""
+        with self.app.state_lock:
+            self.app.state.display_settings.clip_percent = value
+            self.app.state.invalidate_base_rgb()
+        self.app.display_pipeline.refresh_display()
+
     def _apply_smear_update(self) -> None:
         """Apply pending smear update (called after debounce delay)."""
         if self.smear_pending_value is None:
@@ -880,6 +893,18 @@ class PostprocessingPanel:
 
         self.smear_pending_value = None
         self.app.display_pipeline.refresh_display()
+
+    def check_clip_debounce(self) -> None:
+        """Check if clip update should be applied (called every frame)."""
+        if self.clip_pending_value is None:
+            return
+
+        current_time = time.time()
+        # Only apply if enough time has passed since the last slider movement
+        if current_time - self.clip_last_update_time >= self.clip_debounce_delay:
+            self._apply_clip_update(self.clip_pending_value)
+            self.clip_last_update_time = current_time
+            self.clip_pending_value = None
 
     def check_smear_debounce(self) -> None:
         """Check if smear update should be applied (called every frame)."""
