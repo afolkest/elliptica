@@ -100,6 +100,7 @@ class FlowColApp:
     canvas_id: Optional[int] = None
     canvas_layer_id: Optional[int] = None
     canvas_window_id: Optional[int] = None
+    canvas_window_theme_id: Optional[int] = None
     display_scale: float = 1.0
     viewport_created: bool = False
     edit_controls_id: Optional[int] = None
@@ -239,8 +240,16 @@ class FlowColApp:
         # Canvas window with initial size (will be resized after viewport is shown)
         # Setting width/height prevents auto-expansion to fit drawlist
         # no_scrollbar and no_scroll_with_mouse prevent scrolling behavior
+        if self.canvas_window_theme_id is None:
+            with dpg.theme() as canvas_theme:
+                with dpg.theme_component(dpg.mvWindowAppItem):
+                    dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0.0, 0.0)
+                    dpg.add_theme_style(dpg.mvStyleVar_WindowBorderSize, 0.0)
+                    dpg.add_theme_style(dpg.mvStyleVar_WindowRounding, 0.0)
+            self.canvas_window_theme_id = canvas_theme
+
         with dpg.window(label="Canvas", pos=(380, 10), width=880, height=800, tag="canvas_window",
-                       no_scrollbar=True, no_scroll_with_mouse=True) as canvas_window:
+                       no_scrollbar=True, no_scroll_with_mouse=True, no_title_bar=True) as canvas_window:
             self.canvas_window_id = canvas_window
             canvas_w, canvas_h = self.state.project.canvas_resolution
             with dpg.drawlist(width=canvas_w, height=canvas_h) as canvas:
@@ -248,6 +257,9 @@ class FlowColApp:
                 # Create a draw_node for applying scale transforms
                 with dpg.draw_node() as node:
                     self.canvas_layer_id = node
+
+        if self.canvas_window_theme_id is not None and self.canvas_window_id is not None:
+            dpg.bind_item_theme(self.canvas_window_id, self.canvas_window_theme_id)
 
         self.display_pipeline.texture_manager.refresh_render_texture()
         self._update_control_visibility()
