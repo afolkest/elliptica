@@ -75,6 +75,9 @@ class PaletteExplorer:
         self.gamma = self.state.display_settings.gamma
         self.saturation = 1.0  # Saturation multiplier (1.0 = no change)
 
+        # Pre-allocated RGBA buffer for texture updates (avoids reallocations)
+        self._rgba_buffer: Optional[np.ndarray] = None
+
         # DPG resources
         self.texture_id: Optional[int] = None
         self.texture_registry_id: Optional[int] = None
@@ -83,12 +86,11 @@ class PaletteExplorer:
         self.palette_popup_id: Optional[int] = None
 
         # Custom gradient state
-        self.gradient_stops: list[dict] = []
+        self.gradient_stops: list[dict] = []  # Single source of truth: [{id, pos, color}]
         self._next_stop_id: int = 0
         self.selected_stop_id: Optional[int] = None
-        self.dragging_stop_id: Optional[int] = None
+        self.is_dragging: bool = False  # Simple boolean flag
         self.use_custom_gradient: bool = False
-        self.custom_gradient_lut: Optional[np.ndarray] = None
 
         # Gradient UI resources
         self.gradient_texture_id: Optional[int] = None
@@ -108,7 +110,6 @@ class PaletteExplorer:
         self.gradient_bar_top = 40
         self.gradient_bar_bottom = 80
         self.gradient_handle_radius = 9
-        self._handle_positions: dict[int, tuple[float, float]] = {}
 
         # Gradient persistence & limits
         self.gradient_metadata_path = USER_PALETTES_PATH.with_name("palettes_gradients.json")
@@ -210,8 +211,8 @@ class PaletteExplorer:
             RGB array (H, W, 3) uint8
         """
         # Use custom gradient if enabled, otherwise fall back to library palette
-        if self.use_custom_gradient and self.custom_gradient_lut is not None:
-            lut_numpy = self.custom_gradient_lut
+        if self.use_custom_gradient:
+            lut_numpy = self._build_gradient_lut()
         else:
             lut_numpy = _get_palette_lut(self.current_palette)
 
@@ -337,83 +338,45 @@ class PaletteExplorer:
         self._persist_gradient_metadata()
 
     def _sanitize_stops(self, stops_input: list) -> list[dict]:
-        """Normalize list of stops to sorted structure with clamped values."""
-        cleaned: list[dict] = []
-        for stop in stops_input or []:
-            if isinstance(stop, dict):
-                pos = stop.get("pos")
-                color = stop.get("color")
-            elif isinstance(stop, (list, tuple)) and len(stop) >= 4:
-                pos = stop[0]
-                color = stop[1:4]
-            else:
-                continue
-
-            if pos is None or color is None:
-                continue
-
-            try:
-                pos_f = float(pos)
-            except (TypeError, ValueError):
-                continue
-
-            try:
-                color_vals = np.array(color[:3], dtype=np.float32)
-            except (TypeError, ValueError):
-                continue
-
-            if np.isnan(color_vals).any():
-                continue
-
-            if float(np.max(color_vals)) > 1.0 + 1e-3:
-                color_vals = color_vals / 255.0
-
-            color_vals = np.clip(color_vals, 0.0, 1.0)
-            cleaned.append({"pos": pos_f, "color": color_vals.tolist()})
-
-        if not cleaned:
+        """Normalize and sort gradient stops."""
+        if not stops_input:
             return [
                 {"pos": 0.0, "color": [0.0, 0.0, 0.0]},
                 {"pos": 1.0, "color": [1.0, 1.0, 1.0]},
             ]
 
-        cleaned.sort(key=lambda s: s["pos"])
-
-        merged: list[dict] = []
-        for stop in cleaned:
-            pos = float(np.clip(stop["pos"], 0.0, 1.0))
-            color = [float(c) for c in stop["color"]]
-            if merged and abs(pos - merged[-1]["pos"]) < self.gradient_min_spacing * 0.5:
-                merged[-1] = {"pos": pos, "color": color}
-            else:
-                merged.append({"pos": pos, "color": color})
-
-        if len(merged) == 1:
-            merged.append({"pos": 1.0, "color": merged[0]["color"][:]})
-            merged[0]["pos"] = 0.0
-
-        if merged[0]["pos"] > self.gradient_min_spacing:
-            merged.insert(0, {"pos": 0.0, "color": merged[0]["color"][:]})
-        else:
-            merged[0]["pos"] = 0.0
-
-        if merged[-1]["pos"] < 1.0 - self.gradient_min_spacing:
-            merged.append({"pos": 1.0, "color": merged[-1]["color"][:]})
-        else:
-            merged[-1]["pos"] = 1.0
-
-        result: list[dict] = []
-        for stop in merged:
-            if (
-                result
-                and abs(stop["pos"] - result[-1]["pos"]) < self.gradient_min_spacing
-                and np.allclose(stop["color"], result[-1]["color"], atol=1e-3)
-            ):
-                result[-1]["pos"] = stop["pos"]
+        # Parse and clamp all stops
+        stops = []
+        for raw in stops_input:
+            if not isinstance(raw, dict):
                 continue
-            result.append({"pos": stop["pos"], "color": stop["color"][:]})
+            pos = np.clip(float(raw.get("pos", 0.0)), 0.0, 1.0)
+            color = np.array(raw.get("color", [0, 0, 0])[:3], dtype=np.float32)
+            if np.max(color) > 1.0 + 1e-3:
+                color = color / 255.0
+            color = np.clip(color, 0.0, 1.0).tolist()
+            stops.append({"pos": pos, "color": color})
 
-        return result
+        if not stops:
+            return [
+                {"pos": 0.0, "color": [0.0, 0.0, 0.0]},
+                {"pos": 1.0, "color": [1.0, 1.0, 1.0]},
+            ]
+
+        stops.sort(key=lambda s: s["pos"])
+
+        # Ensure endpoints at 0.0 and 1.0
+        if stops[0]["pos"] > 1e-6:
+            stops.insert(0, {"pos": 0.0, "color": stops[0]["color"]})
+        else:
+            stops[0]["pos"] = 0.0
+
+        if stops[-1]["pos"] < 1.0 - 1e-6:
+            stops.append({"pos": 1.0, "color": stops[-1]["color"]})
+        else:
+            stops[-1]["pos"] = 1.0
+
+        return stops
 
     def _stops_from_palette_colors(self, colors: np.ndarray) -> list[dict]:
         """Derive a manageable stop list from a palette color array."""
@@ -481,8 +444,7 @@ class PaletteExplorer:
 
         self._sort_gradient_stops()
         self.selected_stop_id = self.gradient_stops[0]["id"] if self.gradient_stops else None
-        self.dragging_stop_id = None
-        self.custom_gradient_lut = self._build_gradient_lut()
+        self.is_dragging = False
 
     def _sort_gradient_stops(self) -> None:
         """Ensure gradient stops are ordered by position."""
@@ -526,10 +488,7 @@ class PaletteExplorer:
 
     def _ensure_gradient_texture(self) -> None:
         """Create or update gradient preview texture."""
-        if self.texture_registry_id is None:
-            return
-
-        lut = self.custom_gradient_lut if self.custom_gradient_lut is not None else self._build_gradient_lut()
+        lut = self._build_gradient_lut()
         width = lut.shape[0]
         height = 4
         gradient = np.tile(lut[np.newaxis, :, :], (height, 1, 1))
@@ -546,9 +505,6 @@ class PaletteExplorer:
 
     def _update_gradient_drawlist(self) -> None:
         """Redraw gradient preview and handles."""
-        if self.gradient_drawlist_id is None or not dpg.does_item_exist(self.gradient_drawlist_id):
-            return
-
         self._ensure_gradient_texture()
         dpg.delete_item(self.gradient_drawlist_id, children_only=True)
 
@@ -558,13 +514,12 @@ class PaletteExplorer:
         bar_bottom = self.gradient_bar_bottom
 
         # Draw gradient bar
-        if self.gradient_texture_id is not None:
-            dpg.draw_image(
-                self.gradient_texture_id,
-                (bar_left, bar_top),
-                (bar_right, bar_bottom),
-                parent=self.gradient_drawlist_id,
-            )
+        dpg.draw_image(
+            self.gradient_texture_id,
+            (bar_left, bar_top),
+            (bar_right, bar_bottom),
+            parent=self.gradient_drawlist_id,
+        )
         dpg.draw_rectangle(
             (bar_left, bar_top),
             (bar_right, bar_bottom),
@@ -576,9 +531,8 @@ class PaletteExplorer:
         # Draw handles
         handle_base = bar_bottom + 4
         handle_height = 16
-        self._handle_positions = {}
 
-        for idx, stop in enumerate(self.gradient_stops):
+        for stop in self.gradient_stops:
             x = self._stop_to_x(stop["pos"])
             color = tuple(int(c * 255) for c in stop["color"])
             fill = (*color, 255)
@@ -600,27 +554,16 @@ class PaletteExplorer:
                 parent=self.gradient_drawlist_id,
             )
 
-            # reference for hit testing
-            self._handle_positions[stop["id"]] = (x, handle_base + handle_height / 2.0)
-
     def _select_stop_by_index(self, index: Optional[int]) -> None:
+        """Select stop by index (does not update UI)."""
         if index is None or not (0 <= index < len(self.gradient_stops)):
             self.selected_stop_id = None
         else:
             self.selected_stop_id = self.gradient_stops[index]["id"]
-        self._update_gradient_selection_ui()
 
     def _select_stop_by_id(self, stop_id: Optional[int]) -> None:
-        if stop_id is None:
-            self.selected_stop_id = None
-        else:
-            for idx, stop in enumerate(self.gradient_stops):
-                if stop["id"] == stop_id:
-                    self.selected_stop_id = stop_id
-                    break
-            else:
-                self.selected_stop_id = None
-        self._update_gradient_selection_ui()
+        """Select stop by ID (does not update UI)."""
+        self.selected_stop_id = stop_id
 
     def _get_stop_index(self, stop_id: int) -> Optional[int]:
         for idx, stop in enumerate(self.gradient_stops):
@@ -628,73 +571,42 @@ class PaletteExplorer:
                 return idx
         return None
 
-    def _update_gradient_selection_ui(self) -> None:
-        """Sync UI widgets with current selection."""
-        if self.gradient_color_picker_id is None or not dpg.does_item_exist(self.gradient_color_picker_id):
-            return
+    def _update_ui_from_selection(self) -> None:
+        """Update all UI widgets to reflect current selection state.
 
-        has_selection = self.selected_stop_id is not None
+        IMPORTANT: Only call this from code paths that won't create circular callbacks.
+        Never call from within widget callbacks that modify data.
+        """
+        idx = self._get_stop_index(self.selected_stop_id) if self.selected_stop_id is not None else None
+        has_selection = idx is not None
+
+        # Enable/disable widgets
         dpg.configure_item(self.gradient_color_picker_id, enabled=has_selection)
-        if self.gradient_position_slider_id is not None and dpg.does_item_exist(self.gradient_position_slider_id):
-            dpg.configure_item(self.gradient_position_slider_id, enabled=has_selection)
-        if self.gradient_selected_text_id is not None and dpg.does_item_exist(self.gradient_selected_text_id):
+        dpg.configure_item(self.gradient_position_slider_id, enabled=has_selection)
+
+        if has_selection:
+            stop = self.gradient_stops[idx]
+            dpg.set_value(self.gradient_color_picker_id, [*stop["color"], 1.0])
+            dpg.set_value(self.gradient_position_slider_id, stop["pos"])
+            dpg.set_value(self.gradient_selected_text_id,
+                         f"Stop {idx + 1}/{len(self.gradient_stops)} @ {stop['pos']:.3f}")
+        else:
             dpg.set_value(self.gradient_selected_text_id, "No stop selected")
 
-        if not has_selection:
-            if self.gradient_selected_text_id is not None and dpg.does_item_exist(self.gradient_selected_text_id):
-                dpg.set_value(self.gradient_selected_text_id, "No stop selected")
-            return
+    def _clamp_stop_position(self, idx: int, position: float) -> float:
+        """Clamp position to stay between neighboring stops."""
+        min_pos = self.gradient_stops[idx - 1]["pos"] + self.gradient_min_spacing if idx > 0 else 0.0
+        max_pos = self.gradient_stops[idx + 1]["pos"] - self.gradient_min_spacing if idx < len(self.gradient_stops) - 1 else 1.0
+        return float(np.clip(position, min_pos, max_pos))
 
-        idx = self._get_stop_index(self.selected_stop_id)
-        if idx is None:
-            if self.gradient_selected_text_id is not None and dpg.does_item_exist(self.gradient_selected_text_id):
-                dpg.set_value(self.gradient_selected_text_id, "No stop selected")
-            return
-
-        stop = self.gradient_stops[idx]
-        color = [float(stop["color"][0]), float(stop["color"][1]), float(stop["color"][2]), 1.0]
-        dpg.set_value(self.gradient_color_picker_id, color)
-        if self.gradient_position_slider_id is not None and dpg.does_item_exist(self.gradient_position_slider_id):
-            dpg.set_value(self.gradient_position_slider_id, stop["pos"])
-        if self.gradient_selected_text_id is not None and dpg.does_item_exist(self.gradient_selected_text_id):
-            dpg.set_value(
-                self.gradient_selected_text_id,
-                f"Stop {idx + 1}/{len(self.gradient_stops)} @ {stop['pos']:.3f}",
-            )
-
-    def _set_stop_position(self, stop_id: int, position: float, apply: bool = True) -> None:
-        idx = self._get_stop_index(stop_id)
-        if idx is None:
-            return
-
-        min_pos = 0.0
-        max_pos = 1.0
-        padding = self.gradient_min_spacing
-        if idx > 0:
-            min_pos = self.gradient_stops[idx - 1]["pos"] + padding
-        if idx < len(self.gradient_stops) - 1:
-            max_pos = self.gradient_stops[idx + 1]["pos"] - padding
-        if max_pos < min_pos:
-            midpoint = (min_pos + max_pos) * 0.5
-            min_pos = midpoint
-            max_pos = midpoint
-
-        clamped = np.clip(position, min_pos, max_pos)
-        self.gradient_stops[idx]["pos"] = float(clamped)
-        self._sort_gradient_stops()
-        self._select_stop_by_id(stop_id)
-        if apply:
-            self._apply_gradient_change()
-
-    def _apply_gradient_change(self, refresh_view: bool = True) -> None:
-        self.custom_gradient_lut = self._build_gradient_lut()
-        if refresh_view and self.gradient_drawlist_id is not None and dpg.does_item_exist(self.gradient_drawlist_id):
-            self._update_gradient_drawlist()
-            self._update_gradient_selection_ui()
+    def _refresh_gradient_display(self) -> None:
+        """Full refresh: rebuild LUT, redraw handles, update main texture."""
+        self._update_gradient_drawlist()
         if self.use_custom_gradient:
             self._update_texture()
 
     def _add_gradient_stop(self, position: float, color: Optional[list[float]] = None) -> int:
+        """Add a new gradient stop at the given position."""
         if color is None:
             color = self._sample_gradient_color(position)
 
@@ -707,10 +619,12 @@ class PaletteExplorer:
         self.gradient_stops.append(stop)
         self._sort_gradient_stops()
         self._select_stop_by_id(stop["id"])
-        self._apply_gradient_change()
+        self._refresh_gradient_display()
+        self._update_ui_from_selection()
         return stop["id"]
 
     def _remove_stop(self, stop_id: int) -> None:
+        """Remove a gradient stop (minimum 2 stops required)."""
         if len(self.gradient_stops) <= 2:
             print("ℹ At least two stops required.")
             return
@@ -724,7 +638,8 @@ class PaletteExplorer:
             self._select_stop_by_index(min(idx, len(self.gradient_stops) - 1))
         else:
             self.selected_stop_id = None
-        self._apply_gradient_change()
+        self._refresh_gradient_display()
+        self._update_ui_from_selection()
 
     def _hit_test_handle(self, local_x: float, local_y: float) -> Optional[int]:
         handle_base = self.gradient_bar_bottom + 4
@@ -752,6 +667,7 @@ class PaletteExplorer:
     # ------------------------------------------------------------------
 
     def _on_gradient_mouse_down(self, sender, app_data) -> None:
+        """Handle mouse down: start drag or add new stop."""
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         coords = self._gradient_local_coords(mouse_x, mouse_y)
         if coords is None:
@@ -759,38 +675,60 @@ class PaletteExplorer:
 
         local_x, local_y = coords
         handle_index = self._hit_test_handle(local_x, local_y)
-        if handle_index is not None:
-            stop_id = self.gradient_stops[handle_index]["id"]
-            self.dragging_stop_id = stop_id
-            self._select_stop_by_id(stop_id)
-            return
 
-        # Add new stop when clicking inside gradient bar
-        if self.gradient_bar_top <= local_y <= self.gradient_bar_bottom:
+        if handle_index is not None:
+            # Start dragging existing stop
+            stop_id = self.gradient_stops[handle_index]["id"]
+            self.is_dragging = True
+            self._select_stop_by_id(stop_id)
+            self._update_ui_from_selection()
+        elif self.gradient_bar_top <= local_y <= self.gradient_bar_bottom:
+            # Add new stop when clicking inside gradient bar
             position = self._x_to_position(local_x)
             color = self._sample_gradient_color(position)
             stop_id = self._add_gradient_stop(position, color=color)
-            self.dragging_stop_id = stop_id
+            self.is_dragging = True
 
     def _on_gradient_mouse_drag(self, sender, app_data) -> None:
-        if self.dragging_stop_id is None:
+        """Handle mouse drag: update stop position and texture only (no handle redraw)."""
+        if not self.is_dragging or self.selected_stop_id is None:
             return
+
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         coords = self._gradient_local_coords(mouse_x, mouse_y)
         if coords is None:
             return
+
         local_x, _ = coords
         position = self._x_to_position(local_x)
-        self._set_stop_position(self.dragging_stop_id, position)
+
+        # Update position directly (no sort yet)
+        idx = self._get_stop_index(self.selected_stop_id)
+        if idx is not None:
+            self.gradient_stops[idx]["pos"] = self._clamp_stop_position(idx, position)
+
+            # Update main texture only if custom gradient is active
+            if self.use_custom_gradient:
+                self._update_texture()
 
     def _on_gradient_mouse_release(self, sender, app_data) -> None:
-        self.dragging_stop_id = None
+        """Handle mouse release: sort stops and do full refresh."""
+        if self.is_dragging:
+            self.is_dragging = False
+            self._sort_gradient_stops()
+            self._refresh_gradient_display()
+            self._update_ui_from_selection()
 
     def _on_gradient_mouse_double_click(self, sender, app_data) -> None:
+        """Handle double-click: delete stop."""
+        if self.is_dragging:
+            return  # Ignore during drag
+
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         coords = self._gradient_local_coords(mouse_x, mouse_y)
         if coords is None:
             return
+
         local_x, local_y = coords
         handle_index = self._hit_test_handle(local_x, local_y)
         if handle_index is not None:
@@ -798,45 +736,68 @@ class PaletteExplorer:
             self._remove_stop(stop_id)
 
     def _on_gradient_color_change(self, sender, app_data) -> None:
+        """Handle color picker change: update stop color and refresh display.
+
+        IMPORTANT: Does not call dpg.set_value() on color picker to avoid feedback loop.
+        """
         if self.selected_stop_id is None:
             return
         idx = self._get_stop_index(self.selected_stop_id)
         if idx is None:
             return
-        # Dear PyGui can emit either [0,1] floats or [0,255] ints depending on configuration.
+
+        # Handle both [0,1] and [0,255] formats
         if max(app_data[:3]) <= 1.0 + 1e-6:
             rgb = [float(app_data[i]) for i in range(3)]
         else:
             rgb = [float(app_data[i]) / 255.0 for i in range(3)]
+
         self.gradient_stops[idx]["color"] = rgb
-        self._apply_gradient_change()
+        self._refresh_gradient_display()
 
     def _on_gradient_position_change(self, sender, app_data) -> None:
+        """Handle position slider change: update stop position and refresh display.
+
+        IMPORTANT: Does not call dpg.set_value() on position slider to avoid feedback loop.
+        """
         if self.selected_stop_id is None:
             return
-        self._set_stop_position(self.selected_stop_id, float(app_data))
+        idx = self._get_stop_index(self.selected_stop_id)
+        if idx is None:
+            return
+
+        position = float(app_data)
+        self.gradient_stops[idx]["pos"] = self._clamp_stop_position(idx, position)
+        self._sort_gradient_stops()
+        self._refresh_gradient_display()
+        # Update UI to reflect new position after sorting (may have changed index)
+        self._update_ui_from_selection()
 
     def _on_use_gradient_toggle(self, sender, app_data) -> None:
+        """Handle custom gradient checkbox toggle."""
         self.use_custom_gradient = bool(app_data)
         if self.use_custom_gradient:
-            self._apply_gradient_change()
             dpg.set_value("current_palette_text", "Palette: Custom Gradient")
         else:
             dpg.set_value("current_palette_text", f"Palette: {self.current_palette}")
-            self._update_texture()
+        self._update_texture()
 
     def _on_load_palette_into_gradient(self) -> None:
+        """Load current library palette into gradient editor."""
         self._init_gradient_from_palette(self.current_palette)
-        self._apply_gradient_change()
+        self._refresh_gradient_display()
+        self._update_ui_from_selection()
         print(f"✓ Loaded '{self.current_palette}' into gradient editor")
 
     def _on_delete_selected_stop(self) -> None:
+        """Delete the currently selected stop."""
         if self.selected_stop_id is None:
             print("ℹ Select a stop to delete.")
             return
         self._remove_stop(self.selected_stop_id)
 
     def _on_add_midpoint_stop(self) -> None:
+        """Add a new stop at position 0.5."""
         self._add_gradient_stop(0.5)
 
     def _on_save_gradient(self) -> None:
@@ -875,9 +836,15 @@ class PaletteExplorer:
     def _update_texture(self) -> None:
         """Recompute RGB and update DPG texture."""
         rgb_uint8 = self._apply_palette()
-        pil_img = Image.fromarray(rgb_uint8, mode='RGB')
 
-        width, height, data = self._image_to_texture_data(pil_img)
+        # Convert directly to RGBA float32 without PIL overhead
+        height, width = rgb_uint8.shape[:2]
+        if self._rgba_buffer is None or self._rgba_buffer.shape[:2] != (height, width):
+            self._rgba_buffer = np.empty((height, width, 4), dtype=np.float32)
+
+        self._rgba_buffer[:, :, :3] = rgb_uint8.astype(np.float32) / 255.0
+        self._rgba_buffer[:, :, 3] = 1.0
+        data = self._rgba_buffer.ravel()
 
         # Create or update texture
         if self.texture_id is None:
@@ -891,15 +858,12 @@ class PaletteExplorer:
         """Callback when palette selection changes."""
         self.current_palette = user_data
         self.use_custom_gradient = False
-        if self.use_gradient_checkbox_id is not None:
-            dpg.set_value(self.use_gradient_checkbox_id, False)
+        dpg.set_value(self.use_gradient_checkbox_id, False)
         self._init_gradient_from_palette(self.current_palette)
-        self._apply_gradient_change()
-        self._update_texture()
+        self._refresh_gradient_display()
+        self._update_ui_from_selection()
         dpg.set_value("current_palette_text", f"Palette: {self.current_palette}")
-        # Close popup
-        if self.palette_popup_id is not None:
-            dpg.configure_item(self.palette_popup_id, show=False)
+        dpg.configure_item(self.palette_popup_id, show=False)
 
     def _on_brightness_change(self, sender, app_data) -> None:
         """Callback when brightness slider changes."""
@@ -937,12 +901,10 @@ class PaletteExplorer:
 
         # Reset custom gradient toggle and update editor with new palette
         self.use_custom_gradient = False
-        if self.use_gradient_checkbox_id is not None:
-            dpg.set_value(self.use_gradient_checkbox_id, False)
+        dpg.set_value(self.use_gradient_checkbox_id, False)
         self._init_gradient_from_palette(self.current_palette)
-        self._apply_gradient_change()
-
-        self._update_texture()
+        self._refresh_gradient_display()
+        self._update_ui_from_selection()
         dpg.set_value("current_palette_text", f"Palette: {self.current_palette}")
 
     def _on_save_palette(self) -> None:
@@ -1206,7 +1168,7 @@ class PaletteExplorer:
 
         # Finalize gradient UI state
         self._update_gradient_drawlist()
-        self._update_gradient_selection_ui()
+        self._update_ui_from_selection()
 
     def run(self) -> None:
         """Launch the palette explorer."""
