@@ -1,4 +1,5 @@
 -add more noise types
+-if you delete characters in save menu it will also delete conductors......
 -make it easier to see what mask is chosen in postprocess mode
 -use gpu in edit mode for smoother experience
 -add zoom 

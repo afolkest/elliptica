@@ -286,11 +286,20 @@ class CanvasController:
         if dpg is None or BACKSPACE_KEY is None:
             return
 
+        # Don't process keyboard shortcuts when file dialogs are open
+        if self.is_file_dialog_showing():
+            self.backspace_down_last = False
+            self.ctrl_c_down_last = False
+            self.ctrl_v_down_last = False
+            return
+
         # Only process shortcuts when mouse is over canvas (not over UI controls)
         # This prevents keyboard shortcuts from firing while typing in input fields
         over_canvas = self.is_mouse_over_canvas()
         if not over_canvas:
             self.backspace_down_last = False
+            self.ctrl_c_down_last = False
+            self.ctrl_v_down_last = False
             return
 
         # Backspace to delete
