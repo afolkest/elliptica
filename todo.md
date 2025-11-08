@@ -6,3 +6,9 @@
 -make it easier to see what voltage is use - color by voltage in edit mode
 -add better smear 
 -add custom postprocessing for the different regions
+
+
+Undermind colors:
+
+Dark blue: 41, 41, 148
+Light blue: 71, 71, 198
