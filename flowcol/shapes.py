@@ -27,17 +27,18 @@ class ShapeSpec:
     generator: Callable[..., tuple[np.ndarray, np.ndarray | None]]
 
 
-def make_disk(size: int, radius: float) -> tuple[np.ndarray, np.ndarray | None]:
+def make_disk(radius: float) -> tuple[np.ndarray, np.ndarray | None]:
     """Create a solid disk (filled circle).
 
     Args:
-        size: Array size (width and height)
         radius: Disk radius in pixels
 
     Returns:
         (surface_mask, interior_mask) - interior is None for solid disk
     """
-    h = w = int(size)
+    # Bounding box fits the radius with 1px padding
+    size = int(2 * radius) + 3
+    h = w = size
     y, x = np.ogrid[:h, :w]
     cy = cx = (size - 1) / 2.0
     mask = ((x - cx) ** 2 + (y - cy) ** 2) <= radius**2
@@ -45,18 +46,19 @@ def make_disk(size: int, radius: float) -> tuple[np.ndarray, np.ndarray | None]:
     return mask, None
 
 
-def make_annulus(size: int, outer_radius: float, inner_radius: float) -> tuple[np.ndarray, np.ndarray]:
+def make_annulus(outer_radius: float, inner_radius: float) -> tuple[np.ndarray, np.ndarray]:
     """Create an annulus (ring) with hollow interior.
 
     Args:
-        size: Array size (width and height)
         outer_radius: Outer radius in pixels
         inner_radius: Inner radius in pixels
 
     Returns:
         (surface_mask, interior_mask)
     """
-    h = w = int(size)
+    # Bounding box fits the outer radius with 1px padding
+    size = int(2 * outer_radius) + 3
+    h = w = size
     y = np.arange(h, dtype=np.float32) - (h - 1) * 0.5
     x = np.arange(w, dtype=np.float32) - (w - 1) * 0.5
     yy, xx = np.meshgrid(y, x, indexing="ij")
@@ -72,7 +74,6 @@ SHAPES: dict[str, ShapeSpec] = {
     "disk": ShapeSpec(
         name="Disk",
         params=[
-            ParamSpec("size", int, 200, 10, 2000),
             ParamSpec("radius", float, 80.0, 5.0, 1000.0),
         ],
         generator=make_disk,
@@ -80,7 +81,6 @@ SHAPES: dict[str, ShapeSpec] = {
     "annulus": ShapeSpec(
         name="Annulus",
         params=[
-            ParamSpec("size", int, 300, 10, 2000),
             ParamSpec("outer_radius", float, 120.0, 10.0, 1000.0),
             ParamSpec("inner_radius", float, 80.0, 5.0, 1000.0),
         ],
