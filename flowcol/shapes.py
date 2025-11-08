@@ -69,6 +69,56 @@ def make_annulus(outer_radius: float, inner_radius: float) -> tuple[np.ndarray, 
     return surface, interior
 
 
+def make_rectangle(width: float, height: float) -> tuple[np.ndarray, np.ndarray | None]:
+    """Create a solid filled rectangle.
+
+    Args:
+        width: Rectangle width in pixels
+        height: Rectangle height in pixels
+
+    Returns:
+        (surface_mask, interior_mask) - interior is None for solid rectangle
+    """
+    h = int(height) + 1
+    w = int(width) + 1
+    mask = np.ones((h, w), dtype=np.float32)
+    return mask, None
+
+
+def make_hollow_rectangle(width: float, height: float, thickness: float) -> tuple[np.ndarray, np.ndarray]:
+    """Create a hollow rectangle (frame).
+
+    Args:
+        width: Rectangle width in pixels
+        height: Rectangle height in pixels
+        thickness: Frame thickness in pixels
+
+    Returns:
+        (surface_mask, interior_mask)
+    """
+    h = int(height) + 1
+    w = int(width) + 1
+    thickness = int(thickness)
+
+    # Full rectangle
+    surface = np.ones((h, w), dtype=np.float32)
+
+    # Interior (hollow part) - shrink by thickness on all sides
+    interior = np.zeros((h, w), dtype=np.float32)
+    inner_h_start = thickness
+    inner_h_end = h - thickness
+    inner_w_start = thickness
+    inner_w_end = w - thickness
+
+    if inner_h_end > inner_h_start and inner_w_end > inner_w_start:
+        interior[inner_h_start:inner_h_end, inner_w_start:inner_w_end] = 1.0
+
+    # Surface is only the frame (full rectangle minus interior)
+    surface = surface - interior
+
+    return surface, interior
+
+
 # Shape registry - add new shapes here!
 SHAPES: dict[str, ShapeSpec] = {
     "disk": ShapeSpec(
@@ -85,5 +135,22 @@ SHAPES: dict[str, ShapeSpec] = {
             ParamSpec("inner_radius", float, 80.0, 5.0, 1000.0),
         ],
         generator=make_annulus,
+    ),
+    "rectangle": ShapeSpec(
+        name="Rectangle",
+        params=[
+            ParamSpec("width", float, 150.0, 10.0, 2000.0),
+            ParamSpec("height", float, 100.0, 10.0, 2000.0),
+        ],
+        generator=make_rectangle,
+    ),
+    "hollow_rectangle": ShapeSpec(
+        name="Hollow Rectangle",
+        params=[
+            ParamSpec("width", float, 200.0, 10.0, 2000.0),
+            ParamSpec("height", float, 150.0, 10.0, 2000.0),
+            ParamSpec("thickness", float, 20.0, 1.0, 500.0),
+        ],
+        generator=make_hollow_rectangle,
     ),
 }
