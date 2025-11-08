@@ -173,6 +173,6 @@ def compute_field(
         )
 
     grad_y, grad_x = np.gradient(phi)
-    grad_y += -1e-5
-    grad_x += 1e-5
+    #grad_y += -1e-5
+    #grad_x += 1e-5
     return -grad_x, -grad_y
