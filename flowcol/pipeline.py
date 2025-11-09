@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import time
 import os
 from flowcol.types import Project
-from flowcol.field import compute_field
+from flowcol.field_pde import compute_field_pde
 from flowcol.postprocess.masks import rasterize_conductor_masks
 from flowcol.render import (
     compute_lic,
@@ -34,6 +34,8 @@ class RenderResult:
     # Cached conductor masks at canvas resolution (saves redundant rasterization)
     conductor_masks_canvas: list[np.ndarray] | None = None  # Surface masks
     interior_masks_canvas: list[np.ndarray] | None = None  # Interior masks
+    # Solution dict from PDE solver (for noise correlation, multiple field extractions, etc.)
+    solution: dict[str, np.ndarray] | None = None
 
 
 @dataclass
@@ -134,9 +136,9 @@ def perform_render(
         return None
 
     preview_note = "" if poisson_scale >= 0.999 else f" (preview scale {poisson_scale:.2f})"
-    print(f"Starting Poisson solve ({compute_w}×{compute_h}){preview_note}...")
+    print(f"Starting PDE solve ({compute_w}×{compute_h}){preview_note}...")
     t_poisson_start = time.time()
-    ex, ey = compute_field(
+    solution, (ex, ey) = compute_field_pde(
         project,
         multiplier,
         supersample_factor,
@@ -148,7 +150,7 @@ def perform_render(
         poisson_scale=poisson_scale,
     )
     t_poisson_end = time.time()
-    print(f"  Poisson solve completed in {t_poisson_end - t_poisson_start:.2f}s")
+    print(f"  PDE solve completed in {t_poisson_end - t_poisson_start:.2f}s")
 
     # Generate conductor mask for LIC blocking if enabled
     lic_mask = None
@@ -255,4 +257,5 @@ def perform_render(
         ey=ey_cropped,
         conductor_masks_canvas=conductor_masks_canvas,
         interior_masks_canvas=interior_masks_canvas,
+        solution=solution,  # Store the PDE solution dict
     )
