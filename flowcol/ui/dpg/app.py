@@ -10,6 +10,7 @@ from typing import Optional
 import numpy as np
 import dearpygui.dearpygui as dpg  # type: ignore
 
+from flowcol.pde.register import register_all_pdes
 from flowcol.app.core import AppState
 from flowcol.app import actions
 from flowcol.ui.dpg.render_modal import RenderModalController
@@ -114,6 +115,9 @@ class FlowColApp:
     mouse_handler_registry_id: Optional[int] = None
 
     def __post_init__(self) -> None:
+        # Register all available PDEs
+        register_all_pdes()
+
         # Create projects directory if it doesn't exist
         projects_dir = Path.cwd() / "projects"
         projects_dir.mkdir(exist_ok=True)
