@@ -1,8 +1,10 @@
 # FlowCol
 
-**Physics-based generative art through electric field visualization**
+**Physics-based generative art framework**
 
-FlowCol is an interactive application for creating visual art using electric fields and conductors. Instead of traditional brushstrokes, you draw with physics: place conductors with assigned voltages on a canvas, solve the Poisson equation to compute the resulting electric field, and visualize the field lines using high-quality Line Integral Convolution (LIC).
+FlowCol is a modular framework for creating visual art using physics simulations. While it originated as an electrostatics visualizer, it has evolved into a generic engine for **Partial Differential Equation (PDE)** based art.
+
+You draw with physics: place boundary objects (conductors, obstacles, sources) on a canvas, solve a physical system (like the Poisson equation for electric fields), and visualize the resulting vector fields using high-quality Line Integral Convolution (LIC).
 
 ![Example renders would go here]
 
@@ -24,450 +26,162 @@ FlowCol is an interactive application for creating visual art using electric fie
 # Install dependencies
 pip install -r requirements.txt
 
-# Launch the GUI
+# Launch the GUI (defaults to Electrostatics mode)
 python -m flowcol.ui.dpg
 ```
 
 ## Core Concept
 
-FlowCol transforms the mathematical beauty of electrostatics into visual art:
+FlowCol transforms mathematical physics into visual art through a four-step pipeline:
 
-1. **Import conductor shapes** - Load PNG images with alpha channels to define conductor geometry
-2. **Assign voltages** - Set voltages on conductors and canvas boundaries
-3. **Solve physics** - The Poisson equation is solved to compute the electric field
-4. **Visualize flow** - Line Integral Convolution creates flowing textures that follow field lines
-5. **Colorize and refine** - Apply sophisticated post-processing to create the final artwork
-
-The result is organic, flowing imagery that emerges from the precise mathematics of electrostatics.
+1.  **Define Geometry** - Import shapes as "Boundary Objects" (formerly Conductors) using PNG masks.
+2.  **Select Physics** - Choose a PDE solver from the registry (e.g., Electrostatics).
+3.  **Solve System** - The framework solves the chosen PDE (e.g., $\nabla^2\phi = 0$) to compute a vector field.
+4.  **Visualize Flow** - Line Integral Convolution (LIC) creates flowing textures that follow the field lines.
+5.  **Colorize & Refine** - Apply GPU-accelerated post-processing for artistic effect.
 
 ## Features
 
-### Physics & Rendering
+### Pluggable Physics Engine
+-   **Generic PDE System** - Architecture supports arbitrary physics solvers via `PDERegistry`.
+-   **Electrostatics (Default)** - Robust Poisson solver using PyAMG-preconditioned conjugate gradient.
+-   **Extensible** - Easily add new physics modules (Fluid dynamics, Reaction-Diffusion, etc.) by implementing the `PDEDefinition` interface.
 
-- **Robust Poisson solver** - Uses PyAMG-preconditioned conjugate gradient with 5-point stencil discretization
-- **Configurable boundary conditions** - Dirichlet or Neumann on all four canvas edges
-- **High-quality LIC** - Multi-pass line integral convolution using the rLIC library
-- **Conductor features**:
-  - Position, scale, and blur controls
-  - Hollow or solid geometry (interior/exterior regions)
-  - Texture smearing inside conductors with feathering
-  - Per-conductor surface and interior colorization
+### Rendering & Visualization
+-   **High-quality LIC** - Multi-pass line integral convolution using the rLIC library.
+-   **GPU Acceleration** - PyTorch MPS/CUDA backend for real-time post-processing.
+-   **Anisotropic Blur** - Field-aligned blur effects.
 
-### GPU Acceleration
-
-- **PyTorch MPS backend** - Hardware-accelerated post-processing on Apple Silicon
-- **Real-time updates** - Adjust brightness, contrast, gamma, and colors interactively
-- **Anisotropic edge blur** - Field-aligned blur with power-law falloff
-- **Smart fallback** - Automatically uses CPU if GPU unavailable
-
-### Rendering Pipeline
-
-- **Multi-resolution workflow** - Solve at high resolution, display at screen resolution
-- **Supersample anti-aliasing** - Optional supersampling for ultra-smooth results
-- **Intelligent caching** - Dirty flags separate expensive field computation from cheap display updates
-- **Background rendering** - Non-blocking render thread keeps UI responsive
-
-### Post-Processing & Colorization
-
-- **Color palettes** - "Ink & Gold", "Crimson & Turquoise", "Bronze & Sapphire", and more
-- **Region-based coloring** - Separate colors for conductor surfaces, interiors, and background
-- **Adaptive contrast** - CLAHE (Contrast Limited Adaptive Histogram Equalization)
-- **Tone controls** - Brightness, contrast, gamma, and percentile clipping
-- **Edge enhancement** - Anisotropic blur that respects field direction
-
-### Interactive UI (Dear PyGui)
-
-- **Visual canvas** - Interactive 2D view for conductor placement and editing
-- **Property panels** - Real-time control over conductor and render settings
-- **Project management** - Save/load complete projects as `.flowcol` archives
-- **Export renders** - Save high-resolution output to PNG with metadata
+### Interactive UI
+-   **Visual Canvas** - Direct manipulation of boundary objects.
+-   **Real-time Feedback** - Adjust physics parameters and see results instantly (using low-res preview).
+-   **Project Management** - Save/load projects with full state preservation.
 
 ## Installation
 
 ### Requirements
-
-- Python 3.10+
-- For GPU acceleration: macOS with Apple Silicon (MPS support) or CUDA-compatible GPU
+-   Python 3.10+
+-   macOS with Apple Silicon (recommended for MPS acceleration) or CUDA-compatible GPU
 
 ### Install Dependencies
-
 ```bash
 pip install -r requirements.txt
 ```
 
-#### Dependencies Include:
-
-- **numpy, scipy** - Numerical computation and sparse linear algebra
-- **numba** - JIT compilation for performance-critical code
-- **pyamg** - Algebraic multigrid preconditioner for Poisson solver
-- **rLIC** - Production-quality Line Integral Convolution
-- **torch, torchvision** - GPU acceleration (MPS/CUDA)
-- **dearpygui** - Modern immediate-mode GUI framework
-- **pillow** - Image I/O
-- **scikit-image** - CLAHE and image processing
-- **matplotlib** - Utilities and colormaps
-
-### Optional: GPU Setup
-
-For Apple Silicon Macs, PyTorch 2.0+ with MPS is automatically supported. For NVIDIA GPUs, ensure CUDA-compatible PyTorch is installed.
-
 ## Usage
 
-### Launch the GUI
+### GUI Workflow
+1.  **Import Shapes** - Load PNG images to define your boundary objects.
+2.  **Configure Physics** - Set values (e.g., Voltage) for each object.
+3.  **Render** - Click render to solve the PDE and generate the LIC visualization.
+4.  **Post-Process** - Adjust colors, contrast, and blur in real-time.
 
-```bash
-python -m flowcol.ui.dpg
-```
+### Programmatic Usage
 
-### Basic Workflow
-
-1. **Set canvas resolution** - Define your working canvas size (default: 1024x1024)
-2. **Import conductors** - Load PNG masks (alpha channel defines conductor shape)
-3. **Position and scale** - Drag conductors on canvas, adjust scale and blur
-4. **Assign voltages** - Set voltage values for each conductor
-5. **Configure boundaries** - Choose Dirichlet (fixed voltage) or Neumann (insulating) edges
-6. **Render** - Compute the electric field and LIC visualization
-7. **Adjust display** - Tune colorization, contrast, brightness, and edge effects
-8. **Export** - Save high-resolution renders and project files
-
-### Keyboard Shortcuts
-
-(Document key shortcuts from the UI implementation)
-
-### Command-Line Usage
-
-FlowCol can be used programmatically:
+FlowCol can be used as a library. The new API supports the generic PDE system:
 
 ```python
-from flowcol.types import Project, Conductor
-from flowcol.field import compute_field
+from flowcol.types import Project, BoundaryObject
+from flowcol.field_pde import compute_field_pde
 from flowcol.pipeline import perform_render
 from flowcol.mask_utils import load_mask_from_png
-import numpy as np
+from flowcol.pde import PDERegistry
+
+# Ensure the desired PDE is active (defaults to 'poisson')
+PDERegistry.set_active("poisson")
 
 # Create project
 project = Project(canvas_resolution=(1024, 1024))
 
-# Load conductor
-mask = load_mask_from_png("conductor.png")
-conductor = Conductor(mask=mask, voltage=1.0, position=(512, 512))
-project.conductors.append(conductor)
+# Load a boundary object (e.g., a conductor)
+mask = load_mask_from_png("shape.png")
+obj = BoundaryObject(mask=mask, voltage=1.0, position=(512, 512))
+project.boundary_objects.append(obj)
 
-# Compute electric field
-ex, ey, phi, solve_resolution = compute_field(
+# Compute field using the active PDE solver
+# Returns solution dict (e.g. {'phi': ...}) and vector field (ex, ey)
+solution, (ex, ey) = compute_field_pde(
     project,
     multiplier=2.0,
-    margin=0.1,
-    blur_is_physical=True
+    margin=(0.1, 0.1)
 )
 
-# Render LIC
+# Render LIC visualization
 result = perform_render(
     project,
     multiplier=2.0,
     num_passes=2,
-    supersample=1.0,
-    streamlength_factor=60.0/1024.0,
-    margin=0.1,
-    noise_seed=0
+    streamlength_factor=0.05
 )
-
-# result.array contains the LIC visualization
 ```
 
 ## Architecture
 
-FlowCol follows a clean separation between physics/rendering (backend) and interaction (frontend):
+FlowCol has evolved into a layered architecture separating the generic physics engine from the rendering and UI layers.
 
-### Backend (Procedural/Functional)
-
-The backend is strictly **functional** - pure functions with no hidden state:
+### Core Components
 
 ```
 flowcol/
-   poisson.py          # Poisson equation solver
-   field.py            # Electric field computation
-   lic.py              # Line integral convolution wrapper
-   render.py           # High-quality rendering operations
-   pipeline.py         # Full render pipeline orchestration
-   mask_utils.py       # PNG mask loading and processing
-   serialization.py    # Project save/load
-   types.py            # Core dataclasses (Project, Conductor)
-   defaults.py         # Default configuration values
-   gpu/
-      ops.py          # Individual GPU operations
-      pipeline.py     # GPU postprocessing pipeline
-      edge_blur.py    # Anisotropic edge blur
-   postprocess/
-       color.py        # Region-based colorization
-       blur.py         # Advanced blur techniques
-       masks.py        # Mask rasterization
+   pde/                 # Pluggable Physics System
+      base.py           # PDEDefinition interface
+      registry.py       # Global PDE registry
+      poisson_pde.py    # Electrostatics implementation
+   
+   field_pde.py         # Generic field computation orchestrator
+   pipeline.py          # Render pipeline (PDE solve -> LIC -> Post-process)
+   types.py             # Core data structures (Project, BoundaryObject)
+   
+   # Legacy/Support
+   poisson.py           # Low-level Poisson solver
+   field.py             # Legacy wrapper (deprecated)
 ```
 
-**Design principle**: Backend functions take inputs and return outputs. Easy to test, cache, and reason about. Plays well with numpy's functional style.
+### Key Concepts
 
-### Frontend (Modular Controllers)
-
-The UI is **organized into focused, single-responsibility controllers**:
-
-```
-flowcol/ui/dpg/
-   app.py                              # Main app coordinator (434 lines)
-   __main__.py                         # Entry point
-   canvas_controller.py                # Canvas interaction (pan, zoom, click)
-   canvas_renderer.py                  # Canvas display rendering
-   render_orchestrator.py              # Background render thread coordination
-   display_pipeline_controller.py      # Display scaling (DearPyGUI WYSIWYG)
-   image_export_controller.py          # High-res export logic
-   file_io_controller.py               # Project save/load UI
-   cache_management_panel.py           # Cache visualization and controls
-   postprocessing_panel.py             # Color/brightness/contrast/gamma UI
-   conductor_controls_panel.py         # Conductor property editing
-   render_modal.py                     # Render dialog and progress
-
-flowcol/app/
-   core.py                             # AppState, RenderCache, DisplaySettings
-   actions.py                          # State mutations (reusable)
-```
-
-**Design principle**: Each controller owns one UI concern. No God Objects. The 2,630-line monolith app.py was refactored into focused controllers (83% reduction). Central `AppState` manages all application state with dirty flags for caching.
-
-### Application State
-
-The `AppState` class (flowcol/app/core.py) holds all application state:
-
-- **Project**: Canvas resolution, conductors, boundaries
-- **RenderSettings**: Poisson multiplier, supersampling, LIC passes, noise
-- **DisplaySettings**: Brightness, contrast, gamma, colorization, edge blur
-- **RenderCache**: Cached full-resolution render outputs (CPU and GPU tensors)
-- **ConductorColorSettings**: Per-conductor surface/interior colors
-- **Dirty flags**: `field_dirty`, `render_dirty` for smart caching
-
-State mutations go through `actions.py` which is toolkit-agnostic and reusable.
-
-### Data Flow
-
-```
-User Input -> AppState (via actions.py)
-           |
-           v
-        [Dirty flags set]
-           |
-           v
-    RenderOrchestrator Thread
-           |
-           v
-     field_dirty? -> compute_field() -> perform_render()
-     render_dirty? -> perform_render()
-     display_dirty? -> GPU postprocessing only
-           |
-           v
-      RenderCache Updated
-           |
-           v
-    CanvasRenderer + DisplayPipeline -> Screen
-```
-
-Smart caching avoids expensive Poisson solves when only display settings change. DearPyGUI handles all display scaling for true WYSIWYG preview/export matching.
+1.  **BoundaryObject**: A generic entity with a shape (mask) and a value. In Electrostatics, this represents a Conductor with Voltage. In other PDEs, it could represent an Obstacle or Heat Source.
+2.  **PDEDefinition**: An interface defining how to `solve()` a system and `extract_lic_field()` from the solution.
+3.  **Render Pipeline**: A functional pipeline that takes a `Project` state, runs the active PDE solver, and feeds the result into the LIC renderer.
 
 ## Project File Format
 
-FlowCol projects are saved as `.flowcol` files - ZIP archives containing:
-
-```
-project.flowcol (ZIP)
-   metadata.json                   # Project configuration
-   conductor_0_mask.png            # Conductor masks (uint16 PNG)
-   conductor_0_interior.png        # Interior masks
-   conductor_0_original_mask.png   # Original (for reset)
-   conductor_1_mask.png
-   ...
-```
-
-### metadata.json Structure
+Projects are saved as `.flowcol` ZIP archives. The format has been updated to support generic metadata:
 
 ```json
 {
-  "schema_version": "1.0",
   "project": {
-    "canvas_resolution": [1024, 1024],
-    "streamlength_factor": 0.05859375,
-    "boundary_top": 0,
-    "boundary_bottom": 0,
-    "boundary_left": 0,
-    "boundary_right": 0
-  },
-  "render_settings": {
-    "multiplier": 2.0,
-    "supersample": 1.0,
-    "num_passes": 2,
-    "margin": 0.1,
-    "noise_seed": 0,
-    "noise_sigma": 0.0
-  },
-  "display_settings": {
-    "downsample_sigma": 0.6,
-    "clip_percent": 0.5,
-    "brightness": 0.0,
-    "contrast": 1.0,
-    "gamma": 1.0,
-    "color_enabled": true,
-    "palette": "Ink & Gold",
-    "edge_blur_sigma": 0.0,
-    "edge_blur_falloff": 0.015,
-    "edge_blur_strength": 1.0,
-    "edge_blur_power": 2.0
+    "pde_type": "poisson",
+    "pde_params": { ... }
   },
   "conductors": [
     {
-      "voltage": 1.0,
+      "voltage": 1.0,  # Primary value
       "position": [512.0, 512.0],
-      "scale_factor": 1.0,
-      "blur_sigma": 0.0,
-      "blur_is_fractional": false,
-      "smear_enabled": false,
-      "smear_sigma": 2.0,
-      "smear_feather": 3.0,
-      "id": 0
+      "scale_factor": 1.0
     }
-  ],
-  "conductor_color_settings": {
-    "0": {
-      "surface_enabled": true,
-      "surface_color": [255, 215, 0],
-      "interior_enabled": false,
-      "interior_color": [0, 0, 0]
-    }
-  }
+  ]
 }
 ```
 
-Projects typically range from 200 KB to 2 MB (PNG compression is very effective for masks).
-
-## Performance
-
-### Computational Complexity
-
-- **Poisson solve**: O(N log N) per iteration with PyAMG, where N = solve_resolution²
-- **LIC rendering**: O(N × streamlength) per pass
-- **GPU postprocessing**: O(M) where M = display_resolution² (very fast)
-
-### Optimization Strategies
-
-1. **Solve at render resolution, display at screen resolution** - Separate computation from display
-2. **Dirty flag system** - Only recompute when necessary:
-   - `field_dirty`: Full Poisson solve + LIC render
-   - `render_dirty`: LIC render only (reuse field)
-   - `display_dirty`: GPU postprocessing only
-3. **Background rendering** - Non-blocking thread keeps UI responsive
-4. **GPU acceleration** - PyTorch MPS handles colorization, blur, contrast in <10ms
-5. **Smart caching** - Cache render results, GPU tensors, conductor masks
-6. **DearPyGUI display scaling** - Renders at full resolution, displays at screen resolution for true WYSIWYG
-
-### Typical Performance (M1 MacBook Pro)
-
-| Operation | 1024² Canvas | 2048² Canvas | 4096² Canvas |
-|-----------|--------------|--------------|--------------|
-| Poisson solve | ~0.5s | ~2s | ~10s |
-| LIC (2 passes) | ~0.3s | ~1.2s | ~5s |
-| GPU postprocess | <10ms | <15ms | <30ms |
-
 ## Development
 
-### Code Philosophy (from CLAUDE.md)
-
-FlowCol makes strong assumptions and focuses on clean, performant code:
-
-- **No defensive programming** - Assumes correct use, no try/except blocks
-- **No backwards compatibility focus** - This is not production software
-- **Backend: Strictly procedural/functional** - Physics and rendering are pure mathematical transforms
-- **Frontend: Modular controller architecture** - Single-responsibility controllers with central state management
-- **Performance over compatibility** - GPU acceleration, smart caching, numba JIT
-
-### Project Structure
-
-```
-flowcol/
-   flowcol/              # Main package (backend + frontend)
-      gpu/              # GPU-accelerated operations
-      postprocess/      # Post-processing utilities
-      ui/               # User interface implementations
-         dpg/          # Dear PyGui controllers
-      app/              # Application state and actions
-   assets/               # Example conductor images
-   tests/                # Test suite
-   scripts/              # Utility scripts
-   requirements.txt      # Dependencies
-   CLAUDE.md             # Code philosophy
-   SCHEMA.md             # Project file format spec
-   README.md             # This file
-```
-
-### Running Tests
-
-```bash
-pytest tests/
-```
+### Philosophy
+-   **Functional Backend**: Physics and rendering are pure functions.
+-   **Modular Frontend**: UI controllers are single-responsibility.
+-   **No Defensive Programming**: Assume correct usage for maximum performance.
 
 ### Contributing
-
-This is a personal art project, but contributions and suggestions are welcome. Please:
-
-1. Respect the code philosophy (functional backend, modular controller frontend)
-2. No defensive programming - assume correct use
-3. Performance matters - profile before optimizing
-4. Keep functions pure where possible
-5. Extract controllers if a class exceeds 500 lines
-
-## Theory & Background
-
-### The Poisson Equation
-
-FlowCol solves the Poisson equation for the electric potential φ:
-
-```
-∇²φ = 0   (Laplace equation in conductor-free regions)
-```
-
-With boundary conditions:
-- **Dirichlet**: φ = V (fixed voltage on conductor surfaces)
-- **Neumann**: ∂φ/∂n = 0 (insulating/no-flux boundaries)
-
-The electric field is then:
-```
-E = -∇φ
-```
-
-### Line Integral Convolution (LIC)
-
-LIC creates flow visualization by:
-1. Starting with white noise texture
-2. For each pixel, trace streamline forward and backward along field
-3. Average texture values along streamline
-4. Result: noise is "smeared" along field lines, revealing flow structure
-
-### Numerical Methods
-
-- **Discretization**: 5-point stencil finite difference (2nd order accurate)
-- **Solver**: Conjugate gradient with PyAMG algebraic multigrid preconditioner
-- **Convergence**: Typically 10-50 iterations to machine precision
+To add a new physics engine:
+1.  Implement `PDEDefinition` in `flowcol/pde/`.
+2.  Register it in `flowcol/pde/__init__.py`.
+3.  Ensure it returns a vector field `(ex, ey)` for LIC visualization.
 
 ## License
 
-(Add license information)
+[License Information]
 
 ## Credits
 
-- **rLIC**: Line Integral Convolution library
-- **PyAMG**: Algebraic multigrid solver
-- **Dear PyGui**: Modern GUI framework
-- Inspired by classical electrostatics visualization techniques
-
-## References
-
-- Cabral, B., & Leedom, L. C. (1993). "Imaging vector fields using line integral convolution." SIGGRAPH '93.
-- Jackson, J. D. (1999). "Classical Electrodynamics" (3rd ed.). Wiley.
-
----
-
-**FlowCol** - Where physics meets art.
+-   **rLIC**: Line Integral Convolution library
+-   **PyAMG**: Algebraic multigrid solver
+-   **Dear PyGui**: Modern GUI framework
