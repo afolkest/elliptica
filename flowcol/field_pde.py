@@ -10,6 +10,9 @@ from scipy.ndimage import zoom
 from flowcol.types import Project
 from flowcol.pde import PDERegistry
 from flowcol.poisson import DIRICHLET
+from flowcol import defaults
+from flowcol.pde.relaxation import build_relaxation_mask, relax_potential_band
+from flowcol.mask_utils import blur_mask
 
 
 def compute_field_pde(
@@ -97,6 +100,51 @@ def compute_field_pde(
             else:
                 # For non-2D arrays, just copy
                 solution[key] = array
+
+        # Apply relaxation if enabled (only for 'phi' field currently)
+        if "phi" in solution:
+
+            if (
+                defaults.POISSON_PREVIEW_RELAX_ITERS > 0
+                and defaults.POISSON_PREVIEW_RELAX_BAND > 0
+            ):
+
+                
+                # We need to rebuild the Dirichlet mask at full resolution to know where to relax
+                # This is a bit expensive but necessary for good previews
+                # Create a temporary project for full-res mask generation
+                full_res_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h))
+                
+                # TODO: This assumes Poisson PDE internals (dirichlet_mask). 
+                # Ideally the PDE solver would expose a "get_boundary_mask" method.
+                # For now, we'll use a helper to generate it.
+                dirichlet_mask = _build_dirichlet_mask(full_res_project)
+                
+                relax_mask = build_relaxation_mask(
+                    dirichlet_mask,
+                    defaults.POISSON_PREVIEW_RELAX_BAND,
+                )
+                
+                if np.any(relax_mask):
+                    phi = solution["phi"]
+                    # Ensure contiguous array for Numba
+                    if not phi.flags['C_CONTIGUOUS']:
+                        phi = np.ascontiguousarray(phi)
+                        
+                    relax_potential_band(
+                        phi,
+                        relax_mask,
+                        defaults.POISSON_PREVIEW_RELAX_ITERS,
+                        float(defaults.POISSON_PREVIEW_RELAX_OMEGA),
+                    )
+                    
+                    # Re-enforce boundary conditions after relaxation
+                    # (We need values for this, which is another expense. 
+                    #  Optimization: maybe skip this if relaxation is gentle enough?)
+                    dirichlet_values = _build_dirichlet_values(full_res_project)
+                    phi[dirichlet_mask] = dirichlet_values[dirichlet_mask]
+                    solution["phi"] = phi
+
     else:
         # Solve at full resolution
         solve_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h))
@@ -106,6 +154,9 @@ def compute_field_pde(
     ex, ey = pde.extract_lic_field(solution, solve_project)
 
     return solution, (ex, ey)
+
+
+    return ex, ey
 
 
 def _match_shape(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
@@ -126,6 +177,87 @@ def _match_shape(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray
         array = np.pad(array, ((0, 0), (0, pad_w)), mode="edge")
 
     return array
+
+
+def _build_dirichlet_mask(project) -> np.ndarray:
+    """Helper to build Dirichlet mask for relaxation."""
+
+    
+    grid_h, grid_w = project.shape
+    mask = np.zeros((grid_h, grid_w), dtype=bool)
+    
+    domain_w, domain_h = project.domain_size
+    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
+    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
+    margin_x, margin_y = project.margin
+
+    for obj in project.boundary_objects:
+        x = (obj.position[0] + margin_x) * grid_scale_x
+        y = (obj.position[1] + margin_y) * grid_scale_y
+
+        obj_mask = obj.mask
+        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
+            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
+
+        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
+            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
+            scaled_sigma = obj.edge_smooth_sigma * scale_factor
+            obj_mask = blur_mask(obj_mask, scaled_sigma)
+
+        mask_h, mask_w = obj_mask.shape
+        ix, iy = int(round(x)), int(round(y))
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
+
+        mx0, my0 = max(0, -ix), max(0, -iy)
+        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+
+        mask_slice = obj_mask[my0:my1, mx0:mx1]
+        mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
+        
+    return mask
+
+
+def _build_dirichlet_values(project) -> np.ndarray:
+    """Helper to build Dirichlet values for relaxation."""
+
+    
+    grid_h, grid_w = project.shape
+    values = np.zeros((grid_h, grid_w), dtype=float)
+    
+    domain_w, domain_h = project.domain_size
+    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
+    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
+    margin_x, margin_y = project.margin
+
+    for obj in project.boundary_objects:
+        x = (obj.position[0] + margin_x) * grid_scale_x
+        y = (obj.position[1] + margin_y) * grid_scale_y
+
+        obj_mask = obj.mask
+        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
+            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
+
+        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
+            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
+            scaled_sigma = obj.edge_smooth_sigma * scale_factor
+            obj_mask = blur_mask(obj_mask, scaled_sigma)
+
+        mask_h, mask_w = obj_mask.shape
+        ix, iy = int(round(x)), int(round(y))
+        x0, y0 = max(0, ix), max(0, iy)
+        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
+
+        mx0, my0 = max(0, -ix), max(0, -iy)
+        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+
+        mask_slice = obj_mask[my0:my1, mx0:mx1]
+        mask_bool = mask_slice > 0.5
+        
+        value = obj.voltage if hasattr(obj, 'voltage') else obj.value
+        values[y0:y1, x0:x1] = np.where(mask_bool, value, values[y0:y1, x0:x1])
+        
+    return values
 
 
 def compute_field_legacy(
