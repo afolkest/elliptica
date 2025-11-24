@@ -29,7 +29,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from flowcol.types import Project, Conductor
-from flowcol.field import compute_field
+from flowcol.field_pde import compute_field_pde
 from flowcol.render import compute_lic, apply_gaussian_highpass, downsample_lic, _normalize_unit, _get_palette_lut
 
 def load_mask(path: Path) -> np.ndarray:
@@ -111,7 +111,7 @@ def run_pipeline(
     conductor = Conductor(mask=mask_canvas, voltage=10.0, position=(0.0, 0.0))
     project.conductors.append(conductor)
 
-    ex, ey = compute_field(project)
+    _, (ex, ey) = compute_field_pde(project)
     compute_h, compute_w = ex.shape
     compute_min = min(compute_h, compute_w)
     extent = 2.5  # gauss_law_morph physical half-width

@@ -13,8 +13,18 @@ from pathlib import Path
 # Add parent directory to path to import flowcol
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from flowcol.poisson import solve_poisson_system, DIRICHLET, NEUMANN
-from flowcol.field import compute_field, _build_relaxation_mask, _relax_potential_band
+from flowcol.field_pde import compute_field_pde
+from flowcol.pde.relaxation import build_relaxation_mask, relax_potential_band
 from flowcol.types import Project, Conductor
+from flowcol.pde import PDERegistry
+from flowcol.pde.poisson_pde import POISSON_PDE
+
+# Ensure PDE is registered for tests
+try:
+    PDERegistry.register(POISSON_PDE)
+except ValueError:
+    pass  # Already registered
+PDERegistry.set_active("poisson")
 
 
 def create_annulus_conductor(size, outer_radius=0.4, inner_radius=0.2, center=(0.5, 0.5)):
@@ -199,8 +209,8 @@ def test_compute_field_preview_scale_accuracy():
     conductor = Conductor(mask=mask, voltage=1.0, position=(24, 24))
     project.conductors.append(conductor)
 
-    ex_full, ey_full = compute_field(project, poisson_scale=1.0)
-    ex_preview, ey_preview = compute_field(project, poisson_scale=0.5)
+    _, (ex_full, ey_full) = compute_field_pde(project, poisson_scale=1.0)
+    _, (ex_preview, ey_preview) = compute_field_pde(project, poisson_scale=0.5)
 
     rms_error = np.sqrt(
         np.mean((ex_full - ex_preview) ** 2 + (ey_full - ey_preview) ** 2)
@@ -218,11 +228,11 @@ def test_relaxation_preserves_dirichlet_and_modifies_band():
     dirichlet_mask[12:20, 12:20] = True
 
     phi[dirichlet_mask] = 1.0
-    relax_mask = _build_relaxation_mask(dirichlet_mask, band_width=2)
+    relax_mask = build_relaxation_mask(dirichlet_mask, band_width=2)
     phi_before = phi.copy()
 
     if relax_mask.any():
-        _relax_potential_band(phi, relax_mask, iterations=6, omega=0.8)
+        relax_potential_band(phi, relax_mask, iterations=6, omega=0.8)
 
     # Dirichlet region should remain fixed
     assert np.allclose(phi[dirichlet_mask], phi_before[dirichlet_mask])
