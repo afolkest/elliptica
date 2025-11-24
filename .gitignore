@@ -15,6 +15,9 @@ projects
 candidates
 experiments
 rlic
+output_raw
+output_renders
+outputs
 
 # C extensions
 *.so
