@@ -38,20 +38,7 @@ class BoundaryObject:
 Conductor = BoundaryObject
 
 
-# Keep original Conductor class for reference (will be removed later)
-@dataclass
-class _LegacyConductor:
-    mask: np.ndarray
-    voltage: float
-    position: tuple[float, float] = (0.0, 0.0)
-    interior_mask: Optional[np.ndarray] = None
-    original_mask: Optional[np.ndarray] = None
-    original_interior_mask: Optional[np.ndarray] = None
-    scale_factor: float = 1.0  # Current scale relative to original
-    edge_smooth_sigma: float = 1.5  # Edge anti-aliasing blur in pixels (0-5px range)
-    smear_enabled: bool = False  # Enable texture smearing inside conductor
-    smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA  # Gaussian blur strength as fraction of canvas width (resolution-independent)
-    id: Optional[int] = None  # Assigned when added to project
+
 
 
 @dataclass

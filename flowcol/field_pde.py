@@ -259,26 +259,3 @@ def _build_dirichlet_values(project) -> np.ndarray:
         
     return values
 
-
-def compute_field_legacy(
-    project: Project,
-    multiplier: float = 1.0,
-    supersample: float = 1.0,
-    margin: tuple[float, float] = (0.0, 0.0),
-    boundary_top: int = DIRICHLET,
-    boundary_bottom: int = DIRICHLET,
-    boundary_left: int = DIRICHLET,
-    boundary_right: int = DIRICHLET,
-    poisson_scale: float = 1.0,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Legacy compute_field wrapper that only returns the field.
-
-    This maintains backwards compatibility with existing code.
-    """
-    _, (ex, ey) = compute_field_pde(
-        project, multiplier, supersample, margin,
-        boundary_top, boundary_bottom, boundary_left, boundary_right,
-        poisson_scale
-    )
-    return ex, ey

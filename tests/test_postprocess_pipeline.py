@@ -9,7 +9,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "LineIntegralConvolutions" / "src"))
 
 from flowcol.types import Project, Conductor
-from flowcol.field import compute_field
+from flowcol.field_pde import compute_field_pde
 from flowcol.render import (
     compute_lic,
     apply_gaussian_highpass,
@@ -43,7 +43,7 @@ def test_full_pipeline_matches_reference():
     compute_h = int(round(project.canvas_resolution[1] * scale))
     compute_min = min(compute_w, compute_h)
 
-    ex, ey = compute_field(project, multiplier=multiplier, supersample=supersample)
+    _, (ex, ey) = compute_field_pde(project, multiplier=multiplier, supersample=supersample)
 
     rng = np.random.default_rng(0)
     seed_texture = rng.random((compute_h, compute_w)).astype(np.float32)
