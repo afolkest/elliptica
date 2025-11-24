@@ -18,7 +18,7 @@ from flowcol.ui.dpg.render_orchestrator import RenderOrchestrator
 from flowcol.ui.dpg.file_io_controller import FileIOController
 from flowcol.ui.dpg.cache_management_panel import CacheManagementPanel
 from flowcol.ui.dpg.postprocessing_panel import PostprocessingPanel
-from flowcol.ui.dpg.conductor_controls_panel import ConductorControlsPanel
+from flowcol.ui.dpg.boundary_controls_panel import BoundaryControlsPanel
 from flowcol.ui.dpg.display_pipeline_controller import DisplayPipelineController
 from flowcol.ui.dpg.image_export_controller import ImageExportController
 from flowcol.ui.dpg.canvas_controller import CanvasController
@@ -64,7 +64,7 @@ def _clone_conductor(conductor: Conductor) -> Conductor:
         original_interior = conductor.original_interior_mask.copy()
     return Conductor(
         mask=conductor.mask.copy(),
-        voltage=conductor.voltage,
+        params=conductor.params.copy(),  # Copy params dict
         position=conductor.position,
         interior_mask=interior,
         original_mask=original,
@@ -139,7 +139,7 @@ class FlowColApp:
         self.shape_dialog = ShapeDialogController(self)
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
-        self.conductor_controls = ConductorControlsPanel(self)
+        self.boundary_controls = BoundaryControlsPanel(self)
 
         # Seed a demo conductor if project is empty so the canvas has content for manual testing.
         if not self.state.project.conductors:
@@ -215,7 +215,7 @@ class FlowColApp:
                     dpg.add_button(label="Fit Display", callback=self._fit_canvas_to_window, width=140)
                 dpg.add_spacer(height=10)
                 dpg.add_separator()
-                self.conductor_controls.build_conductor_controls_container(edit_group)
+                self.boundary_controls.build_container(edit_group)
 
             with dpg.group(tag="render_controls_group") as render_group:
                 self.render_controls_id = render_group
@@ -269,7 +269,7 @@ class FlowColApp:
         self._update_control_visibility()
         self.file_io.ensure_conductor_file_dialog()
         self._update_canvas_inputs()
-        self.conductor_controls.rebuild_conductor_controls()
+        self.boundary_controls.rebuild_controls()
 
     # ------------------------------------------------------------------
     # Canvas window layout
@@ -454,7 +454,7 @@ class FlowColApp:
             show_button = (mode == "edit" and has_cache)
             dpg.configure_item(self.cache_panel.view_postprocessing_button_id, show=show_button)
 
-        self.conductor_controls.update_conductor_slider_labels()
+        self.boundary_controls.update_slider_labels()
 
 def run() -> None:
     """Launch FlowCol Dear PyGui application."""

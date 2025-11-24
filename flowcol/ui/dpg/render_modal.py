@@ -71,11 +71,9 @@ class RenderModalController:
         self.edge_gain_strength_slider_id: Optional[int] = None
         self.edge_gain_power_slider_id: Optional[int] = None
 
-        # Boundary condition checkboxes
-        self.boundary_top_checkbox_id: Optional[int] = None
-        self.boundary_bottom_checkbox_id: Optional[int] = None
-        self.boundary_left_checkbox_id: Optional[int] = None
-        self.boundary_right_checkbox_id: Optional[int] = None
+        # Generic Boundary Condition Controls
+        # Map: edge_name -> combo_id
+        self.bc_combo_ids: dict[str, int] = {}
 
     def ensure_modal(self) -> None:
         """Create the modal dialog window if it doesn't exist."""
@@ -91,7 +89,7 @@ class RenderModalController:
             no_close=True,
             no_collapse=True,
             width=420,
-            height=520,
+            height=550,
         ) as modal:
             self.modal_id = modal
 
@@ -193,33 +191,43 @@ class RenderModalController:
             dpg.add_spacer(height=15)
             dpg.add_separator()
             dpg.add_spacer(height=10)
-            dpg.add_text("Boundary Conditions")
-            dpg.add_spacer(height=5)
+            
+            # Dynamic Boundary Conditions Section
+            from flowcol.pde import PDERegistry
+            pde = PDERegistry.get_active()
+            
+            if pde.global_bc_options:
+                dpg.add_text("Boundary Conditions")
+                dpg.add_spacer(height=5)
+                
+                bc_labels = list(pde.global_bc_options.keys())
+                
+                # Cross-shaped layout for boundary controls
+                with dpg.table(header_row=False, borders_innerH=False, borders_innerV=False,
+                              borders_outerH=False, borders_outerV=False):
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=120)
+                    dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
 
-            # Cross-shaped layout for boundary controls
-            with dpg.table(header_row=False, borders_innerH=False, borders_innerV=False,
-                          borders_outerH=False, borders_outerV=False):
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=120)
-                dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
+                    # Row 0: Top boundary centered
+                    with dpg.table_row():
+                        dpg.add_text("")
+                        self.bc_combo_ids["top"] = dpg.add_combo(items=bc_labels, width=100)
+                        dpg.add_text("")
 
-                # Row 0: Top boundary centered
-                with dpg.table_row():
-                    dpg.add_text("")
-                    self.boundary_top_checkbox_id = dpg.add_checkbox(label="Top Neumann")
-                    dpg.add_text("")
+                    # Row 1: Left and Right boundaries
+                    with dpg.table_row():
+                        self.bc_combo_ids["left"] = dpg.add_combo(items=bc_labels, width=100)
+                        dpg.add_text("   (Domain)   ")
+                        self.bc_combo_ids["right"] = dpg.add_combo(items=bc_labels, width=100)
 
-                # Row 1: Left and Right boundaries
-                with dpg.table_row():
-                    self.boundary_left_checkbox_id = dpg.add_checkbox(label="Left Neumann")
-                    dpg.add_text("(Insulating)", indent=30)
-                    self.boundary_right_checkbox_id = dpg.add_checkbox(label="Right Neumann")
-
-                # Row 2: Bottom boundary centered
-                with dpg.table_row():
-                    dpg.add_text("")
-                    self.boundary_bottom_checkbox_id = dpg.add_checkbox(label="Bottom Neumann")
-                    dpg.add_text("")
+                    # Row 2: Bottom boundary centered
+                    with dpg.table_row():
+                        dpg.add_text("")
+                        self.bc_combo_ids["bottom"] = dpg.add_combo(items=bc_labels, width=100)
+                        dpg.add_text("")
+            else:
+                dpg.add_text("No global boundary conditions available.")
 
             dpg.add_spacer(height=20)
             with dpg.group(horizontal=True):
@@ -237,6 +245,12 @@ class RenderModalController:
             dpg.set_value("status_text", "Render already in progress...")
             return
 
+        # Rebuild modal if PDE changed (to update BC options)
+        if self.modal_id is not None:
+            dpg.delete_item(self.modal_id)
+            self.modal_id = None
+            self.bc_combo_ids.clear()
+            
         self.ensure_modal()
         self.update_values()
 
@@ -294,16 +308,28 @@ class RenderModalController:
         if self.edge_gain_power_slider_id is not None:
             dpg.set_value(self.edge_gain_power_slider_id, float(settings.edge_gain_power))
 
-        # Update boundary condition checkboxes
-        from flowcol.poisson import NEUMANN
-        if self.boundary_top_checkbox_id is not None:
-            dpg.set_value(self.boundary_top_checkbox_id, project.boundary_top == NEUMANN)
-        if self.boundary_bottom_checkbox_id is not None:
-            dpg.set_value(self.boundary_bottom_checkbox_id, project.boundary_bottom == NEUMANN)
-        if self.boundary_left_checkbox_id is not None:
-            dpg.set_value(self.boundary_left_checkbox_id, project.boundary_left == NEUMANN)
-        if self.boundary_right_checkbox_id is not None:
-            dpg.set_value(self.boundary_right_checkbox_id, project.boundary_right == NEUMANN)
+        # Update boundary condition combos
+        from flowcol.pde import PDERegistry
+        pde = PDERegistry.get_active()
+        
+        # Reverse lookup: value -> label
+        bc_lookup = {v: k for k, v in pde.global_bc_options.items()}
+        
+        if "top" in self.bc_combo_ids:
+            label = bc_lookup.get(project.boundary_top, list(pde.global_bc_options.keys())[0])
+            dpg.set_value(self.bc_combo_ids["top"], label)
+            
+        if "bottom" in self.bc_combo_ids:
+            label = bc_lookup.get(project.boundary_bottom, list(pde.global_bc_options.keys())[0])
+            dpg.set_value(self.bc_combo_ids["bottom"], label)
+            
+        if "left" in self.bc_combo_ids:
+            label = bc_lookup.get(project.boundary_left, list(pde.global_bc_options.keys())[0])
+            dpg.set_value(self.bc_combo_ids["left"], label)
+            
+        if "right" in self.bc_combo_ids:
+            label = bc_lookup.get(project.boundary_right, list(pde.global_bc_options.keys())[0])
+            dpg.set_value(self.bc_combo_ids["right"], label)
 
     def on_cancel(self, sender=None, app_data=None) -> None:
         """Handle cancel button click - closes modal without changes."""
@@ -331,12 +357,30 @@ class RenderModalController:
         edge_gain_strength = float(dpg.get_value(self.edge_gain_strength_slider_id)) if self.edge_gain_strength_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_STRENGTH
         edge_gain_power = float(dpg.get_value(self.edge_gain_power_slider_id)) if self.edge_gain_power_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_POWER
 
-        # Read boundary condition checkboxes
-        from flowcol.poisson import DIRICHLET, NEUMANN
-        boundary_top = NEUMANN if (self.boundary_top_checkbox_id and dpg.get_value(self.boundary_top_checkbox_id)) else DIRICHLET
-        boundary_bottom = NEUMANN if (self.boundary_bottom_checkbox_id and dpg.get_value(self.boundary_bottom_checkbox_id)) else DIRICHLET
-        boundary_left = NEUMANN if (self.boundary_left_checkbox_id and dpg.get_value(self.boundary_left_checkbox_id)) else DIRICHLET
-        boundary_right = NEUMANN if (self.boundary_right_checkbox_id and dpg.get_value(self.boundary_right_checkbox_id)) else DIRICHLET
+        # Read boundary condition combos
+        from flowcol.pde import PDERegistry
+        pde = PDERegistry.get_active()
+        
+        boundary_top = 0
+        boundary_bottom = 0
+        boundary_left = 0
+        boundary_right = 0
+        
+        if "top" in self.bc_combo_ids:
+            label = dpg.get_value(self.bc_combo_ids["top"])
+            boundary_top = pde.global_bc_options.get(label, 0)
+            
+        if "bottom" in self.bc_combo_ids:
+            label = dpg.get_value(self.bc_combo_ids["bottom"])
+            boundary_bottom = pde.global_bc_options.get(label, 0)
+            
+        if "left" in self.bc_combo_ids:
+            label = dpg.get_value(self.bc_combo_ids["left"])
+            boundary_left = pde.global_bc_options.get(label, 0)
+            
+        if "right" in self.bc_combo_ids:
+            label = dpg.get_value(self.bc_combo_ids["right"])
+            boundary_right = pde.global_bc_options.get(label, 0)
 
         # Clamp to valid ranges
         passes = max(passes, 1)

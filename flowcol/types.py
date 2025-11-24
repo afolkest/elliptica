@@ -11,7 +11,7 @@ from flowcol.poisson import DIRICHLET
 class BoundaryObject:
     """Generic boundary object for any PDE (replaces Conductor)."""
     mask: np.ndarray
-    voltage: float = 0.0  # Primary field for backwards compatibility
+    params: dict[str, float] = field(default_factory=dict)  # Generic parameters
     position: tuple[float, float] = (0.0, 0.0)
     interior_mask: Optional[np.ndarray] = None
     original_mask: Optional[np.ndarray] = None
@@ -19,8 +19,37 @@ class BoundaryObject:
     scale_factor: float = 1.0  # Current scale relative to original
     edge_smooth_sigma: float = 1.5  # Edge anti-aliasing blur in pixels (0-5px range)
     smear_enabled: bool = False  # Enable texture smearing inside boundary
-    smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA  # Gaussian blur strength as fraction of canvas width
     id: Optional[int] = None  # Assigned when added to project
+
+    def __init__(self, mask: np.ndarray, voltage: float = 0.0, params: Optional[dict[str, float]] = None, **kwargs):
+        self.mask = mask
+        self.params = params if params is not None else {}
+        if "voltage" not in self.params:
+            self.params["voltage"] = voltage
+        
+        # Handle other fields
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+            
+        # Set defaults for missing fields (simulating dataclass behavior)
+        if not hasattr(self, 'position'): self.position = (0.0, 0.0)
+        if not hasattr(self, 'interior_mask'): self.interior_mask = None
+        if not hasattr(self, 'original_mask'): self.original_mask = None
+        if not hasattr(self, 'original_interior_mask'): self.original_interior_mask = None
+        if not hasattr(self, 'scale_factor'): self.scale_factor = 1.0
+        if not hasattr(self, 'edge_smooth_sigma'): self.edge_smooth_sigma = 1.5
+        if not hasattr(self, 'smear_enabled'): self.smear_enabled = False
+        if not hasattr(self, 'smear_sigma'): self.smear_sigma = defaults.DEFAULT_SMEAR_SIGMA
+        if not hasattr(self, 'id'): self.id = None
+
+    # Backwards compatibility for 'voltage'
+    @property
+    def voltage(self) -> float:
+        return self.params.get("voltage", 0.0)
+
+    @voltage.setter
+    def voltage(self, v: float) -> None:
+        self.params["voltage"] = v
 
     # Generic 'value' is an alias for 'voltage' for future PDE compatibility
     @property
