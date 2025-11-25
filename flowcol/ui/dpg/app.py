@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import copy
 import threading
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict
 
 import numpy as np
 import dearpygui.dearpygui as dpg  # type: ignore
 
 from flowcol.pde.register import register_all_pdes
+from flowcol.pde import PDERegistry
+from flowcol.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 from flowcol.app.core import AppState
 from flowcol.app import actions
 from flowcol.ui.dpg.render_modal import RenderModalController
@@ -88,6 +91,8 @@ def _snapshot_project(project: Project) -> Project:
         boundary_bottom=project.boundary_bottom,
         boundary_left=project.boundary_left,
         boundary_right=project.boundary_right,
+        pde_type=project.pde_type,
+        pde_bc=copy.deepcopy(project.pde_bc),
     )
 
 
@@ -106,6 +111,7 @@ class FlowColApp:
     viewport_created: bool = False
     edit_controls_id: Optional[int] = None
     render_controls_id: Optional[int] = None
+    pde_combo_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
 
@@ -113,10 +119,12 @@ class FlowColApp:
     downsample_debounce_timer: Optional[threading.Timer] = None
     postprocess_debounce_timer: Optional[threading.Timer] = None
     mouse_handler_registry_id: Optional[int] = None
+    pde_label_map: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         # Register all available PDEs
         register_all_pdes()
+        self._build_pde_label_map()
 
         # Create projects directory if it doesn't exist
         projects_dir = Path.cwd() / "projects"
@@ -154,6 +162,58 @@ class FlowColApp:
             raise RuntimeError("Dear PyGui is not installed. Please `pip install dearpygui` to run the GUI.")
 
     # ------------------------------------------------------------------
+    # PDE selection helpers
+    # ------------------------------------------------------------------
+    def _build_pde_label_map(self) -> None:
+        """Build mapping from combo labels to PDE registry names."""
+        self.pde_label_map.clear()
+        for name in PDERegistry.list_available():
+            pde = PDERegistry.get(name)
+            label = f"{pde.display_name} ({name})"
+            self.pde_label_map[label] = name
+
+    def _label_for_active_pde(self) -> str:
+        """Return combo label for currently active PDE."""
+        active = PDERegistry.get_active_name()
+        for label, name in self.pde_label_map.items():
+            if name == active:
+                return label
+        return next(iter(self.pde_label_map.keys()), "")
+
+    def on_pde_changed(self, sender=None, app_data=None) -> None:
+        """Handle equation combo change."""
+        if dpg is None:
+            return
+
+        label = app_data
+        name = self.pde_label_map.get(label)
+        if not name:
+            return
+
+        PDERegistry.set_active(name)
+        with self.state_lock:
+            self.state.project.pde_type = name
+            active_pde = PDERegistry.get_active()
+            if getattr(active_pde, "bc_fields", None):
+                # Ensure BC map exists for this PDE and sync legacy fields
+                bc_map = resolve_bc_map(self.state.project, active_pde)
+                self.state.project.pde_bc[name] = bc_map
+                legacy_bc = bc_map_to_legacy(bc_map)
+                self.state.project.boundary_top = legacy_bc.get("top", self.state.project.boundary_top)
+                self.state.project.boundary_bottom = legacy_bc.get("bottom", self.state.project.boundary_bottom)
+                self.state.project.boundary_left = legacy_bc.get("left", self.state.project.boundary_left)
+                self.state.project.boundary_right = legacy_bc.get("right", self.state.project.boundary_right)
+            self.state.field_dirty = True
+            self.state.render_dirty = True
+            self.state.clear_render_cache()
+
+        self.boundary_controls.rebuild_controls()
+        if self.pde_combo_id is not None:
+            dpg.set_value(self.pde_combo_id, label)
+        if dpg.does_item_exist("status_text"):
+            dpg.set_value("status_text", f"Active equation: {label}")
+
+    # ------------------------------------------------------------------
     # Building the interface
     # ------------------------------------------------------------------
     def build(self) -> None:
@@ -184,6 +244,14 @@ class FlowColApp:
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
                 dpg.add_text("Render Controls")
+                self.pde_combo_id = dpg.add_combo(
+                    label="Equation",
+                    items=list(self.pde_label_map.keys()),
+                    default_value=self._label_for_active_pde(),
+                    callback=self.on_pde_changed,
+                    width=250,
+                )
+                dpg.add_spacer(height=6)
                 dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
                 dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
                 dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")

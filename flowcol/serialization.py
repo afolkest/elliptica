@@ -146,6 +146,8 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
         'boundary_bottom': project.boundary_bottom,
         'boundary_left': project.boundary_left,
         'boundary_right': project.boundary_right,
+        'pde_type': getattr(project, 'pde_type', 'poisson'),
+        'pde_bc': getattr(project, 'pde_bc', {}),
     }
 
 
@@ -160,6 +162,8 @@ def _dict_to_project(data: dict[str, Any]) -> Project:
         boundary_bottom=data.get('boundary_bottom', 0),
         boundary_left=data.get('boundary_left', 0),
         boundary_right=data.get('boundary_right', 0),
+        pde_type=data.get('pde_type', 'poisson'),
+        pde_bc=data.get('pde_bc', {}),
     )
 
 

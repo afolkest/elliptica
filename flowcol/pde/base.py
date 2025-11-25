@@ -8,6 +8,19 @@ import numpy as np
 
 
 @dataclass
+class BCField:
+    """Metadata for a boundary condition field (per edge)."""
+    name: str
+    display_name: str
+    field_type: str  # "enum", "float", "int", "bool"
+    default: Any
+    min_value: float | None = None
+    max_value: float | None = None
+    choices: list[tuple[str, Any]] = field(default_factory=list)  # For enum: [(label, value)]
+    description: str = ""
+
+
+@dataclass
 class BoundaryParameter:
     """Metadata for a parameter controllable on boundary objects."""
     name: str
@@ -44,4 +57,7 @@ class PDEDefinition:
     # Global boundary condition options (e.g., {"Dirichlet": 0, "Neumann": 1})
     # If empty, no global BC controls will be shown.
     global_bc_options: dict[str, int] = field(default_factory=dict)
+    
+    # Rich boundary condition fields (preferred over global_bc_options)
+    bc_fields: list[BCField] = field(default_factory=list)
     """List of parameters that can be adjusted for each boundary object."""

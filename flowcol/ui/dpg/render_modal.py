@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 
 from flowcol import defaults
 from flowcol.app import actions
+from flowcol.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 
 if TYPE_CHECKING:
     from flowcol.ui.dpg.app import FlowColApp
@@ -72,8 +73,12 @@ class RenderModalController:
         self.edge_gain_power_slider_id: Optional[int] = None
 
         # Generic Boundary Condition Controls
-        # Map: edge_name -> combo_id
-        self.bc_combo_ids: dict[str, int] = {}
+        # Map: edge_name -> field_name -> widget_id
+        self.bc_field_ids: dict[str, dict[str, int]] = {}
+        # Enum choices cache: edge -> field_name -> [(label, value)]
+        self.bc_enum_choices: dict[str, dict[str, list[tuple[str, object]]]] = {}
+        # Field metadata cache by name
+        self.bc_field_defs: dict[str, object] = {}
 
     def ensure_modal(self) -> None:
         """Create the modal dialog window if it doesn't exist."""
@@ -191,48 +196,70 @@ class RenderModalController:
             dpg.add_spacer(height=15)
             dpg.add_separator()
             dpg.add_spacer(height=10)
-            
-            # Dynamic Boundary Conditions Section
+            # Dynamic Boundary Conditions Section (per-PDE)
             from flowcol.pde import PDERegistry
             pde = PDERegistry.get_active()
-            
-            if pde.global_bc_options:
-                dpg.add_text("Boundary Conditions")
-                dpg.add_spacer(height=5)
-                
-                bc_labels = list(pde.global_bc_options.keys())
-                
-                # Cross-shaped layout for boundary controls
-                with dpg.table(header_row=False, borders_innerH=False, borders_innerV=False,
-                              borders_outerH=False, borders_outerV=False):
-                    dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
-                    dpg.add_table_column(width_fixed=True, init_width_or_weight=120)
-                    dpg.add_table_column(width_fixed=True, init_width_or_weight=100)
-
-                    # Row 0: Top boundary centered
-                    with dpg.table_row():
-                        dpg.add_text("")
-                        self.bc_combo_ids["top"] = dpg.add_combo(items=bc_labels, width=100)
-                        dpg.add_text("")
-
-                    # Row 1: Left and Right boundaries
-                    with dpg.table_row():
-                        self.bc_combo_ids["left"] = dpg.add_combo(items=bc_labels, width=100)
-                        dpg.add_text("   (Domain)   ")
-                        self.bc_combo_ids["right"] = dpg.add_combo(items=bc_labels, width=100)
-
-                    # Row 2: Bottom boundary centered
-                    with dpg.table_row():
-                        dpg.add_text("")
-                        self.bc_combo_ids["bottom"] = dpg.add_combo(items=bc_labels, width=100)
-                        dpg.add_text("")
-            else:
-                dpg.add_text("No global boundary conditions available.")
+            self._build_bc_controls(modal, pde)
 
             dpg.add_spacer(height=20)
             with dpg.group(horizontal=True):
                 dpg.add_button(label="Render", width=140, callback=self.on_apply)
                 dpg.add_button(label="Cancel", width=140, callback=self.on_cancel)
+
+    def _build_bc_controls(self, parent, pde) -> None:
+        """Build boundary condition controls from PDE metadata."""
+        if dpg is None:
+            return
+
+        self.bc_field_ids = {}
+        self.bc_enum_choices = {}
+        self.bc_field_defs = {f.name: f for f in getattr(pde, "bc_fields", [])}
+
+        bc_fields = getattr(pde, "bc_fields", [])
+        if not bc_fields:
+            dpg.add_text("No global boundary conditions available.", parent=parent)
+            return
+
+        dpg.add_text("Boundary Conditions")
+        dpg.add_spacer(height=5)
+
+        edges = ["top", "right", "bottom", "left"]
+        for edge in edges:
+            self.bc_field_ids[edge] = {}
+            self.bc_enum_choices[edge] = {}
+            with dpg.collapsing_header(label=edge.title(), default_open=True, parent=parent):
+                for field in bc_fields:
+                    if field.field_type == "enum":
+                        labels = [lbl for lbl, _ in field.choices]
+                        self.bc_enum_choices[edge][field.name] = list(field.choices)
+                        widget_id = dpg.add_combo(
+                            label=field.display_name,
+                            items=labels,
+                            width=200,
+                        )
+                    elif field.field_type == "bool":
+                        widget_id = dpg.add_checkbox(
+                            label=field.display_name,
+                        )
+                    elif field.field_type == "int":
+                        widget_id = dpg.add_input_int(
+                            label=field.display_name,
+                            width=120,
+                            min_value=field.min_value if field.min_value is not None else 0,
+                            max_value=field.max_value if field.max_value is not None else 2147483647,
+                        )
+                    else:
+                        widget_id = dpg.add_input_float(
+                            label=field.display_name,
+                            width=180,
+                            min_value=field.min_value if field.min_value is not None else 0.0,
+                            max_value=field.max_value if field.max_value is not None else 1e9,
+                        )
+
+                    self.bc_field_ids[edge][field.name] = widget_id
+                    if getattr(field, "description", ""):
+                        with dpg.tooltip(widget_id):
+                            dpg.add_text(field.description)
 
     def open(self, sender=None, app_data=None) -> None:
         """Open the render modal dialog.
@@ -249,7 +276,9 @@ class RenderModalController:
         if self.modal_id is not None:
             dpg.delete_item(self.modal_id)
             self.modal_id = None
-            self.bc_combo_ids.clear()
+            self.bc_field_ids.clear()
+            self.bc_enum_choices.clear()
+            self.bc_field_defs.clear()
             
         self.ensure_modal()
         self.update_values()
@@ -308,28 +337,36 @@ class RenderModalController:
         if self.edge_gain_power_slider_id is not None:
             dpg.set_value(self.edge_gain_power_slider_id, float(settings.edge_gain_power))
 
-        # Update boundary condition combos
+        # Update boundary condition controls
         from flowcol.pde import PDERegistry
         pde = PDERegistry.get_active()
-        
-        # Reverse lookup: value -> label
-        bc_lookup = {v: k for k, v in pde.global_bc_options.items()}
-        
-        if "top" in self.bc_combo_ids:
-            label = bc_lookup.get(project.boundary_top, list(pde.global_bc_options.keys())[0])
-            dpg.set_value(self.bc_combo_ids["top"], label)
-            
-        if "bottom" in self.bc_combo_ids:
-            label = bc_lookup.get(project.boundary_bottom, list(pde.global_bc_options.keys())[0])
-            dpg.set_value(self.bc_combo_ids["bottom"], label)
-            
-        if "left" in self.bc_combo_ids:
-            label = bc_lookup.get(project.boundary_left, list(pde.global_bc_options.keys())[0])
-            dpg.set_value(self.bc_combo_ids["left"], label)
-            
-        if "right" in self.bc_combo_ids:
-            label = bc_lookup.get(project.boundary_right, list(pde.global_bc_options.keys())[0])
-            dpg.set_value(self.bc_combo_ids["right"], label)
+        bc_map = resolve_bc_map(project, pde)
+
+        if self.bc_field_ids:
+            for edge, field_map in self.bc_field_ids.items():
+                for field_name, widget_id in field_map.items():
+                    field = self.bc_field_defs.get(field_name)
+                    if field is None or not dpg.does_item_exist(widget_id):
+                        continue
+                    val = bc_map.get(edge, {}).get(field_name, field.default)
+                    if field.field_type == "enum":
+                        choices = self.bc_enum_choices.get(edge, {}).get(field_name, [])
+                        label = None
+                        for lbl, v in choices:
+                            if v == val:
+                                label = lbl
+                                break
+                        if label is None and choices:
+                            label = choices[0][0]
+                        elif label is None:
+                            label = str(val)
+                        dpg.set_value(widget_id, label)
+                    elif field.field_type == "bool":
+                        dpg.set_value(widget_id, bool(val))
+                    elif field.field_type == "int":
+                        dpg.set_value(widget_id, int(val))
+                    else:
+                        dpg.set_value(widget_id, float(val))
 
     def on_cancel(self, sender=None, app_data=None) -> None:
         """Handle cancel button click - closes modal without changes."""
@@ -357,30 +394,36 @@ class RenderModalController:
         edge_gain_strength = float(dpg.get_value(self.edge_gain_strength_slider_id)) if self.edge_gain_strength_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_STRENGTH
         edge_gain_power = float(dpg.get_value(self.edge_gain_power_slider_id)) if self.edge_gain_power_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_POWER
 
-        # Read boundary condition combos
+        # Read boundary condition controls
         from flowcol.pde import PDERegistry
         pde = PDERegistry.get_active()
-        
-        boundary_top = 0
-        boundary_bottom = 0
-        boundary_left = 0
-        boundary_right = 0
-        
-        if "top" in self.bc_combo_ids:
-            label = dpg.get_value(self.bc_combo_ids["top"])
-            boundary_top = pde.global_bc_options.get(label, 0)
-            
-        if "bottom" in self.bc_combo_ids:
-            label = dpg.get_value(self.bc_combo_ids["bottom"])
-            boundary_bottom = pde.global_bc_options.get(label, 0)
-            
-        if "left" in self.bc_combo_ids:
-            label = dpg.get_value(self.bc_combo_ids["left"])
-            boundary_left = pde.global_bc_options.get(label, 0)
-            
-        if "right" in self.bc_combo_ids:
-            label = dpg.get_value(self.bc_combo_ids["right"])
-            boundary_right = pde.global_bc_options.get(label, 0)
+        bc_map = resolve_bc_map(self.app.state.project, pde)
+
+        if self.bc_field_ids:
+            for edge, field_map in self.bc_field_ids.items():
+                for field_name, widget_id in field_map.items():
+                    field = self.bc_field_defs.get(field_name)
+                    if field is None or not dpg.does_item_exist(widget_id):
+                        continue
+                    if field.field_type == "enum":
+                        label = dpg.get_value(widget_id)
+                        choices = self.bc_enum_choices.get(edge, {}).get(field_name, [])
+                        value = None
+                        for lbl, val in choices:
+                            if lbl == label:
+                                value = val
+                                break
+                        if value is None and choices:
+                            value = choices[0][1]
+                        bc_map.setdefault(edge, {})[field_name] = value
+                    elif field.field_type == "bool":
+                        bc_map.setdefault(edge, {})[field_name] = bool(dpg.get_value(widget_id))
+                    elif field.field_type == "int":
+                        bc_map.setdefault(edge, {})[field_name] = int(dpg.get_value(widget_id))
+                    else:
+                        bc_map.setdefault(edge, {})[field_name] = float(dpg.get_value(widget_id))
+
+        legacy_bc = bc_map_to_legacy(bc_map)
 
         # Clamp to valid ranges
         passes = max(passes, 1)
@@ -405,10 +448,11 @@ class RenderModalController:
             self.app.state.render_settings.edge_gain_strength = edge_gain_strength
             self.app.state.render_settings.edge_gain_power = edge_gain_power
             # Update boundary conditions
-            self.app.state.project.boundary_top = boundary_top
-            self.app.state.project.boundary_bottom = boundary_bottom
-            self.app.state.project.boundary_left = boundary_left
-            self.app.state.project.boundary_right = boundary_right
+            self.app.state.project.pde_bc[pde.name] = bc_map
+            self.app.state.project.boundary_top = legacy_bc.get("top", self.app.state.project.boundary_top)
+            self.app.state.project.boundary_bottom = legacy_bc.get("bottom", self.app.state.project.boundary_bottom)
+            self.app.state.project.boundary_left = legacy_bc.get("left", self.app.state.project.boundary_left)
+            self.app.state.project.boundary_right = legacy_bc.get("right", self.app.state.project.boundary_right)
 
         self.close()
         # Start the render job via orchestrator
