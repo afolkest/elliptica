@@ -93,6 +93,7 @@ class Project:
     # === Multi-PDE support ===
     pde_type: str = "poisson"  # Active PDE type
     pde_params: dict = field(default_factory=dict)  # PDE-specific parameters
+    pde_bc: dict = field(default_factory=dict)  # Per-PDE boundary condition values
 
     # === Compatibility accessors ===
     @property

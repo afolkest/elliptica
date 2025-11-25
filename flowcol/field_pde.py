@@ -13,6 +13,7 @@ from flowcol.poisson import DIRICHLET
 from flowcol import defaults
 from flowcol.pde.relaxation import build_relaxation_mask, relax_potential_band
 from flowcol.mask_utils import blur_mask
+from flowcol.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 
 
 def compute_field_pde(
@@ -47,6 +48,20 @@ def compute_field_pde(
     """
     # Get active PDE definition
     pde = PDERegistry.get_active()
+    if getattr(pde, "bc_fields", None):
+        bc_map = resolve_bc_map(project, pde)
+        legacy_bc = bc_map_to_legacy(bc_map, DIRICHLET)
+        # Persist resolved BCs for this PDE on the project (for UI/state roundtrips)
+        if hasattr(project, "pde_bc"):
+            project.pde_bc[pde.name] = bc_map
+    else:
+        bc_map = {}
+        legacy_bc = {
+            'top': boundary_top,
+            'bottom': boundary_bottom,
+            'left': boundary_left,
+            'right': boundary_right,
+        }
 
     # Calculate grid dimensions
     canvas_w, canvas_h = project.canvas_resolution
@@ -60,16 +75,17 @@ def compute_field_pde(
     # Create a temporary project-like object with the solve dimensions
     # This is a bit of a hack but maintains compatibility
     class SolveProject:
-        def __init__(self, original_project, solve_shape, margin, domain_size):
+        def __init__(self, original_project, solve_shape, margin, domain_size, bc_map, legacy_bc):
             self.boundary_objects = original_project.boundary_objects
             self.shape = solve_shape
             self.margin = margin  # (margin_x, margin_y) tuple
             self.domain_size = domain_size  # (domain_w, domain_h) tuple
+            self.bc = bc_map  # Rich BC map
             self.boundary_conditions = {
-                'top': boundary_top,
-                'bottom': boundary_bottom,
-                'left': boundary_left,
-                'right': boundary_right,
+                'top': legacy_bc.get('top', boundary_top),
+                'bottom': legacy_bc.get('bottom', boundary_bottom),
+                'left': legacy_bc.get('left', boundary_left),
+                'right': legacy_bc.get('right', boundary_right),
             }
             self.poisson_scale = poisson_scale
             self.pde_params = original_project.pde_params
@@ -82,7 +98,7 @@ def compute_field_pde(
         # Solve at lower resolution
         solve_w = max(1, int(round(field_w * poisson_scale)))
         solve_h = max(1, int(round(field_h * poisson_scale)))
-        solve_project = SolveProject(project, (solve_h, solve_w), margin, (domain_w, domain_h))
+        solve_project = SolveProject(project, (solve_h, solve_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
 
         # Solve PDE at lower resolution
         solution_lowres = pde.solve(solve_project)
@@ -113,7 +129,7 @@ def compute_field_pde(
                 # We need to rebuild the Dirichlet mask at full resolution to know where to relax
                 # This is a bit expensive but necessary for good previews
                 # Create a temporary project for full-res mask generation
-                full_res_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h))
+                full_res_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
                 
                 # TODO: This assumes Poisson PDE internals (dirichlet_mask). 
                 # Ideally the PDE solver would expose a "get_boundary_mask" method.
@@ -147,7 +163,7 @@ def compute_field_pde(
 
     else:
         # Solve at full resolution
-        solve_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h))
+        solve_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
         solution = pde.solve(solve_project)
 
     # Extract LIC field from solution
@@ -258,4 +274,3 @@ def _build_dirichlet_values(project) -> np.ndarray:
         values[y0:y1, x0:x1] = np.where(mask_bool, value, values[y0:y1, x0:x1])
         
     return values
-

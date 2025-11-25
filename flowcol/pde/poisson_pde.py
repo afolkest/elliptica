@@ -7,7 +7,7 @@ from typing import Any
 from scipy.ndimage import zoom
 from ..poisson import solve_poisson_system, DIRICHLET
 from ..mask_utils import blur_mask
-from .base import PDEDefinition, BoundaryParameter
+from .base import PDEDefinition, BoundaryParameter, BCField
 
 
 def solve_poisson(project: Any) -> dict[str, np.ndarray]:
@@ -141,8 +141,14 @@ POISSON_PDE = PDEDefinition(
             description="Electric potential of the conductor"
         )
     ],
-    global_bc_options={
-        "Dirichlet": 0,
-        "Neumann": 1
-    }
+    bc_fields=[
+        BCField(
+            name="type",
+            display_name="Boundary Type",
+            field_type="enum",
+            default=DIRICHLET,
+            choices=[("Dirichlet", DIRICHLET), ("Neumann", 1)],
+            description="Dirichlet=fixed potential, Neumann=insulated edge"
+        )
+    ],
 )

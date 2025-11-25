@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from typing import Any, Optional
 import numba
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -95,18 +97,30 @@ def _build_poisson_system(
 
     return row_index[:n_nonzero], col_index[:n_nonzero], almost_laplacian[:n_nonzero], rhs
 
-def solve_poisson_system(
+@dataclass
+class PoissonSolverContext:
+    """Context holding the pre-built matrix and preconditioner for fast solving."""
+    A: Any
+    preconditioner: Any
+    row_index: np.ndarray
+    col_index: np.ndarray
+    almost_laplacian: np.ndarray
+    shape: tuple[int, int]
+    dirichlet_mask: np.ndarray
+
+def build_poisson_solver(
     dirichlet_mask,
     dirichlet_values,
-    tol = SOLVER_TOL,
-    maxiter = 2000,
     boundary_top=DIRICHLET,
     boundary_bottom=DIRICHLET,
     boundary_left=DIRICHLET,
     boundary_right=DIRICHLET,
     charge_density=None
-):
-
+) -> PoissonSolverContext:
+    """
+    Build the system matrix and preconditioner for the Poisson equation.
+    Returns a context object that can be used with solve_poisson_fast.
+    """
     height, width = dirichlet_mask.shape
     if charge_density is None:
         charge_density = np.zeros((height, width), dtype=PRECISION)
@@ -135,15 +149,105 @@ def solve_poisson_system(
         max_coarse=10,
         max_levels=10
     )
-    preconditioner  = multilevel_solver.aspreconditioner() #preconditioner
+    preconditioner = multilevel_solver.aspreconditioner()
 
-    phi_flat, info = cg(A, rhs.astype(PRECISION), M=preconditioner, rtol=tol, maxiter=maxiter)
+    return PoissonSolverContext(
+        A=A,
+        preconditioner=preconditioner,
+        row_index=row_index,
+        col_index=col_index,
+        almost_laplacian=almost_laplacian,
+        shape=(height, width),
+        dirichlet_mask=dirichlet_mask
+    )
+
+def solve_poisson_fast(
+    context: PoissonSolverContext,
+    dirichlet_values: np.ndarray,
+    charge_density: Optional[np.ndarray] = None,
+    tol=SOLVER_TOL,
+    maxiter=2000
+) -> np.ndarray:
+    """
+    Solve the Poisson system using a pre-built context.
+    Only the RHS (dirichlet_values and charge_density) can change.
+    """
+    height, width = context.shape
+    N = height * width
+    
+    if charge_density is None:
+        charge_density = np.zeros((height, width), dtype=PRECISION)
+    
+    # Reconstruct RHS efficiently without rebuilding the matrix
+    # We need to replicate the RHS logic from _build_poisson_system but in Python/Numpy for speed
+    # or just call a simplified Numba function.
+    # For now, let's reuse _build_poisson_system but ignore the matrix outputs to ensure correctness,
+    # as optimizing RHS construction is a secondary optimization.
+    
+    # Note: To truly optimize, we should split _build_poisson_system into build_matrix and build_rhs.
+    # But for now, let's just use the existing function and discard the matrix parts.
+    # The matrix build is the slow part usually, but let's verify.
+    # Actually, _build_poisson_system does both. 
+    # Let's write a fast RHS builder.
+    
+    rhs = _build_rhs_only(
+        height, width, 
+        context.dirichlet_mask, 
+        dirichlet_values.astype(PRECISION), 
+        charge_density.astype(PRECISION),
+        context.almost_laplacian # Pass this if needed, but actually we just need the logic
+    )
+
+    phi_flat, info = cg(context.A, rhs, M=context.preconditioner, rtol=tol, maxiter=maxiter)
 
     if info > 0:
         print(f"Warning: poisson solve not converged")
     elif info < 0:
         raise RuntimeError(f"CG failed with error code {info}")
-    
-    #phi_flat = multilevel_solver.solve(rhs, tol=1e-5, maxiter=100, cycle='V') #slightly faster
 
     return phi_flat.reshape(height, width)
+
+@numba.jit(nopython=True, cache=True)
+def _build_rhs_only(height, width, dirichlet_mask, dirichlet_voltage, charge_density, dummy_arg=None):
+    """Fast RHS reconstruction."""
+    N = height * width
+    rhs = np.empty(N, dtype=PRECISION)
+    
+    for i in range(height):
+        for j in range(width):
+            k = j + i * width
+            
+            if dirichlet_mask[i, j]:
+                rhs[k] = dirichlet_voltage[i, j]
+            else:
+                rhs[k] = -charge_density[i, j]
+                # Check neighbors for Dirichlet boundaries
+                for di, dj in [(-1,0), (1, 0), (0, -1), (0, 1)]:
+                    ii, jj = i + di, j + dj
+                    if 0 <= ii < height and 0 <= jj < width:
+                        if dirichlet_mask[ii, jj]:
+                            rhs[k] -= dirichlet_voltage[ii, jj]
+    return rhs
+
+def solve_poisson_system(
+    dirichlet_mask,
+    dirichlet_values,
+    tol = SOLVER_TOL,
+    maxiter = 2000,
+    boundary_top=DIRICHLET,
+    boundary_bottom=DIRICHLET,
+    boundary_left=DIRICHLET,
+    boundary_right=DIRICHLET,
+    charge_density=None
+):
+    """Legacy wrapper for backward compatibility."""
+    context = build_poisson_solver(
+        dirichlet_mask,
+        dirichlet_values,
+        boundary_top,
+        boundary_bottom,
+        boundary_left,
+        boundary_right,
+        charge_density
+    )
+    return solve_poisson_fast(context, dirichlet_values, charge_density, tol, maxiter)

@@ -187,6 +187,18 @@ def perform_render(
             mask_slice = scaled_mask[my0:my1, mx0:mx1]
             lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
 
+    if lic_mask is not None:
+        mask_pixels = int(lic_mask.sum())
+        print(f"  LIC mask enabled: {mask_pixels} pixels blocked, edge_gain={edge_gain_strength:.3f}, power={edge_gain_power:.3f}")
+        if os.environ.get("FLOWCOL_DEBUG_LIC_MASK"):
+            # Write a quick debug mask preview
+            out_dir = Path("outputs")
+            out_dir.mkdir(exist_ok=True)
+            mask_img = (lic_mask.astype(np.uint8) * 255)
+            Image.fromarray(mask_img).save(out_dir / "debug_lic_mask.png")
+    else:
+        print(f"  LIC mask disabled (use_mask={use_mask}, conductors={len(project.conductors)})")
+
     num_passes = max(1, num_passes)
     min_compute = min(compute_w, compute_h)
     streamlength_pixels = max(int(round(streamlength_factor * min_compute)), 1)
