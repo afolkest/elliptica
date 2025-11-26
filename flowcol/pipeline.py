@@ -158,34 +158,47 @@ def perform_render(
         from flowcol.mask_utils import blur_mask
         from scipy.ndimage import zoom
 
-        lic_mask = np.zeros((compute_h, compute_w), dtype=bool)
-        scale_x = compute_w / domain_w if domain_w > 0 else 1.0
-        scale_y = compute_h / domain_h if domain_h > 0 else 1.0
-
-        for conductor in project.conductors:
-            x = (conductor.position[0] + margin_physical) * scale_x
-            y = (conductor.position[1] + margin_physical) * scale_y
-
-            # Scale and blur mask (same logic as field.py)
-            if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
-                scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=0)
+        # Check if PDE provided a dirichlet mask (e.g., biharmonic with extended band)
+        # This ensures LIC blocking matches where the field is actually zero
+        if solution and "dirichlet_mask" in solution:
+            pde_mask = solution["dirichlet_mask"]
+            if pde_mask.shape == (compute_h, compute_w):
+                lic_mask = pde_mask.astype(bool)
             else:
-                scaled_mask = conductor.mask
+                # Fallback: scale to compute resolution (shouldn't normally happen)
+                lic_mask = zoom(pde_mask.astype(np.uint8),
+                               (compute_h / pde_mask.shape[0], compute_w / pde_mask.shape[1]),
+                               order=0) > 0
+        else:
+            # Original logic for PDEs that don't provide a mask (e.g., Poisson)
+            lic_mask = np.zeros((compute_h, compute_w), dtype=bool)
+            scale_x = compute_w / domain_w if domain_w > 0 else 1.0
+            scale_y = compute_h / domain_h if domain_h > 0 else 1.0
 
-            scale_factor = (scale_x + scale_y) / 2.0
-            scaled_sigma = conductor.edge_smooth_sigma * scale_factor
-            scaled_mask = blur_mask(scaled_mask, scaled_sigma)
+            for conductor in project.conductors:
+                x = (conductor.position[0] + margin_physical) * scale_x
+                y = (conductor.position[1] + margin_physical) * scale_y
 
-            mask_h, mask_w = scaled_mask.shape
-            ix, iy = int(round(x)), int(round(y))
-            x0, y0 = max(0, ix), max(0, iy)
-            x1, y1 = min(ix + mask_w, compute_w), min(iy + mask_h, compute_h)
+                # Scale and blur mask (same logic as field.py)
+                if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
+                    scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=0)
+                else:
+                    scaled_mask = conductor.mask
 
-            mx0, my0 = max(0, -ix), max(0, -iy)
-            mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+                scale_factor = (scale_x + scale_y) / 2.0
+                scaled_sigma = conductor.edge_smooth_sigma * scale_factor
+                scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
-            mask_slice = scaled_mask[my0:my1, mx0:mx1]
-            lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
+                mask_h, mask_w = scaled_mask.shape
+                ix, iy = int(round(x)), int(round(y))
+                x0, y0 = max(0, ix), max(0, iy)
+                x1, y1 = min(ix + mask_w, compute_w), min(iy + mask_h, compute_h)
+
+                mx0, my0 = max(0, -ix), max(0, -iy)
+                mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
+
+                mask_slice = scaled_mask[my0:my1, mx0:mx1]
+                lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
 
     if lic_mask is not None:
         mask_pixels = int(lic_mask.sum())

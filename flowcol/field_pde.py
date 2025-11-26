@@ -108,7 +108,11 @@ def compute_field_pde(
         for key, array in solution_lowres.items():
             if array.ndim == 2:
                 zoom_factors = (field_h / array.shape[0], field_w / array.shape[1])
-                upscaled = zoom(array, zoom_factors, order=1)
+                # Use nearest neighbor for boolean masks, bilinear for continuous fields
+                if array.dtype == bool:
+                    upscaled = zoom(array.astype(np.uint8), zoom_factors, order=0) > 0
+                else:
+                    upscaled = zoom(array, zoom_factors, order=1)
                 # Ensure exact shape match
                 if upscaled.shape != (field_h, field_w):
                     upscaled = _match_shape(upscaled, (field_h, field_w))

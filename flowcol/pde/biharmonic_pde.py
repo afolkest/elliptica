@@ -342,6 +342,10 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
         # Grow a band so objects behave as clamped boundaries (φ fixed, ∂nφ ≈ 0)
         mask, values = _extend_dirichlet_band(mask, values, steps=2)
 
+    # Save conductor mask for LIC blocking (before domain edge BCs are added)
+    # This extended mask is where the field is ~zero and LIC should be blocked
+    conductor_dirichlet_mask = mask.copy()
+
     # Edge BCs from project.bc (resolved upstream)
     bc_map = getattr(project, "bc", {}) or {}
     edge_bc = _edge_bc_from_map(bc_map)
@@ -390,7 +394,7 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
     )
     phi = phi_field.astype(np.float32)
 
-    return {"phi": phi}
+    return {"phi": phi, "dirichlet_mask": conductor_dirichlet_mask}
 
 
 BIHARMONIC_PDE = PDEDefinition(
