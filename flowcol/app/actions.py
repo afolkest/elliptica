@@ -133,14 +133,14 @@ def set_noise_sigma(state: AppState, sigma: float) -> None:
         state.render_dirty = True
 
 
-def set_poisson_scale(state: AppState, scale: float) -> None:
-    """Update Poisson preview scale (0.1–1.0)."""
+def set_solve_scale(state: AppState, scale: float) -> None:
+    """Update PDE solve resolution scale (0.1–1.0)."""
     scale = float(scale)
     if not np.isfinite(scale):
         return
-    scale = max(defaults.MIN_POISSON_SCALE, min(defaults.MAX_POISSON_SCALE, scale))
-    if not np.isclose(state.render_settings.poisson_scale, scale):
-        state.render_settings.poisson_scale = scale
+    scale = max(defaults.MIN_SOLVE_SCALE, min(defaults.MAX_SOLVE_SCALE, scale))
+    if not np.isclose(state.render_settings.solve_scale, scale):
+        state.render_settings.solve_scale = scale
         state.field_dirty = True
         state.render_dirty = True
 
@@ -236,7 +236,7 @@ def ensure_render(state: AppState) -> bool:
         settings.use_mask,
         settings.edge_gain_strength,
         settings.edge_gain_power,
-        settings.poisson_scale,
+        settings.solve_scale,
     )
     if result is None:
         return False

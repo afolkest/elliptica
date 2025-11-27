@@ -274,12 +274,14 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
         'use_mask': settings.use_mask,
         'edge_gain_strength': settings.edge_gain_strength,
         'edge_gain_power': settings.edge_gain_power,
-        'poisson_scale': settings.poisson_scale,
+        'solve_scale': settings.solve_scale,
     }
 
 
 def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
     """Reconstruct RenderSettings from dict."""
+    # Support both old 'poisson_scale' and new 'solve_scale' keys for backwards compatibility
+    solve_scale_raw = data.get('solve_scale', data.get('poisson_scale', defaults.DEFAULT_SOLVE_SCALE))
     return RenderSettings(
         multiplier=data.get('multiplier', defaults.RENDER_RESOLUTION_CHOICES[0]),
         supersample=data.get('supersample', defaults.SUPERSAMPLE_CHOICES[0]),
@@ -290,9 +292,9 @@ def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
         use_mask=data.get('use_mask', defaults.DEFAULT_USE_MASK),
         edge_gain_strength=data.get('edge_gain_strength', defaults.DEFAULT_EDGE_GAIN_STRENGTH),
         edge_gain_power=data.get('edge_gain_power', defaults.DEFAULT_EDGE_GAIN_POWER),
-        poisson_scale=max(
-            defaults.MIN_POISSON_SCALE,
-            min(defaults.MAX_POISSON_SCALE, data.get('poisson_scale', defaults.DEFAULT_POISSON_SCALE)),
+        solve_scale=max(
+            defaults.MIN_SOLVE_SCALE,
+            min(defaults.MAX_SOLVE_SCALE, solve_scale_raw),
         ),
     )
 

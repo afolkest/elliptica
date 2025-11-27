@@ -30,7 +30,7 @@ class RenderResult:
     margin: float
     offset_x: int = 0  # Crop offset for mask alignment
     offset_y: int = 0  # Crop offset for mask alignment
-    poisson_scale: float = 1.0  # Poisson solve scale relative to render grid
+    solve_scale: float = 1.0  # PDE solve resolution relative to render grid
     ex: np.ndarray | None = None  # Electric field X component (for anisotropic blur)
     ey: np.ndarray | None = None  # Electric field Y component (for anisotropic blur)
     # Cached conductor masks at canvas resolution (saves redundant rasterization)
@@ -115,7 +115,7 @@ def perform_render(
     use_mask: bool = True,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
-    poisson_scale: float = 1.0,
+    solve_scale: float = 1.0,
 ) -> RenderResult | None:
     """Execute full render pipeline.
 
@@ -137,9 +137,9 @@ def perform_render(
     if compute_w > MAX_RENDER_DIM or compute_h > MAX_RENDER_DIM:
         return None
 
-    preview_note = "" if poisson_scale >= 0.999 else f" (preview scale {poisson_scale:.2f})"
-    print(f"Starting PDE solve ({compute_w}×{compute_h}){preview_note}...")
-    t_poisson_start = time.time()
+    solve_note = "" if solve_scale >= 0.999 else f" (solve scale {solve_scale:.2f})"
+    print(f"Starting PDE solve ({compute_w}×{compute_h}){solve_note}...")
+    t_solve_start = time.time()
     solution, (ex, ey) = compute_field_pde(
         project,
         multiplier,
@@ -149,10 +149,10 @@ def perform_render(
         boundary_bottom=project.boundary_bottom,
         boundary_left=project.boundary_left,
         boundary_right=project.boundary_right,
-        poisson_scale=poisson_scale,
+        solve_scale=solve_scale,
     )
-    t_poisson_end = time.time()
-    print(f"  PDE solve completed in {t_poisson_end - t_poisson_start:.2f}s")
+    t_solve_end = time.time()
+    print(f"  PDE solve completed in {t_solve_end - t_solve_start:.2f}s")
 
     # Generate conductor mask for LIC blocking if enabled
     lic_mask = None
@@ -281,7 +281,7 @@ def perform_render(
         margin=margin_physical,
         offset_x=crop_x0,
         offset_y=crop_y0,
-        poisson_scale=poisson_scale,
+        solve_scale=solve_scale,
         ex=ex_cropped,
         ey=ey_cropped,
         conductor_masks_canvas=conductor_masks_canvas,

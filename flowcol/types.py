@@ -112,8 +112,8 @@ class Project:
         return self.canvas_resolution
 
     @property
-    def poisson_scale(self) -> float:
-        """Scale factor for Poisson solver (always 1.0 for now)."""
+    def solve_scale(self) -> float:
+        """Scale factor for PDE solver (always 1.0 for now)."""
         return 1.0
 
     @property
