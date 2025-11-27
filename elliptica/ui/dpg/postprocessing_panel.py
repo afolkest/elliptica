@@ -83,22 +83,6 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        dpg.add_text("Post-processing", parent=parent)
-        dpg.add_spacer(height=10, parent=parent)
-
-        self.postprocess_clip_slider_id = dpg.add_slider_float(
-            label="Clip %",
-            default_value=self.app.state.display_settings.clip_percent,
-            min_value=0.0,
-            max_value=defaults.MAX_CLIP_PERCENT,
-            format="%.2f%%",
-            callback=self.on_clip_slider,
-            width=200,
-            parent=parent,
-        )
-
-        dpg.add_spacer(height=10, parent=parent)
-        dpg.add_separator(parent=parent)
         dpg.add_text("Colorization", parent=parent)
         dpg.add_spacer(height=10, parent=parent)
 
@@ -120,8 +104,18 @@ class PostprocessingPanel:
             # Build global palette selection UI
             self._build_global_palette_ui("palette_mode_group", palette_colormaps)
 
-            # Brightness/contrast/gamma only apply in palette mode
+            # Clip/brightness/contrast/gamma only apply in palette mode
+            # (in expression mode, you control these directly in the L expression)
             dpg.add_spacer(height=10)
+            self.postprocess_clip_slider_id = dpg.add_slider_float(
+                label="Clip %",
+                default_value=self.app.state.display_settings.clip_percent,
+                min_value=0.0,
+                max_value=defaults.MAX_CLIP_PERCENT,
+                format="%.2f%%",
+                callback=self.on_clip_slider,
+                width=200,
+            )
             self.postprocess_brightness_slider_id = dpg.add_slider_float(
                 label="Brightness",
                 default_value=self.app.state.display_settings.brightness,
@@ -249,7 +243,7 @@ class PostprocessingPanel:
             self.expr_preset_combo_id = dpg.add_combo(
                 items=preset_names,
                 default_value=preset_names[0] if preset_names else "",
-                width=180,
+                width=-1,  # Fill available width
                 callback=self.on_expression_preset_change,
                 tag="expr_preset_combo",
             )
@@ -260,8 +254,8 @@ class PostprocessingPanel:
         dpg.add_text("Lightness (L)  [0-1]", parent=parent)
         self.expr_L_input_id = dpg.add_input_text(
             default_value="clipnorm(lic, 0.5, 99.5)",
-            width=280,
-            height=50,
+            width=-1,  # Fill available width
+            height=45,
             multiline=True,
             callback=self.on_expression_change,
             on_enter=False,
@@ -269,14 +263,14 @@ class PostprocessingPanel:
             parent=parent,
         )
 
-        dpg.add_spacer(height=8, parent=parent)
+        dpg.add_spacer(height=6, parent=parent)
 
         # C expression
         dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
         self.expr_C_input_id = dpg.add_input_text(
             default_value="0",
-            width=280,
-            height=50,
+            width=-1,  # Fill available width
+            height=45,
             multiline=True,
             callback=self.on_expression_change,
             on_enter=False,
@@ -284,14 +278,14 @@ class PostprocessingPanel:
             parent=parent,
         )
 
-        dpg.add_spacer(height=8, parent=parent)
+        dpg.add_spacer(height=6, parent=parent)
 
         # H expression
-        dpg.add_text("Hue (H)  [0-360 degrees]", parent=parent)
+        dpg.add_text("Hue (H)  [0-360°]", parent=parent)
         self.expr_H_input_id = dpg.add_input_text(
             default_value="0",
-            width=280,
-            height=50,
+            width=-1,  # Fill available width
+            height=45,
             multiline=True,
             callback=self.on_expression_change,
             on_enter=False,
@@ -299,21 +293,19 @@ class PostprocessingPanel:
             parent=parent,
         )
 
-        dpg.add_spacer(height=8, parent=parent)
-
         # Error display
         self.expr_error_text_id = dpg.add_text(
             "",
             color=(255, 100, 100),
             tag="expr_error_text",
             parent=parent,
-            wrap=280,
+            wrap=-1,  # Wrap to available width
         )
 
-        dpg.add_spacer(height=10, parent=parent)
+        dpg.add_spacer(height=4, parent=parent)
 
         # Reference section (collapsible)
-        with dpg.collapsing_header(label="Reference", default_open=False, parent=parent):
+        with dpg.collapsing_header(label="Expression Reference", default_open=False, parent=parent):
             dpg.add_text("Variables:", color=(150, 200, 255))
             for var_name, var_desc in AVAILABLE_VARIABLES:
                 dpg.add_text(f"  {var_name}", color=(200, 200, 200))

@@ -245,8 +245,7 @@ class EllipticaApp:
         # Set viewport resize callback
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
 
-        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window",
-                       no_scroll_with_mouse=True):
+        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
             with dpg.group(tag="edit_controls_group") as edit_group:
                 self.edit_controls_id = edit_group
                 dpg.add_text("Render Controls")

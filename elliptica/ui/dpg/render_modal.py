@@ -80,7 +80,7 @@ class RenderModalController:
             no_close=True,
             no_collapse=True,
             width=420,
-            height=550,
+            height=750,
         ) as modal:
             self.modal_id = modal
 
