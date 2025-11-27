@@ -81,6 +81,17 @@ class BoundaryControlsPanel:
             if idx == selected_idx:
                 label += " (selected)"
 
+            # Add boundary type to label if bc_type field exists
+            bc_type_field = self.field_defs.get("bc_type")
+            if bc_type_field and bc_type_field.field_type == "enum":
+                current_bc = conductor.params.get("bc_type", bc_type_field.default)
+                for lbl, val in bc_type_field.choices:
+                    if val == current_bc:
+                        # Extract short name (e.g., "Dirichlet" from "Dirichlet (fixed V)")
+                        short_name = lbl.split(" (")[0] if " (" in lbl else lbl
+                        label += f" - {short_name}"
+                        break
+
             with dpg.collapsing_header(label=label, default_open=True, parent=self.container_id):
                 self.slider_ids[idx] = {}
                 self.field_ids[idx] = {}
@@ -219,6 +230,10 @@ class BoundaryControlsPanel:
 
         # Update visibility for conditional fields
         self._update_field_visibility()
+
+        # Rebuild controls if bc_type changed (to update header labels)
+        if field_name == "bc_type":
+            self.rebuild_controls()
 
     def _update_field_visibility(self) -> None:
         """Show/hide fields based on their visible_when rules."""

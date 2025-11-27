@@ -233,7 +233,7 @@ class CanvasController:
                     hit_idx, hit_region = self.detect_region_at_point(x, y)
                     self.app.state.set_selected(hit_idx)
                     self.selected_region = hit_region
-                self.app.boundary_controls.update_slider_labels()
+                self.app.boundary_controls.rebuild_controls()
                 self.app.postprocess_panel.update_region_properties_panel()
             self.mouse_down_last = mouse_down
             return
@@ -256,7 +256,7 @@ class CanvasController:
                     self.drag_last_pos = (x, y)
                 else:
                     self.drag_active = False
-            self.app.boundary_controls.update_slider_labels()
+            self.app.boundary_controls.rebuild_controls()
             self.app.postprocess_panel.update_region_properties_panel()
             self.app.canvas_renderer.mark_dirty()
 
