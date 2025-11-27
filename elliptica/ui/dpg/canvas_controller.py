@@ -235,6 +235,7 @@ class CanvasController:
                     self.selected_region = hit_region
                 self.app.boundary_controls.update_header_labels()
                 self.app.postprocess_panel.update_region_properties_panel()
+                self.app.canvas_renderer.mark_dirty()  # Redraw to update selection outline
             self.mouse_down_last = mouse_down
             return
 

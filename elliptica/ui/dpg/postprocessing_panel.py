@@ -68,6 +68,69 @@ class PostprocessingPanel:
         self.expr_last_update_time: float = 0.0
         self.expr_debounce_delay: float = 0.3  # 300ms delay
 
+        # Themes for grayed-out appearance
+        self.disabled_theme_id: Optional[int] = None
+        self.disabled_slider_theme_id: Optional[int] = None
+        self.disabled_button_theme_id: Optional[int] = None
+
+    def _ensure_themes(self) -> None:
+        """Create disabled/normal themes if not already created."""
+        if dpg is None or self.disabled_theme_id is not None:
+            return
+
+        # Grayed-out colors (obviously dimmed)
+        gray_bg = (35, 35, 35, 255)
+        gray_grab = (70, 70, 70, 255)
+        gray_text = (90, 90, 90, 255)
+        gray_button = (45, 45, 45, 255)
+
+        # Disabled theme for sliders - uses enabled_state=False to apply when disabled
+        with dpg.theme() as disabled_slider_theme:
+            with dpg.theme_component(dpg.mvSliderFloat, enabled_state=False):
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrab, gray_grab, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_SliderGrabActive, gray_grab, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, gray_text, category=dpg.mvThemeCat_Core)
+        self.disabled_slider_theme_id = disabled_slider_theme
+
+        # Disabled theme for buttons
+        with dpg.theme() as disabled_button_theme:
+            with dpg.theme_component(dpg.mvButton, enabled_state=False):
+                dpg.add_theme_color(dpg.mvThemeCol_Button, gray_button, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonHovered, gray_button, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_ButtonActive, gray_button, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, gray_text, category=dpg.mvThemeCat_Core)
+        self.disabled_button_theme_id = disabled_button_theme
+
+        # Mark as initialized
+        self.disabled_theme_id = disabled_slider_theme
+
+    def _set_slider_grayed(self, widget_tag: str, grayed: bool) -> None:
+        """Set a slider to visually grayed out or normal."""
+        if dpg is None:
+            return
+        self._ensure_themes()
+        if grayed:
+            dpg.bind_item_theme(widget_tag, self.disabled_slider_theme_id)
+            dpg.configure_item(widget_tag, enabled=False)
+        else:
+            dpg.bind_item_theme(widget_tag, 0)
+            dpg.configure_item(widget_tag, enabled=True)
+
+    def _set_button_grayed(self, widget_tag: str, grayed: bool) -> None:
+        """Set a button to visually grayed out or normal."""
+        if dpg is None:
+            return
+        self._ensure_themes()
+        if grayed:
+            dpg.bind_item_theme(widget_tag, self.disabled_button_theme_id)
+            dpg.configure_item(widget_tag, enabled=False)
+        else:
+            dpg.bind_item_theme(widget_tag, 0)
+            dpg.configure_item(widget_tag, enabled=True)
+
     def _is_conductor_selected(self) -> bool:
         """Check if a conductor is currently selected."""
         with self.app.state_lock:
@@ -504,25 +567,26 @@ class PostprocessingPanel:
             dpg.configure_item("global_palette_group", show=False)
             dpg.configure_item("region_palette_group", show=True)
 
-            # Update region palette display
+            # Check if override is enabled
+            has_override = self._has_override_enabled()
+            dpg.set_value("enable_override_checkbox", has_override)
+
+            # Update region palette display and grayed state
             region_style = self._get_current_region_style()
             if region_style and region_style.enabled:
                 dpg.set_value("region_palette_current_text", f"Current: {region_style.palette}")
             else:
                 dpg.set_value("region_palette_current_text", "Current: Use Global")
+            self._set_button_grayed("region_palette_button", not has_override)
 
-            # Clip% always shows global, disabled in conductor mode
-            dpg.configure_item("clip_slider", enabled=False)
+            # Clip% always shows global, grayed in conductor mode
+            self._set_slider_grayed("clip_slider", True)
             dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
 
-            # Check if override is enabled
-            has_override = self._has_override_enabled()
-            dpg.set_value("enable_override_checkbox", has_override)
-
-            # Configure B/C/G sliders based on override state
-            dpg.configure_item("brightness_slider", enabled=has_override)
-            dpg.configure_item("contrast_slider", enabled=has_override)
-            dpg.configure_item("gamma_slider", enabled=has_override)
+            # Configure B/C/G sliders - grayed until override enabled
+            self._set_slider_grayed("brightness_slider", not has_override)
+            self._set_slider_grayed("contrast_slider", not has_override)
+            self._set_slider_grayed("gamma_slider", not has_override)
 
             if has_override and region_style:
                 # Show per-region values
@@ -559,14 +623,14 @@ class PostprocessingPanel:
             dpg.configure_item("global_palette_group", show=True)
             dpg.configure_item("region_palette_group", show=False)
 
-            # Clip% enabled in global mode
-            dpg.configure_item("clip_slider", enabled=True)
+            # Clip% normal in global mode
+            self._set_slider_grayed("clip_slider", False)
             dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
 
-            # B/C/G sliders enabled, showing global values
-            dpg.configure_item("brightness_slider", enabled=True)
-            dpg.configure_item("contrast_slider", enabled=True)
-            dpg.configure_item("gamma_slider", enabled=True)
+            # B/C/G sliders normal, showing global values
+            self._set_slider_grayed("brightness_slider", False)
+            self._set_slider_grayed("contrast_slider", False)
+            self._set_slider_grayed("gamma_slider", False)
             dpg.set_value("brightness_slider", self.app.state.display_settings.brightness)
             dpg.set_value("contrast_slider", self.app.state.display_settings.contrast)
             dpg.set_value("gamma_slider", self.app.state.display_settings.gamma)
