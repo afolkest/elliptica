@@ -1,6 +1,8 @@
 """Canvas renderer for Elliptica UI - handles all canvas drawing operations."""
 
 from typing import TYPE_CHECKING, Optional
+import numpy as np
+from scipy import ndimage
 
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
@@ -32,9 +34,126 @@ class CanvasRenderer:
         self.app = app
         self.canvas_dirty: bool = True
 
+        # Cache for selection outline contour
+        self._selection_contours: list[np.ndarray] | None = None
+        self._selection_cache_key: tuple = ()  # (selected_idx, render_cache_id)
+
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""
         self.canvas_dirty = True
+
+    def invalidate_selection_contour(self) -> None:
+        """Clear cached selection contour (call when selection or render changes)."""
+        self._selection_contours = None
+        self._selection_cache_key = ()
+
+    def _extract_contours(self, mask: np.ndarray) -> list[np.ndarray]:
+        """Extract ordered contour points from a mask.
+
+        Uses skimage if available, otherwise falls back to scipy-based method.
+        Returns list of Nx2 arrays of (x, y) points.
+        """
+        try:
+            from skimage import measure
+            contours = measure.find_contours(mask, 0.5)
+            # Convert (row, col) to (x, y)
+            return [np.column_stack([c[:, 1], c[:, 0]]) for c in contours]
+        except ImportError:
+            return self._extract_contours_fallback(mask)
+
+    def _extract_contours_fallback(self, mask: np.ndarray) -> list[np.ndarray]:
+        """Extract contours using scipy (fallback when skimage unavailable)."""
+        binary = (mask > 0.5).astype(np.uint8)
+        eroded = ndimage.binary_erosion(binary)
+        boundary = binary & ~eroded
+
+        # Label connected components of boundary
+        labeled, num_features = ndimage.label(boundary)
+
+        contours = []
+        for i in range(1, num_features + 1):
+            rows, cols = np.where(labeled == i)
+            if len(rows) < 20:
+                continue
+
+            # Order points using nearest neighbor heuristic
+            points = list(zip(cols.astype(float), rows.astype(float)))
+            ordered = [points.pop(0)]
+
+            while points:
+                last = ordered[-1]
+                min_dist = float('inf')
+                min_idx = 0
+                for j, p in enumerate(points):
+                    dist = (p[0] - last[0])**2 + (p[1] - last[1])**2
+                    if dist < min_dist:
+                        min_dist = dist
+                        min_idx = j
+                ordered.append(points.pop(min_idx))
+
+            contours.append(np.array(ordered))
+
+        return contours
+
+    def _get_selection_contours(self, selected_idx: int, render_cache, canvas_w: int, canvas_h: int) -> list[np.ndarray] | None:
+        """Get contours for selected conductor, scaled to canvas coordinates."""
+        if render_cache is None or render_cache.conductor_masks is None:
+            return None
+        if selected_idx < 0 or selected_idx >= len(render_cache.conductor_masks):
+            return None
+
+        mask = render_cache.conductor_masks[selected_idx]
+        if mask is None:
+            return None
+
+        # Check cache
+        cache_key = (selected_idx, id(render_cache))
+        if self._selection_contours is not None and self._selection_cache_key == cache_key:
+            return self._selection_contours
+
+        # Extract contours at render resolution
+        contours = self._extract_contours(mask)
+        if not contours:
+            return None
+
+        # Scale to canvas coordinates
+        tex_h, tex_w = mask.shape[:2]
+        scale_x = canvas_w / tex_w
+        scale_y = canvas_h / tex_h
+
+        scaled_contours = []
+        for contour in contours:
+            scaled = contour.copy()
+            scaled[:, 0] *= scale_x
+            scaled[:, 1] *= scale_y
+            scaled_contours.append(scaled)
+
+        # Cache
+        self._selection_contours = scaled_contours
+        self._selection_cache_key = cache_key
+
+        return scaled_contours
+
+    def _draw_dashed_contour(self, contour: np.ndarray, parent,
+                              dash_length: int = 8, gap_length: int = 6,
+                              color=(255, 255, 255, 220), thickness: float = 2.0) -> None:
+        """Draw a contour as a dashed white line with black outline for visibility."""
+        if len(contour) < 2:
+            return
+
+        # Points are roughly 1 pixel apart, so we can use point count for dash length
+        period = dash_length + gap_length
+        i = 0
+        while i < len(contour):
+            end = min(i + dash_length, len(contour))
+            segment = contour[i:end]
+            if len(segment) >= 2:
+                points = [tuple(p) for p in segment]
+                # Draw black outline first (slightly thicker)
+                dpg.draw_polyline(points, color=(0, 0, 0, 180), thickness=thickness + 1.5, parent=parent)
+                # Draw white line on top
+                dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
+            i += period
 
     def draw(self) -> None:
         """Redraw the canvas with current state.
@@ -101,6 +220,13 @@ class CanvasRenderer:
                     uv_max=(1.0, 1.0),
                     parent=self.app.canvas_layer_id,
                 )
+
+            # Draw selection outline for selected conductor in render mode
+            if selected_idx >= 0:
+                contours = self._get_selection_contours(selected_idx, render_cache, canvas_w, canvas_h)
+                if contours:
+                    for contour in contours:
+                        self._draw_dashed_contour(contour, self.app.canvas_layer_id)
 
         if view_mode == "edit" or render_cache is None:
             for idx, conductor in enumerate(conductors):
