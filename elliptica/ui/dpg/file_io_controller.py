@@ -508,7 +508,7 @@ class FileIOController:
                           if self.app.state.display_settings.color_enabled
                           else "Grayscale")
 
-        dpg.set_value("global_palette_current_text", f"Current: {palette_text}")
+        dpg.configure_item("global_palette_button", label=palette_text)
 
     def auto_save_cache(self) -> None:
         """Auto-save render cache to disk (called after successful render)."""

@@ -299,16 +299,13 @@ class EllipticaApp:
                 dpg.add_spacer(height=15)
                 dpg.add_separator()
                 dpg.add_spacer(height=10)
-                dpg.add_text("Post-processing")
-                dpg.add_spacer(height=10)
 
-                # Render Cache Status
-                self.cache_panel.build_cache_status_ui(render_group)
-
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
                 # Build postprocessing UI (sliders, color controls, region properties)
                 self.postprocess_panel.build_postprocessing_ui(render_group, self.display_pipeline.texture_manager.palette_colormaps)
+
+                # Render cache status at bottom (compact, subtle)
+                dpg.add_spacer(height=10)
+                self.cache_panel.build_cache_status_ui(render_group)
 
             dpg.add_spacer(height=10)
             dpg.add_text("Status:")
