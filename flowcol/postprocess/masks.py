@@ -50,6 +50,7 @@ def rasterize_conductor_masks(
     scale: float,
     offset_x: int = 0,
     offset_y: int = 0,
+    domain_size: tuple[float, float] | None = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """Rasterize conductor masks onto display grid.
 
@@ -60,6 +61,8 @@ def rasterize_conductor_masks(
         scale: multiplier * supersample used for render
         offset_x: Crop offset in x direction (to align with cropped result.array)
         offset_y: Crop offset in y direction (to align with cropped result.array)
+        domain_size: Optional (domain_w, domain_h) for computing exact scale factors.
+            If provided, scale_x and scale_y are computed to match the LIC/field solver.
 
     Returns:
         (surface_masks, interior_masks) - lists of binary masks at display resolution
@@ -67,6 +70,23 @@ def rasterize_conductor_masks(
     height, width = shape
     surface_masks = []
     interior_masks = []
+
+    # Compute scale factors that match the field solver / LIC mask exactly
+    # The field solver uses: compute_dim / domain_dim (after int rounding of compute_dim)
+    # This ensures masks align pixel-perfectly with where the field is actually blocked
+    if domain_size is not None:
+        domain_w, domain_h = domain_size
+        # Reconstruct compute dimensions (full domain before cropping)
+        compute_w = width + offset_x + int(round(margin * scale))  # Approximate
+        compute_h = height + offset_y + int(round(margin * scale))
+        # Actually, we need the original compute dimensions. Use domain_size directly.
+        compute_w_full = int(round(domain_w * scale))
+        compute_h_full = int(round(domain_h * scale))
+        scale_x = compute_w_full / domain_w if domain_w > 0 else scale
+        scale_y = compute_h_full / domain_h if domain_h > 0 else scale
+    else:
+        scale_x = scale
+        scale_y = scale
 
     for conductor in conductors:
         # Get edge smoothing sigma (same as used in field solver and LIC mask)
@@ -78,7 +98,8 @@ def rasterize_conductor_masks(
             conductor.position,
             (height, width),
             margin,
-            scale,
+            scale_x,
+            scale_y,
             offset_x,
             offset_y,
             edge_smooth_sigma=edge_smooth_sigma,
@@ -92,7 +113,8 @@ def rasterize_conductor_masks(
                 conductor.position,
                 (height, width),
                 margin,
-                scale,
+                scale_x,
+                scale_y,
                 offset_x,
                 offset_y,
                 edge_smooth_sigma=0.0,  # Interior doesn't need smoothing
@@ -110,7 +132,8 @@ def _rasterize_single_mask(
     position: tuple[float, float],
     target_shape: tuple[int, int],
     margin: float,
-    scale: float,
+    scale_x: float,
+    scale_y: float,
     offset_x: int = 0,
     offset_y: int = 0,
     edge_smooth_sigma: float = 0.0,
@@ -122,7 +145,8 @@ def _rasterize_single_mask(
         position: (x, y) position on canvas (pre-margin, pre-scale)
         target_shape: (height, width) of output
         margin: Physical margin (pre-scale)
-        scale: Scaling factor applied to canvas
+        scale_x: X scaling factor (compute_w / domain_w)
+        scale_y: Y scaling factor (compute_h / domain_h)
         offset_x: Crop offset in x direction (to align with cropped array)
         offset_y: Crop offset in y direction (to align with cropped array)
         edge_smooth_sigma: Edge smoothing in canvas pixels (will be scaled)
@@ -134,27 +158,24 @@ def _rasterize_single_mask(
     pos_x, pos_y = position
 
     # Apply margin offset and scaling, then subtract crop offset to align with cropped result
-    grid_x = (pos_x + margin) * scale - offset_x
-    grid_y = (pos_y + margin) * scale - offset_y
+    # This matches the field solver: x = (pos + margin) * scale
+    grid_x = (pos_x + margin) * scale_x - offset_x
+    grid_y = (pos_y + margin) * scale_y - offset_y
 
-    # Scale mask using zoom (vectorized, no holes)
-    mask_h, mask_w = mask.shape
-    new_h = max(1, int(round(mask_h * scale)))
-    new_w = max(1, int(round(mask_w * scale)))
-
-    zoom_y = new_h / mask_h
-    zoom_x = new_w / mask_w
-    scaled_mask = zoom(mask, (zoom_y, zoom_x), order=1)
+    # Scale mask using zoom - use the same (scale_y, scale_x) as field solver
+    scaled_mask = zoom(mask, (scale_y, scale_x), order=0)
     scaled_mask = np.clip(scaled_mask, 0.0, 1.0).astype(np.float32)
 
     # Apply edge smoothing (same as field solver and LIC mask)
-    # This ensures smear region matches where field actually stops
+    # Field solver uses: scale_factor = (scale_x + scale_y) / 2.0
     if edge_smooth_sigma > 0:
-        # Scale sigma to match render resolution
-        scaled_sigma = edge_smooth_sigma * scale
+        scale_factor = (scale_x + scale_y) / 2.0
+        scaled_sigma = edge_smooth_sigma * scale_factor
         scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
     # Compute integer placement on target grid
+    # Use actual scaled mask dimensions (after zoom)
+    new_h, new_w = scaled_mask.shape
     x0 = int(round(grid_x))
     y0 = int(round(grid_y))
     x1 = x0 + new_w

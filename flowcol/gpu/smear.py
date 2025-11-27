@@ -201,8 +201,9 @@ def apply_conductor_smear_gpu(
             else:
                 rgb_blur = grayscale_to_rgb_gpu(adjusted)
 
-        # Apply smear at full strength inside mask (no distance-based feathering)
-        weight = full_mask.unsqueeze(-1)  # Broadcast mask to RGB channels (H, W, 1)
+        # Apply smear at full strength inside mask (threshold to match LIC blocking)
+        # The LIC blocking uses mask > 0.5 threshold, so smear must cover the same region
+        weight = (full_mask > 0.5).float().unsqueeze(-1)  # Binary mask as float (H, W, 1)
         out = out * (1.0 - weight) + rgb_blur * weight
 
         # Clean up large temporary tensors to avoid GPU memory accumulation
