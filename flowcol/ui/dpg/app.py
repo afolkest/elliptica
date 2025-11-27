@@ -27,6 +27,7 @@ from flowcol.ui.dpg.image_export_controller import ImageExportController
 from flowcol.ui.dpg.canvas_controller import CanvasController
 from flowcol.ui.dpg.canvas_renderer import CanvasRenderer
 from flowcol.ui.dpg.shape_dialog import ShapeDialogController
+from flowcol.ui.dpg.fonts import setup_fonts
 from flowcol.types import Conductor, Project
 from flowcol import defaults
 
@@ -220,6 +221,10 @@ class FlowColApp:
         """Create viewport, windows, and widgets."""
         self.require_backend()
         dpg.create_context()
+
+        # Load font with math symbol support (must be before any widgets)
+        setup_fonts(size=14)
+
         self.display_pipeline.texture_manager.create_registries()
 
         dpg.create_viewport(title="FlowCol", width=1280, height=820)
