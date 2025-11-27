@@ -12,59 +12,9 @@ from pyamg import smoothed_aggregation_solver
 from ..poisson import DIRICHLET, NEUMANN, solve_poisson_system
 from .base import PDEDefinition, BoundaryParameter, BCField
 from .poisson_pde import extract_electric_field
-from ..mask_utils import blur_mask
-from scipy.ndimage import zoom, convolve
+from .boundary_utils import build_dirichlet_from_objects
+from scipy.ndimage import convolve
 from scipy.sparse.linalg import cg
-
-
-def _build_dirichlet_from_objects(project: Any) -> tuple[np.ndarray, np.ndarray]:
-    """Construct Dirichlet mask/values from boundary objects."""
-    boundary_objects = project.boundary_objects
-    grid_h, grid_w = project.shape
-
-    mask = np.zeros((grid_h, grid_w), dtype=bool)
-    values = np.zeros((grid_h, grid_w), dtype=float)
-
-    if hasattr(project, 'domain_size'):
-        domain_w, domain_h = project.domain_size
-        grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
-        grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
-    else:
-        grid_scale_x = grid_scale_y = 1.0
-    margin_x, margin_y = project.margin if hasattr(project, 'margin') else (0, 0)
-
-    for obj in boundary_objects:
-        if hasattr(obj, 'position'):
-            x = (obj.position[0] + margin_x) * grid_scale_x
-            y = (obj.position[1] + margin_y) * grid_scale_y
-        else:
-            x = margin_x * grid_scale_x
-            y = margin_y * grid_scale_y
-
-        obj_mask = obj.mask
-        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
-            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
-
-        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
-            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
-            scaled_sigma = obj.edge_smooth_sigma * scale_factor
-            obj_mask = blur_mask(obj_mask, scaled_sigma)
-
-        mask_h, mask_w = obj_mask.shape
-        ix, iy = int(round(x)), int(round(y))
-        x0, y0 = max(0, ix), max(0, iy)
-        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
-        mx0, my0 = max(0, -ix), max(0, -iy)
-        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-        mask_slice = obj_mask[my0:my1, mx0:mx1]
-        mask_bool = mask_slice > 0.5
-        value = obj.voltage if hasattr(obj, 'voltage') else obj.value
-
-        mask[y0:y1, x0:x1] |= mask_bool
-        values[y0:y1, x0:x1] = np.where(mask_bool, value, values[y0:y1, x0:x1])
-
-    return mask, values
 
 
 def _extend_dirichlet_band(mask: np.ndarray, values: np.ndarray, steps: int = 2) -> tuple[np.ndarray, np.ndarray]:
@@ -338,7 +288,7 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
         mask = np.zeros((grid_h, grid_w), dtype=bool)
         values = np.zeros((grid_h, grid_w), dtype=float)
     else:
-        mask, values = _build_dirichlet_from_objects(project)
+        mask, values = build_dirichlet_from_objects(project)
         # Grow a band so objects behave as clamped boundaries (φ fixed, ∂nφ ≈ 0)
         mask, values = _extend_dirichlet_band(mask, values, steps=2)
 

@@ -12,8 +12,7 @@ from flowcol.pde import PDERegistry
 from flowcol.poisson import DIRICHLET
 from flowcol import defaults
 from flowcol.pde.relaxation import build_relaxation_mask, relax_potential_band
-from flowcol.mask_utils import blur_mask
-from flowcol.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
+from flowcol.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy, build_dirichlet_from_objects
 
 
 def compute_field_pde(
@@ -198,80 +197,11 @@ def _match_shape(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray
 
 def _build_dirichlet_mask(project) -> np.ndarray:
     """Helper to build Dirichlet mask for relaxation."""
-
-    
-    grid_h, grid_w = project.shape
-    mask = np.zeros((grid_h, grid_w), dtype=bool)
-    
-    domain_w, domain_h = project.domain_size
-    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
-    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
-    margin_x, margin_y = project.margin
-
-    for obj in project.boundary_objects:
-        x = (obj.position[0] + margin_x) * grid_scale_x
-        y = (obj.position[1] + margin_y) * grid_scale_y
-
-        obj_mask = obj.mask
-        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
-            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
-
-        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
-            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
-            scaled_sigma = obj.edge_smooth_sigma * scale_factor
-            obj_mask = blur_mask(obj_mask, scaled_sigma)
-
-        mask_h, mask_w = obj_mask.shape
-        ix, iy = int(round(x)), int(round(y))
-        x0, y0 = max(0, ix), max(0, iy)
-        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
-
-        mx0, my0 = max(0, -ix), max(0, -iy)
-        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-        mask_slice = obj_mask[my0:my1, mx0:mx1]
-        mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
-        
+    mask, _ = build_dirichlet_from_objects(project)
     return mask
 
 
 def _build_dirichlet_values(project) -> np.ndarray:
     """Helper to build Dirichlet values for relaxation."""
-
-    
-    grid_h, grid_w = project.shape
-    values = np.zeros((grid_h, grid_w), dtype=float)
-    
-    domain_w, domain_h = project.domain_size
-    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
-    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
-    margin_x, margin_y = project.margin
-
-    for obj in project.boundary_objects:
-        x = (obj.position[0] + margin_x) * grid_scale_x
-        y = (obj.position[1] + margin_y) * grid_scale_y
-
-        obj_mask = obj.mask
-        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
-            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
-
-        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
-            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
-            scaled_sigma = obj.edge_smooth_sigma * scale_factor
-            obj_mask = blur_mask(obj_mask, scaled_sigma)
-
-        mask_h, mask_w = obj_mask.shape
-        ix, iy = int(round(x)), int(round(y))
-        x0, y0 = max(0, ix), max(0, iy)
-        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
-
-        mx0, my0 = max(0, -ix), max(0, -iy)
-        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-        mask_slice = obj_mask[my0:my1, mx0:mx1]
-        mask_bool = mask_slice > 0.5
-        
-        value = obj.voltage if hasattr(obj, 'voltage') else obj.value
-        values[y0:y1, x0:x1] = np.where(mask_bool, value, values[y0:y1, x0:x1])
-        
+    _, values = build_dirichlet_from_objects(project)
     return values
