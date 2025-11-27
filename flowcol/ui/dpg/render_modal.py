@@ -236,6 +236,8 @@ class RenderModalController:
                             label=field.display_name,
                             items=labels,
                             width=200,
+                            callback=self._on_bc_type_changed,
+                            user_data=edge,
                         )
                     elif field.field_type == "bool":
                         widget_id = dpg.add_checkbox(
@@ -260,6 +262,57 @@ class RenderModalController:
                     if getattr(field, "description", ""):
                         with dpg.tooltip(widget_id):
                             dpg.add_text(field.description)
+
+        # Set initial visibility based on default BC type (Dirichlet)
+        self._update_bc_field_visibility()
+
+    def _on_bc_type_changed(self, sender, app_data, user_data) -> None:
+        """Callback when any BC enum field changes - updates dependent field visibility."""
+        self._update_bc_field_visibility()
+
+    def _update_bc_field_visibility(self) -> None:
+        """Show/hide BC fields based on their visible_when rules."""
+        if dpg is None:
+            return
+
+        for edge, field_ids in self.bc_field_ids.items():
+            # First, collect current values of all fields for this edge
+            current_values = {}
+            for field_name, widget_id in field_ids.items():
+                field_def = self.bc_field_defs.get(field_name)
+                if field_def is None or not dpg.does_item_exist(widget_id):
+                    continue
+                if field_def.field_type == "enum":
+                    # Convert label back to value
+                    label = dpg.get_value(widget_id)
+                    choices = self.bc_enum_choices.get(edge, {}).get(field_name, [])
+                    value = None
+                    for lbl, v in choices:
+                        if lbl == label:
+                            value = v
+                            break
+                    current_values[field_name] = value
+                else:
+                    current_values[field_name] = dpg.get_value(widget_id)
+
+            # Now apply visibility rules to each field
+            for field_name, widget_id in field_ids.items():
+                field_def = self.bc_field_defs.get(field_name)
+                if field_def is None or not dpg.does_item_exist(widget_id):
+                    continue
+
+                visible_when = getattr(field_def, "visible_when", None)
+                if visible_when is None:
+                    # No rule means always visible
+                    dpg.configure_item(widget_id, show=True)
+                else:
+                    # Check all conditions in visible_when dict
+                    should_show = True
+                    for dep_field, required_value in visible_when.items():
+                        if current_values.get(dep_field) != required_value:
+                            should_show = False
+                            break
+                    dpg.configure_item(widget_id, show=should_show)
 
     def open(self, sender=None, app_data=None) -> None:
         """Open the render modal dialog.
@@ -367,6 +420,9 @@ class RenderModalController:
                         dpg.set_value(widget_id, int(val))
                     else:
                         dpg.set_value(widget_id, float(val))
+
+        # Update field visibility after values are set (e.g., show/hide based on BC type)
+        self._update_bc_field_visibility()
 
     def on_cancel(self, sender=None, app_data=None) -> None:
         """Handle cancel button click - closes modal without changes."""
