@@ -24,6 +24,7 @@ def _build_poisson_system(
     boundary_left=DIRICHLET,
     boundary_right=DIRICHLET,
     neumann_mask=None,
+    neumann_values=None,
     ):
     """
     Build the Poisson system matrix and RHS.
@@ -33,8 +34,9 @@ def _build_poisson_system(
 
     Boundary handling:
     - dirichlet_mask: pixels where φ = V (fixed potential)
-    - neumann_mask: pixels that are interior obstacles with zero normal flux (∂φ/∂n = 0)
-      These are cut out of the domain; adjacent free-space pixels use reflection.
+    - neumann_mask: pixels that are interior obstacles with ∂φ/∂n = g
+      These are cut out of the domain; adjacent free-space pixels use ghost cells.
+    - neumann_values: flux values (∂φ/∂n) at each Neumann pixel. If None, assumes zero flux.
     """
     # Handle None neumann_mask (for backwards compatibility)
     has_neumann = neumann_mask is not None
@@ -89,9 +91,12 @@ def _build_poisson_system(
                             # Neighbor is Dirichlet - move to RHS
                             rhs[k] -= dirichlet_voltage[ii, jj]
                         elif has_neumann and neumann_mask[ii, jj]:
-                            # Neighbor is in Neumann region - apply reflection (∂φ/∂n = 0)
-                            # Ghost value equals this pixel's value, so add 1 to diagonal
+                            # Neighbor is in Neumann region - apply ghost cell for ∂φ/∂n = g
+                            # Ghost value: φ_ghost = φ_here + g (with h=1)
+                            # This adds +1 to diagonal and -g to RHS
                             diagonal += 1
+                            if neumann_values is not None:
+                                rhs[k] -= neumann_values[ii, jj]
                         else:
                             # Normal interior neighbor
                             row_index[n_nonzero] = k
@@ -128,6 +133,9 @@ class PoissonSolverContext:
     almost_laplacian: np.ndarray
     shape: tuple[int, int]
     dirichlet_mask: np.ndarray
+    rhs: np.ndarray  # Store RHS for direct use (especially with Neumann boundaries)
+    neumann_mask: Optional[np.ndarray] = None
+    neumann_values: Optional[np.ndarray] = None
 
 def build_poisson_solver(
     dirichlet_mask,
@@ -138,6 +146,7 @@ def build_poisson_solver(
     boundary_right=DIRICHLET,
     charge_density=None,
     neumann_mask=None,
+    neumann_values=None,
 ) -> PoissonSolverContext:
     """
     Build the system matrix and preconditioner for the Poisson equation.
@@ -145,7 +154,8 @@ def build_poisson_solver(
 
     Args:
         neumann_mask: Optional boolean mask for interior Neumann boundaries.
-            Pixels in this mask are treated as insulating obstacles (∂φ/∂n = 0).
+        neumann_values: Optional float array with flux values (∂φ/∂n) at each Neumann pixel.
+            If None, assumes zero flux (insulating boundary).
     """
     height, width = dirichlet_mask.shape
     if charge_density is None:
@@ -166,6 +176,7 @@ def build_poisson_solver(
         boundary_left,
         boundary_right,
         neumann_mask,
+        neumann_values,
     )
 
     N = height * width
@@ -185,7 +196,10 @@ def build_poisson_solver(
         col_index=col_index,
         almost_laplacian=almost_laplacian,
         shape=(height, width),
-        dirichlet_mask=dirichlet_mask
+        dirichlet_mask=dirichlet_mask,
+        rhs=rhs,
+        neumann_mask=neumann_mask,
+        neumann_values=neumann_values,
     )
 
 def solve_poisson_fast(
@@ -198,32 +212,28 @@ def solve_poisson_fast(
     """
     Solve the Poisson system using a pre-built context.
     Only the RHS (dirichlet_values and charge_density) can change.
+
+    Note: When Neumann boundaries are present, uses the pre-computed RHS from context
+    since _build_rhs_only doesn't handle Neumann flux contributions.
     """
     height, width = context.shape
-    N = height * width
-    
-    if charge_density is None:
-        charge_density = np.zeros((height, width), dtype=PRECISION)
-    
-    # Reconstruct RHS efficiently without rebuilding the matrix
-    # We need to replicate the RHS logic from _build_poisson_system but in Python/Numpy for speed
-    # or just call a simplified Numba function.
-    # For now, let's reuse _build_poisson_system but ignore the matrix outputs to ensure correctness,
-    # as optimizing RHS construction is a secondary optimization.
-    
-    # Note: To truly optimize, we should split _build_poisson_system into build_matrix and build_rhs.
-    # But for now, let's just use the existing function and discard the matrix parts.
-    # The matrix build is the slow part usually, but let's verify.
-    # Actually, _build_poisson_system does both. 
-    # Let's write a fast RHS builder.
-    
-    rhs = _build_rhs_only(
-        height, width, 
-        context.dirichlet_mask, 
-        dirichlet_values.astype(PRECISION), 
-        charge_density.astype(PRECISION),
-        context.almost_laplacian # Pass this if needed, but actually we just need the logic
-    )
+
+    # When Neumann boundaries are present, use the pre-computed RHS directly
+    # since _build_rhs_only doesn't handle Neumann flux contributions
+    if context.neumann_mask is not None:
+        rhs = context.rhs
+    else:
+        # No Neumann boundaries - can rebuild RHS efficiently
+        if charge_density is None:
+            charge_density = np.zeros((height, width), dtype=PRECISION)
+
+        rhs = _build_rhs_only(
+            height, width,
+            context.dirichlet_mask,
+            dirichlet_values.astype(PRECISION),
+            charge_density.astype(PRECISION),
+            context.almost_laplacian
+        )
 
     phi_flat, info = cg(context.A, rhs, M=context.preconditioner, rtol=tol, maxiter=maxiter)
 
@@ -267,13 +277,15 @@ def solve_poisson_system(
     boundary_right=DIRICHLET,
     charge_density=None,
     neumann_mask=None,
+    neumann_values=None,
 ):
     """
     Solve the Poisson equation with Dirichlet and optional Neumann boundaries.
 
     Args:
         neumann_mask: Optional boolean mask for interior Neumann boundaries.
-            Pixels in this mask are treated as insulating obstacles (∂φ/∂n = 0).
+        neumann_values: Optional float array with flux values (∂φ/∂n) at each Neumann pixel.
+            If None, assumes zero flux (insulating boundary).
     """
     context = build_poisson_solver(
         dirichlet_mask,
@@ -284,5 +296,6 @@ def solve_poisson_system(
         boundary_right,
         charge_density,
         neumann_mask,
+        neumann_values,
     )
     return solve_poisson_fast(context, dirichlet_values, charge_density, tol, maxiter)
