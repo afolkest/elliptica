@@ -12,22 +12,22 @@ from .base import PDEDefinition, BoundaryParameter, BCField
 
 # Constants for inner boundary BC types
 INNER_DIRICHLET = 0  # Fixed potential (default conductor behavior)
-INNER_NEUMANN = 1    # Insulating boundary (zero normal flux)
+INNER_NEUMANN = 1    # Specified normal flux (∂φ/∂n = g)
 
 
 def solve_poisson(project: Any) -> dict[str, np.ndarray]:
     """
     Solve the Poisson equation for electrostatic potential.
 
-    Supports both Dirichlet (fixed potential) and Neumann (insulating) boundaries
-    on interior objects.
+    Supports both Dirichlet (φ = V) and Neumann (∂φ/∂n = g) boundaries
+    on interior objects. Neumann boundaries can have non-zero flux values.
 
     Args:
         project: Project object with boundary_objects and shape
 
     Returns:
         Dictionary with 'phi' key containing the potential field,
-        and 'neumann_mask' if any Neumann boundaries exist.
+        and 'dirichlet_mask' for LIC blocking if any boundaries exist.
     """
     boundary_objects = project.boundary_objects
     grid_h, grid_w = project.shape
@@ -40,6 +40,7 @@ def solve_poisson(project: Any) -> dict[str, np.ndarray]:
     dirichlet_mask = np.zeros((grid_h, grid_w), dtype=bool)
     dirichlet_values = np.zeros((grid_h, grid_w), dtype=float)
     neumann_mask = np.zeros((grid_h, grid_w), dtype=bool)
+    neumann_values = np.zeros((grid_h, grid_w), dtype=float)
 
     # Get domain dimensions and margin from project
     if hasattr(project, 'domain_size'):
@@ -88,8 +89,12 @@ def solve_poisson(project: Any) -> dict[str, np.ndarray]:
         bc_type = obj.params.get('bc_type', INNER_DIRICHLET)
 
         if bc_type == INNER_NEUMANN:
-            # Neumann (insulating) boundary - add to neumann_mask
+            # Neumann boundary - add to neumann_mask with flux value
+            flux = obj.params.get('neumann_flux', 0.0)
             neumann_mask[y0:y1, x0:x1] |= mask_bool
+            neumann_values[y0:y1, x0:x1] = np.where(
+                mask_bool, flux, neumann_values[y0:y1, x0:x1]
+            )
         else:
             # Dirichlet (fixed potential) boundary - add to dirichlet_mask
             value = obj.params.get('voltage', 0.0)
@@ -113,6 +118,7 @@ def solve_poisson(project: Any) -> dict[str, np.ndarray]:
         boundary_left=bc.get('left', DIRICHLET),
         boundary_right=bc.get('right', DIRICHLET),
         neumann_mask=neumann_mask if has_neumann else None,
+        neumann_values=neumann_values if has_neumann else None,
     )
 
     result = {"phi": phi}
@@ -162,8 +168,8 @@ POISSON_PDE = PDEDefinition(
             display_name="Boundary Type",
             field_type="enum",
             default=INNER_DIRICHLET,
-            choices=[("Dirichlet (fixed V)", INNER_DIRICHLET), ("Neumann (insulating)", INNER_NEUMANN)],
-            description="Dirichlet = fixed potential, Neumann = insulating (zero normal flux)"
+            choices=[("Dirichlet (fixed V)", INNER_DIRICHLET), ("Neumann (flux BC)", INNER_NEUMANN)],
+            description="Dirichlet = fixed potential, Neumann = specified normal flux"
         ),
         BCField(
             name="voltage",
@@ -174,6 +180,16 @@ POISSON_PDE = PDEDefinition(
             max_value=1.0,
             description="Electric potential of the conductor",
             visible_when={"bc_type": INNER_DIRICHLET},
+        ),
+        BCField(
+            name="neumann_flux",
+            display_name="Normal Flux (∂φ/∂n)",
+            field_type="float",
+            default=0.0,
+            min_value=-1.0,
+            max_value=1.0,
+            description="Normal derivative of potential at boundary (0 = insulating)",
+            visible_when={"bc_type": INNER_NEUMANN},
         ),
     ],
     bc_fields=[
