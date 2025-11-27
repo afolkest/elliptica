@@ -148,8 +148,10 @@ def apply_region_overlays_gpu(
 
         # Apply interior region first (lower layer)
         if settings.interior.enabled and idx < len(interior_masks) and interior_masks[idx] is not None:
-            mask = interior_masks[idx]
-            if torch.any(mask > 0):
+            mask_soft = interior_masks[idx]
+            if torch.any(mask_soft > 0):
+                # Threshold mask to match LIC blocking (mask > 0.5)
+                mask = (mask_soft > 0.5).float()
                 if settings.interior.use_palette:
                     # Resolve per-region params and use cached RGB (stays on GPU!)
                     region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
@@ -163,8 +165,10 @@ def apply_region_overlays_gpu(
 
         # Apply surface region (upper layer)
         if settings.surface.enabled and idx < len(conductor_masks) and conductor_masks[idx] is not None:
-            mask = conductor_masks[idx]
-            if torch.any(mask > 0):
+            mask_soft = conductor_masks[idx]
+            if torch.any(mask_soft > 0):
+                # Threshold mask to match LIC blocking (mask > 0.5)
+                mask = (mask_soft > 0.5).float()
                 if settings.surface.use_palette:
                     # Resolve per-region params and use cached RGB (stays on GPU!)
                     region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness

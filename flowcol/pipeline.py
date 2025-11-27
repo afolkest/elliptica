@@ -257,6 +257,7 @@ def perform_render(
     ey_cropped = ey[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
 
     # Rasterize conductor masks at canvas resolution (do this once to avoid redundant rasterization)
+    # Pass domain_size so scale factors match the field solver exactly
     conductor_masks_canvas = None
     interior_masks_canvas = None
     if project.conductors:
@@ -267,6 +268,7 @@ def perform_render(
             scale,
             crop_x0,
             crop_y0,
+            domain_size=(domain_w, domain_h),
         )
 
     t_end = time.time()
