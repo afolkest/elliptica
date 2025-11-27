@@ -75,7 +75,7 @@ class RenderOrchestrator:
                 settings_snapshot.use_mask,
                 settings_snapshot.edge_gain_strength,
                 settings_snapshot.edge_gain_power,
-                settings_snapshot.poisson_scale,
+                settings_snapshot.solve_scale,
             )
             if result is None:
                 return False

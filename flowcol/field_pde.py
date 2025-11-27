@@ -24,7 +24,7 @@ def compute_field_pde(
     boundary_bottom: int = DIRICHLET,
     boundary_left: int = DIRICHLET,
     boundary_right: int = DIRICHLET,
-    poisson_scale: float = 1.0,
+    solve_scale: float = 1.0,
 ) -> tuple[dict[str, np.ndarray], tuple[np.ndarray, np.ndarray]]:
     """
     Compute field using the active PDE definition.
@@ -38,7 +38,7 @@ def compute_field_pde(
         supersample: Additional supersampling factor
         margin: Extra margin around canvas
         boundary_*: Boundary conditions (for compatibility)
-        poisson_scale: Scale factor for solve resolution
+        solve_scale: Scale factor for PDE solve resolution (0.1-1.0)
 
     Returns:
         Tuple of (solution_dict, (ex, ey)) where:
@@ -86,17 +86,17 @@ def compute_field_pde(
                 'left': legacy_bc.get('left', boundary_left),
                 'right': legacy_bc.get('right', boundary_right),
             }
-            self.poisson_scale = poisson_scale
+            self.solve_scale = solve_scale
             self.pde_params = original_project.pde_params
             # Pass through other attributes
             self.canvas_resolution = original_project.canvas_resolution
             self.conductors = original_project.conductors
 
-    # Handle resolution scaling for preview mode
-    if poisson_scale < 0.999:
+    # Handle resolution scaling
+    if solve_scale < 0.999:
         # Solve at lower resolution
-        solve_w = max(1, int(round(field_w * poisson_scale)))
-        solve_h = max(1, int(round(field_h * poisson_scale)))
+        solve_w = max(1, int(round(field_w * solve_scale)))
+        solve_h = max(1, int(round(field_h * solve_scale)))
         solve_project = SolveProject(project, (solve_h, solve_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
 
         # Solve PDE at lower resolution
@@ -124,8 +124,8 @@ def compute_field_pde(
         if "phi" in solution:
 
             if (
-                defaults.POISSON_PREVIEW_RELAX_ITERS > 0
-                and defaults.POISSON_PREVIEW_RELAX_BAND > 0
+                defaults.SOLVE_RELAX_ITERS > 0
+                and defaults.SOLVE_RELAX_BAND > 0
             ):
 
                 
@@ -141,7 +141,7 @@ def compute_field_pde(
                 
                 relax_mask = build_relaxation_mask(
                     dirichlet_mask,
-                    defaults.POISSON_PREVIEW_RELAX_BAND,
+                    defaults.SOLVE_RELAX_BAND,
                 )
                 
                 if np.any(relax_mask):
@@ -153,8 +153,8 @@ def compute_field_pde(
                     relax_potential_band(
                         phi,
                         relax_mask,
-                        defaults.POISSON_PREVIEW_RELAX_ITERS,
-                        float(defaults.POISSON_PREVIEW_RELAX_OMEGA),
+                        defaults.SOLVE_RELAX_ITERS,
+                        float(defaults.SOLVE_RELAX_OMEGA),
                     )
                     
                     # Re-enforce boundary conditions after relaxation

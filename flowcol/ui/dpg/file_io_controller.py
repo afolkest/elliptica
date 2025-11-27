@@ -380,6 +380,7 @@ class FileIOController:
 
             # Update UI to reflect loaded state
             self.app.canvas_renderer.mark_dirty()
+            self.app._update_canvas_inputs()  # Update canvas size input fields
 
             # Resize drawlist widget to match loaded canvas resolution
             if self.app.canvas_id is not None:
