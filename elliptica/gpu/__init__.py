@@ -1,4 +1,4 @@
-"""GPU acceleration using PyTorch MPS backend."""
+"""GPU acceleration using PyTorch (CUDA or MPS backend)."""
 
 import numpy as np
 import torch
@@ -7,35 +7,41 @@ from torchvision.transforms.functional import gaussian_blur
 
 
 class GPUContext:
-    """Global GPU context for MPS-accelerated operations."""
+    """Global GPU context for accelerated operations (CUDA or MPS)."""
 
     _device: Optional[torch.device] = None
     _available: Optional[bool] = None
+    _backend: Optional[str] = None  # 'cuda', 'mps', or None
 
     @classmethod
     def device(cls) -> torch.device:
         """Get GPU device (lazy initialization).
 
-        Returns MPS if available (Apple Silicon), otherwise CPU.
-        PyTorch operations work on both devices, so CPU is a valid fallback.
+        Returns CUDA if available, then MPS (Apple Silicon), otherwise CPU.
+        PyTorch operations work on all devices, so CPU is a valid fallback.
         """
         if cls._device is None:
-            if cls.is_available():
+            if torch.cuda.is_available():
+                cls._device = torch.device('cuda')
+                cls._backend = 'cuda'
+            elif torch.backends.mps.is_available():
                 cls._device = torch.device('mps')
+                cls._backend = 'mps'
             else:
                 cls._device = torch.device('cpu')
+                cls._backend = None
         return cls._device
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if MPS GPU acceleration is available."""
+        """Check if GPU acceleration is available (CUDA or MPS)."""
         if cls._available is None:
-            cls._available = torch.backends.mps.is_available()
+            cls._available = torch.cuda.is_available() or torch.backends.mps.is_available()
         return cls._available
 
     @classmethod
     def warmup(cls) -> None:
-        """Pre-compile Metal shaders with dummy operations (~500ms)."""
+        """Pre-compile GPU kernels with dummy operations."""
         if not cls.is_available():
             return
 
@@ -43,7 +49,7 @@ class GPUContext:
         # Warmup with realistic operation sizes
         dummy = torch.randn(1024, 1024, device=device, dtype=torch.float32)
 
-        # Gaussian blur warmup (torchvision will compile shaders)
+        # Gaussian blur warmup (torchvision will compile kernels)
         _ = gaussian_blur(dummy.unsqueeze(0).unsqueeze(0), kernel_size=5, sigma=2.0)
 
         # Percentile/quantile warmup
@@ -54,7 +60,10 @@ class GPUContext:
         _ = torch.pow(dummy.clamp(0, 1), 1.2)
 
         # Synchronize to ensure all operations complete
-        torch.mps.synchronize()
+        if cls._backend == 'cuda':
+            torch.cuda.synchronize()
+        elif cls._backend == 'mps':
+            torch.mps.synchronize()
 
     @classmethod
     def to_gpu(cls, arr: np.ndarray) -> torch.Tensor:
@@ -72,9 +81,10 @@ class GPUContext:
         """Release cached GPU memory back to system.
 
         Call this after freeing large tensors to ensure VRAM is released.
-        Only effective when MPS is available.
         """
-        if cls.is_available():
+        if cls._backend == 'cuda':
+            torch.cuda.empty_cache()
+        elif cls._backend == 'mps':
             torch.mps.empty_cache()
 
 

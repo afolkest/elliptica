@@ -134,7 +134,8 @@ class EllipticaApp:
         # Warmup GPU for faster first render (~750ms startup delay)
         from elliptica.gpu import GPUContext
         GPUContext.warmup()
-        device_name = "MPS" if GPUContext.is_available() else "CPU"
+        backend = GPUContext._backend
+        device_name = backend.upper() if backend else "CPU"
         print(f"GPU acceleration: {device_name}")
 
         # Initialize controllers
