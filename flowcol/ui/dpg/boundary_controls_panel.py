@@ -22,6 +22,8 @@ class BoundaryControlsPanel:
 
         # Widget IDs
         self.container_id: Optional[int] = None
+        # Map: conductor_idx -> header_id (for collapsing headers)
+        self.header_ids: Dict[int, int] = {}
         # Map: conductor_idx -> param_name -> slider_id (for boundary_params)
         self.slider_ids: Dict[int, Dict[str, int]] = {}
         # Map: conductor_idx -> field_name -> widget_id (for boundary_fields)
@@ -51,7 +53,15 @@ class BoundaryControlsPanel:
         if dpg is None or self.container_id is None:
             return
 
+        # Save collapsed state before destroying widgets
+        # dpg.get_value on collapsing_header returns True if open, False if collapsed
+        collapsed_state: Dict[int, bool] = {}
+        for idx, header_id in self.header_ids.items():
+            if dpg.does_item_exist(header_id):
+                collapsed_state[idx] = not dpg.get_value(header_id)
+
         dpg.delete_item(self.container_id, children_only=True)
+        self.header_ids.clear()
         self.slider_ids.clear()
         self.field_ids.clear()
         self.enum_choices.clear()
@@ -92,7 +102,9 @@ class BoundaryControlsPanel:
                         label += f" - {short_name}"
                         break
 
-            with dpg.collapsing_header(label=label, default_open=True, parent=self.container_id):
+            header_id = dpg.add_collapsing_header(label=label, default_open=True, parent=self.container_id)
+            self.header_ids[idx] = header_id
+            with dpg.group(parent=header_id):
                 self.slider_ids[idx] = {}
                 self.field_ids[idx] = {}
 
@@ -135,6 +147,42 @@ class BoundaryControlsPanel:
 
         # Set initial visibility based on field values
         self._update_field_visibility()
+
+        # Restore collapsed state for headers that existed before
+        for idx, header_id in self.header_ids.items():
+            if idx in collapsed_state and collapsed_state[idx]:
+                dpg.set_value(header_id, False)  # Collapse it
+
+    def update_header_labels(self) -> None:
+        """Update collapsing header labels without rebuilding widgets."""
+        if dpg is None or not self.header_ids:
+            return
+
+        with self.app.state_lock:
+            conductors = list(self.app.state.project.conductors)
+            selected_idx = self.app.state.selected_idx
+
+        bc_type_field = self.field_defs.get("bc_type")
+
+        for idx, header_id in self.header_ids.items():
+            if idx >= len(conductors) or not dpg.does_item_exist(header_id):
+                continue
+
+            conductor = conductors[idx]
+            label = f"Object {idx + 1}"
+            if idx == selected_idx:
+                label += " (selected)"
+
+            # Add boundary type to label if bc_type field exists
+            if bc_type_field and bc_type_field.field_type == "enum":
+                current_bc = conductor.params.get("bc_type", bc_type_field.default)
+                for lbl, val in bc_type_field.choices:
+                    if val == current_bc:
+                        short_name = lbl.split(" (")[0] if " (" in lbl else lbl
+                        label += f" - {short_name}"
+                        break
+
+            dpg.configure_item(header_id, label=label)
 
     def _build_field_widget(self, idx: int, field, current_val) -> Optional[int]:
         """Build a widget for a boundary field. Returns widget ID."""
@@ -231,9 +279,9 @@ class BoundaryControlsPanel:
         # Update visibility for conditional fields
         self._update_field_visibility()
 
-        # Rebuild controls if bc_type changed (to update header labels)
+        # Update header labels if bc_type changed
         if field_name == "bc_type":
-            self.rebuild_controls()
+            self.update_header_labels()
 
     def _update_field_visibility(self) -> None:
         """Show/hide fields based on their visible_when rules."""

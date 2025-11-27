@@ -181,6 +181,7 @@ class ShapeDialogController:
         self.app._update_control_visibility()
         self.app.conductor_controls.rebuild_conductor_controls()
         self.app.conductor_controls.update_conductor_slider_labels()
+        self.app.boundary_controls.rebuild_controls()
 
         dpg.set_value("status_text", f"Inserted {spec.name}")
         dpg.hide_item(self.dialog_id)
