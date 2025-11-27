@@ -90,8 +90,8 @@ def apply_region_overlays_gpu(
     """
     result = base_rgb.clone()
 
-    # OPTIMIZATION: Pre-compute RGB for each unique (palette, brightness, contrast) combo ONCE on GPU
-    # Cache key: (palette_name, brightness, contrast)
+    # OPTIMIZATION: Pre-compute RGB for each unique (palette, brightness, contrast, gamma) combo ONCE on GPU
+    # Cache key: (palette_name, brightness, contrast, gamma)
     palette_cache: dict[tuple, torch.Tensor] = {}
 
     # Collect unique parameter combinations needed
@@ -108,30 +108,32 @@ def apply_region_overlays_gpu(
             # Resolve per-region params (use region override if set, else global)
             region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
             region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
-            cache_key = (settings.interior.palette, region_brightness, region_contrast)
+            region_gamma = settings.interior.gamma if settings.interior.gamma is not None else gamma
+            cache_key = (settings.interior.palette, region_brightness, region_contrast, region_gamma)
             unique_param_sets.add(cache_key)
 
         # Surface region
         if settings.surface.enabled and settings.surface.use_palette:
             region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
             region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
-            cache_key = (settings.surface.palette, region_brightness, region_contrast)
+            region_gamma = settings.surface.gamma if settings.surface.gamma is not None else gamma
+            cache_key = (settings.surface.palette, region_brightness, region_contrast, region_gamma)
             unique_param_sets.add(cache_key)
 
     # Pre-compute RGB for each unique parameter combination on GPU
     # OPTIMIZATION: Reuse normalized_tensor to skip redundant percentile computation
-    for palette_name, region_brightness, region_contrast in unique_param_sets:
+    for palette_name, region_brightness, region_contrast, region_gamma in unique_param_sets:
         lut_numpy = _get_palette_lut(palette_name)
         lut_tensor = GPUContext.to_gpu(lut_numpy)
 
         # Build full RGB using GPU pipeline with per-region params (stays on GPU!)
-        cache_key = (palette_name, region_brightness, region_contrast)
+        cache_key = (palette_name, region_brightness, region_contrast, region_gamma)
         palette_cache[cache_key] = build_base_rgb_gpu(
             scalar_tensor,
             clip_percent,
             region_brightness,  # Per-region brightness
             region_contrast,    # Per-region contrast
-            gamma,
+            region_gamma,       # Per-region gamma
             color_enabled=True,
             lut=lut_tensor,
             normalized_tensor=normalized_tensor,  # Skip percentile if already computed
@@ -156,7 +158,8 @@ def apply_region_overlays_gpu(
                     # Resolve per-region params and use cached RGB (stays on GPU!)
                     region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
                     region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
-                    cache_key = (settings.interior.palette, region_brightness, region_contrast)
+                    region_gamma = settings.interior.gamma if settings.interior.gamma is not None else gamma
+                    cache_key = (settings.interior.palette, region_brightness, region_contrast, region_gamma)
                     region_rgb = palette_cache[cache_key]
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:
@@ -173,7 +176,8 @@ def apply_region_overlays_gpu(
                     # Resolve per-region params and use cached RGB (stays on GPU!)
                     region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
                     region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
-                    cache_key = (settings.surface.palette, region_brightness, region_contrast)
+                    region_gamma = settings.surface.gamma if settings.surface.gamma is not None else gamma
+                    cache_key = (settings.surface.palette, region_brightness, region_contrast, region_gamma)
                     region_rgb = palette_cache[cache_key]
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:

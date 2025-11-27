@@ -30,12 +30,13 @@ class RegionStyle:
     # Postprocessing overrides (None = inherit from global DisplaySettings)
     brightness: Optional[float] = None
     contrast: Optional[float] = None
+    gamma: Optional[float] = None
 
 
 def resolve_region_postprocess_params(
     region: RegionStyle,
     global_settings: DisplaySettings,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     """Resolve per-region postprocessing params, falling back to global settings.
 
     Args:
@@ -43,11 +44,12 @@ def resolve_region_postprocess_params(
         global_settings: Global display settings
 
     Returns:
-        (brightness, contrast) with global fallback applied
+        (brightness, contrast, gamma) with global fallback applied
     """
     brightness = region.brightness if region.brightness is not None else global_settings.brightness
     contrast = region.contrast if region.contrast is not None else global_settings.contrast
-    return brightness, contrast
+    gamma = region.gamma if region.gamma is not None else global_settings.gamma
+    return brightness, contrast, gamma
 
 
 @dataclass

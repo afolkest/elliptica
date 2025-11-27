@@ -1,7 +1,7 @@
 """Postprocessing panel controller for Elliptica UI - sliders, color, and region properties."""
 
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import Optional, Literal, TYPE_CHECKING
 
 from elliptica import defaults
 from elliptica.app import actions
@@ -32,17 +32,9 @@ class PostprocessingPanel:
         self.postprocess_contrast_slider_id: Optional[int] = None
         self.postprocess_gamma_slider_id: Optional[int] = None
 
-        # Widget IDs for region properties
+        # Widget IDs for smear controls
         self.smear_enabled_checkbox_id: Optional[int] = None
         self.smear_sigma_slider_id: Optional[int] = None
-
-        # Widget IDs for per-region postprocessing
-        self.surface_separate_processing_checkbox_id: Optional[int] = None
-        self.surface_brightness_slider_id: Optional[int] = None
-        self.surface_contrast_slider_id: Optional[int] = None
-        self.interior_separate_processing_checkbox_id: Optional[int] = None
-        self.interior_brightness_slider_id: Optional[int] = None
-        self.interior_contrast_slider_id: Optional[int] = None
 
         # Widget IDs for expression editor
         self.expr_L_input_id: Optional[int] = None
@@ -53,6 +45,9 @@ class PostprocessingPanel:
 
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
+
+        # Region editing context: which region we're editing when conductor selected
+        self.selected_region: Literal["surface", "interior"] = "surface"
 
         # Delete confirmation modal
         self.delete_confirmation_modal_id: Optional[int] = None
@@ -72,6 +67,36 @@ class PostprocessingPanel:
         self.expr_pending_update: bool = False
         self.expr_last_update_time: float = 0.0
         self.expr_debounce_delay: float = 0.3  # 300ms delay
+
+    def _is_conductor_selected(self) -> bool:
+        """Check if a conductor is currently selected."""
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            return selected is not None and selected.id is not None
+
+    def _get_current_region_style(self):
+        """Get the RegionStyle for the currently selected context, or None if global."""
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected is None or selected.id is None:
+                return None
+            settings = self.app.state.conductor_color_settings.get(selected.id)
+            if settings is None:
+                return None
+            if self.selected_region == "surface":
+                return settings.surface
+            else:
+                return settings.interior
+
+    def _has_override_enabled(self) -> bool:
+        """Check if the current region has postprocessing override enabled."""
+        region_style = self._get_current_region_style()
+        if region_style is None:
+            return False
+        # Override is enabled if any of brightness/contrast/gamma is set
+        return (region_style.brightness is not None or
+                region_style.contrast is not None or
+                region_style.gamma is not None)
 
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
@@ -101,21 +126,57 @@ class PostprocessingPanel:
 
         # Palette mode container (shown by default)
         with dpg.group(tag="palette_mode_group", parent=parent):
-            # Build global palette selection UI
-            self._build_global_palette_ui("palette_mode_group", palette_colormaps)
+            # === FIXED CONTEXT AREA (always takes same vertical space) ===
+            # Context header - ALWAYS visible, text changes based on mode
+            dpg.add_text("Global Settings", tag="context_header_text", color=(150, 200, 255))
 
-            # Clip/brightness/contrast/gamma only apply in palette mode
-            # (in expression mode, you control these directly in the L expression)
+            # Region controls line - ONLY shown when conductor selected
+            with dpg.group(horizontal=True, tag="region_controls_line", show=False):
+                dpg.add_radio_button(
+                    items=["Surface", "Interior"],
+                    default_value="Surface",
+                    horizontal=True,
+                    callback=self.on_region_toggle,
+                    tag="region_toggle_radio",
+                )
+                dpg.add_spacer(width=10)
+                dpg.add_checkbox(
+                    label="Override",
+                    callback=self.on_enable_override,
+                    tag="enable_override_checkbox",
+                )
+
+            # Placeholder spacer - shown in global mode to reserve same vertical space
+            # This prevents sliders from jumping when switching between modes
+            dpg.add_spacer(height=22, tag="region_controls_placeholder", show=True)
+
+            dpg.add_spacer(height=5)
+
+            # === PALETTE AREA ===
+            # Global palette UI (shown in global mode)
+            with dpg.group(tag="global_palette_group"):
+                self._build_global_palette_ui("global_palette_group", palette_colormaps)
+
+            # Region palette UI (shown in conductor mode)
+            with dpg.group(tag="region_palette_group", show=False):
+                self._build_region_palette_ui("region_palette_group", palette_colormaps)
+
+            # === SLIDERS (fixed position, never move) ===
             dpg.add_spacer(height=10)
+
+            # Clip% - always shows global, disabled in conductor mode
             self.postprocess_clip_slider_id = dpg.add_slider_float(
-                label="Clip %",
+                label="Clip % (global)",
                 default_value=self.app.state.display_settings.clip_percent,
                 min_value=0.0,
                 max_value=defaults.MAX_CLIP_PERCENT,
                 format="%.2f%%",
                 callback=self.on_clip_slider,
                 width=200,
+                tag="clip_slider",
             )
+
+            # Brightness/Contrast/Gamma sliders
             self.postprocess_brightness_slider_id = dpg.add_slider_float(
                 label="Brightness",
                 default_value=self.app.state.display_settings.brightness,
@@ -124,6 +185,7 @@ class PostprocessingPanel:
                 format="%.2f",
                 callback=self.on_brightness_slider,
                 width=200,
+                tag="brightness_slider",
             )
             self.postprocess_contrast_slider_id = dpg.add_slider_float(
                 label="Contrast",
@@ -133,6 +195,7 @@ class PostprocessingPanel:
                 format="%.2f",
                 callback=self.on_contrast_slider,
                 width=200,
+                tag="contrast_slider",
             )
             self.postprocess_gamma_slider_id = dpg.add_slider_float(
                 label="Gamma",
@@ -142,6 +205,7 @@ class PostprocessingPanel:
                 format="%.2f",
                 callback=self.on_gamma_slider,
                 width=200,
+                tag="gamma_slider",
             )
 
         # Expressions mode container (hidden by default)
@@ -151,8 +215,25 @@ class PostprocessingPanel:
         dpg.add_spacer(height=10, parent=parent)
         dpg.add_separator(parent=parent)
 
-        # Build region properties UI
-        self._build_region_properties_ui(parent, palette_colormaps)
+        # Conductor effects section (smear) - only shown when conductor selected
+        with dpg.collapsing_header(label="Conductor Effects", default_open=True,
+                                   tag="conductor_effects_header", parent=parent, show=False):
+            dpg.add_text("Smear")
+            self.smear_enabled_checkbox_id = dpg.add_checkbox(
+                label="Enable smear",
+                callback=self.on_smear_enabled,
+                tag="smear_enabled_checkbox",
+            )
+            self.smear_sigma_slider_id = dpg.add_slider_float(
+                label="Blur strength",
+                min_value=defaults.MIN_SMEAR_SIGMA,
+                max_value=defaults.MAX_SMEAR_SIGMA,
+                format="%.4f",
+                callback=self.on_smear_sigma,
+                tag="smear_sigma_slider",
+                width=200,
+                clamped=True,
+            )
 
     def _build_global_palette_ui(self, parent, palette_colormaps: dict) -> None:
         """Build global palette selection UI with popup menu.
@@ -223,6 +304,62 @@ class PostprocessingPanel:
                             callback=lambda s, a, u: self._open_delete_confirmation(u),
                             user_data=palette_name
                         )
+
+    def _build_region_palette_ui(self, parent, palette_colormaps: dict) -> None:
+        """Build region palette selection UI with popup menu.
+
+        Args:
+            parent: Parent widget ID
+            palette_colormaps: Dict mapping palette names to colormap tags
+        """
+        if dpg is None:
+            return
+
+        from elliptica.render import list_color_palettes
+        palette_names = list(list_color_palettes())
+
+        # Region palette selection with popup menu
+        dpg.add_text("Region Palette", parent=parent)
+        region_palette_button = dpg.add_button(
+            label="Choose Palette...",
+            width=200,
+            tag="region_palette_button",
+            parent=parent,
+        )
+
+        dpg.add_text(
+            "Current: Use Global",
+            tag="region_palette_current_text",
+            parent=parent,
+        )
+
+        # Popup menu for region palette selection
+        with dpg.popup(region_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="region_palette_popup"):
+            dpg.add_text("Select region palette:")
+            dpg.add_separator()
+
+            # Add "Use Global Palette" option at top
+            dpg.add_button(
+                label="⊙ Use Global Palette",
+                width=350,
+                height=30,
+                callback=self.on_region_use_global,
+                tag="region_use_global_btn",
+            )
+            dpg.add_separator()
+
+            with dpg.child_window(width=380, height=250, tag="region_palette_scrolling_window"):
+                for palette_name in palette_names:
+                    colormap_tag = palette_colormaps[palette_name]
+                    btn = dpg.add_colormap_button(
+                        label=palette_name,
+                        width=350,
+                        height=25,
+                        callback=self.on_region_palette_button,
+                        user_data=palette_name,
+                        tag=f"region_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                    )
+                    dpg.bind_colormap(btn, colormap_tag)
 
     def _build_expression_editor_ui(self, parent) -> None:
         """Build the expression editor UI for OKLCH color mapping.
@@ -342,227 +479,150 @@ class PostprocessingPanel:
         # Trigger update
         self._update_color_config_from_expressions()
 
-    def _build_region_properties_ui(self, parent, palette_colormaps: dict) -> None:
-        """Build region properties UI (surface/interior palettes + smear).
-
-        Args:
-            parent: Parent widget ID
-            palette_colormaps: Dict mapping palette names to colormap tags
-        """
+    def update_context_ui(self) -> None:
+        """Update UI based on current selection context (global vs conductor)."""
         if dpg is None:
             return
 
-        from elliptica.render import list_color_palettes
-        palette_names = list(list_color_palettes())
+        is_conductor_selected = self._is_conductor_selected()
 
-        # Region properties (shown when conductor selected in render mode)
-        with dpg.collapsing_header(label="Region Properties", default_open=True, tag="region_properties_header", parent=parent):
-            dpg.add_text("Select a conductor region to customize", tag="region_hint_text")
+        if is_conductor_selected:
+            # Conductor mode
+            with self.app.state_lock:
+                selected = self.app.state.get_selected()
+                conductor_idx = self.app.state.selected_idx
 
-            dpg.add_spacer(height=5)
-            dpg.add_text("Conductor", tag="surface_label")
-            # Surface palette selection (no checkbox - selecting palette enables it)
-            surface_palette_button = dpg.add_button(
-                label="Choose palette...",
-                width=200,
-                tag="surface_palette_button",
-            )
-            dpg.add_text("Current: Global", tag="surface_palette_current_text")
+            # Update context header text (always visible, just change text)
+            region_label = "Surface" if self.selected_region == "surface" else "Interior"
+            dpg.set_value("context_header_text", f"Conductor {conductor_idx + 1} - {region_label}")
 
-            with dpg.popup(surface_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="surface_palette_popup"):
-                dpg.add_text("Select surface palette:")
-                dpg.add_separator()
+            # Show region controls, hide placeholder
+            dpg.configure_item("region_controls_line", show=True)
+            dpg.configure_item("region_controls_placeholder", show=False)
 
-                # Add "Use Global Palette" option at top
-                dpg.add_button(
-                    label="⊙ Use Global Palette",
-                    width=350,
-                    height=30,
-                    callback=self.on_surface_use_global,
-                    tag="surface_use_global_btn",
-                )
-                dpg.add_separator()
+            # Switch palette UI
+            dpg.configure_item("global_palette_group", show=False)
+            dpg.configure_item("region_palette_group", show=True)
 
-                with dpg.child_window(width=380, height=250):
-                    for palette_name in palette_names:
-                        colormap_tag = palette_colormaps[palette_name]
-                        btn = dpg.add_colormap_button(
-                            label=palette_name,
-                            width=350,
-                            height=25,
-                            callback=self.on_surface_palette_button,
-                            user_data=palette_name,
-                            tag=f"surface_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                        )
-                        dpg.bind_colormap(btn, colormap_tag)
+            # Update region palette display
+            region_style = self._get_current_region_style()
+            if region_style and region_style.enabled:
+                dpg.set_value("region_palette_current_text", f"Current: {region_style.palette}")
+            else:
+                dpg.set_value("region_palette_current_text", "Current: Use Global")
 
-            # Separate postprocessing controls for surface
-            dpg.add_spacer(height=5)
-            self.surface_separate_processing_checkbox_id = dpg.add_checkbox(
-                label="Separate processing",
-                callback=self.on_surface_separate_processing,
-                tag="surface_separate_processing_checkbox",
-            )
-            self.surface_brightness_slider_id = dpg.add_slider_float(
-                label="Conductor brightness",
-                default_value=defaults.DEFAULT_BRIGHTNESS,
-                min_value=defaults.MIN_BRIGHTNESS,
-                max_value=defaults.MAX_BRIGHTNESS,
-                format="%.2f",
-                callback=self.on_surface_brightness,
-                tag="surface_brightness_slider",
-                width=200,
-                show=False,  # Hidden by default
-            )
-            self.surface_contrast_slider_id = dpg.add_slider_float(
-                label="Conductor contrast",
-                default_value=defaults.DEFAULT_CONTRAST,
-                min_value=defaults.MIN_CONTRAST,
-                max_value=defaults.MAX_CONTRAST,
-                format="%.2f",
-                callback=self.on_surface_contrast,
-                tag="surface_contrast_slider",
-                width=200,
-                show=False,  # Hidden by default
-            )
+            # Clip% always shows global, disabled in conductor mode
+            dpg.configure_item("clip_slider", enabled=False)
+            dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
 
-            dpg.add_spacer(height=10)
-            dpg.add_text("Conductor interior", tag="interior_label")
-            # Interior palette selection (no checkbox - selecting palette enables it)
-            interior_palette_button = dpg.add_button(
-                label="Choose palette...",
-                width=200,
-                tag="interior_palette_button",
-            )
-            dpg.add_text("Current: Global", tag="interior_palette_current_text")
+            # Check if override is enabled
+            has_override = self._has_override_enabled()
+            dpg.set_value("enable_override_checkbox", has_override)
 
-            with dpg.popup(interior_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="interior_palette_popup"):
-                dpg.add_text("Select interior palette:")
-                dpg.add_separator()
+            # Configure B/C/G sliders based on override state
+            dpg.configure_item("brightness_slider", enabled=has_override)
+            dpg.configure_item("contrast_slider", enabled=has_override)
+            dpg.configure_item("gamma_slider", enabled=has_override)
 
-                # Add "Use Global Palette" option at top
-                dpg.add_button(
-                    label="⊙ Use Global Palette",
-                    width=350,
-                    height=30,
-                    callback=self.on_interior_use_global,
-                    tag="interior_use_global_btn",
-                )
-                dpg.add_separator()
+            if has_override and region_style:
+                # Show per-region values
+                b = region_style.brightness if region_style.brightness is not None else self.app.state.display_settings.brightness
+                c = region_style.contrast if region_style.contrast is not None else self.app.state.display_settings.contrast
+                g = region_style.gamma if region_style.gamma is not None else self.app.state.display_settings.gamma
+            else:
+                # Show global values (what's being applied)
+                b = self.app.state.display_settings.brightness
+                c = self.app.state.display_settings.contrast
+                g = self.app.state.display_settings.gamma
 
-                with dpg.child_window(width=380, height=250):
-                    for palette_name in palette_names:
-                        colormap_tag = palette_colormaps[palette_name]
-                        btn = dpg.add_colormap_button(
-                            label=palette_name,
-                            width=350,
-                            height=25,
-                            callback=self.on_interior_palette_button,
-                            user_data=palette_name,
-                            tag=f"interior_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
-                        )
-                        dpg.bind_colormap(btn, colormap_tag)
+            dpg.set_value("brightness_slider", b)
+            dpg.set_value("contrast_slider", c)
+            dpg.set_value("gamma_slider", g)
 
-            # Separate postprocessing controls for interior
-            dpg.add_spacer(height=5)
-            self.interior_separate_processing_checkbox_id = dpg.add_checkbox(
-                label="Separate processing",
-                callback=self.on_interior_separate_processing,
-                tag="interior_separate_processing_checkbox",
-            )
-            self.interior_brightness_slider_id = dpg.add_slider_float(
-                label="Interior brightness",
-                default_value=defaults.DEFAULT_BRIGHTNESS,
-                min_value=defaults.MIN_BRIGHTNESS,
-                max_value=defaults.MAX_BRIGHTNESS,
-                format="%.2f",
-                callback=self.on_interior_brightness,
-                tag="interior_brightness_slider",
-                width=200,
-                show=False,  # Hidden by default
-            )
-            self.interior_contrast_slider_id = dpg.add_slider_float(
-                label="Interior contrast",
-                default_value=defaults.DEFAULT_CONTRAST,
-                min_value=defaults.MIN_CONTRAST,
-                max_value=defaults.MAX_CONTRAST,
-                format="%.2f",
-                callback=self.on_interior_contrast,
-                tag="interior_contrast_slider",
-                width=200,
-                show=False,  # Hidden by default
-            )
+            # Show conductor effects section
+            dpg.configure_item("conductor_effects_header", show=True)
 
-            dpg.add_spacer(height=10)
-            dpg.add_separator()
-            dpg.add_text("Conductor smear")
-            self.smear_enabled_checkbox_id = dpg.add_checkbox(
-                label="Enable smear",
-                callback=self.on_smear_enabled,
-                tag="smear_enabled_checkbox",
-            )
-            self.smear_sigma_slider_id = dpg.add_slider_float(
-                label="Blur strength",
-                min_value=defaults.MIN_SMEAR_SIGMA,
-                max_value=defaults.MAX_SMEAR_SIGMA,
-                format="%.4f",
-                callback=self.on_smear_sigma,
-                tag="smear_sigma_slider",
-                width=200,
-                clamped=True,
-            )
+            # Update smear controls
+            dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
+            dpg.set_value("smear_sigma_slider", selected.smear_sigma)
+            dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
+
+        else:
+            # Global mode
+            dpg.set_value("context_header_text", "Global Settings")
+
+            # Hide region controls, show placeholder (maintains layout)
+            dpg.configure_item("region_controls_line", show=False)
+            dpg.configure_item("region_controls_placeholder", show=True)
+
+            # Switch palette UI
+            dpg.configure_item("global_palette_group", show=True)
+            dpg.configure_item("region_palette_group", show=False)
+
+            # Clip% enabled in global mode
+            dpg.configure_item("clip_slider", enabled=True)
+            dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
+
+            # B/C/G sliders enabled, showing global values
+            dpg.configure_item("brightness_slider", enabled=True)
+            dpg.configure_item("contrast_slider", enabled=True)
+            dpg.configure_item("gamma_slider", enabled=True)
+            dpg.set_value("brightness_slider", self.app.state.display_settings.brightness)
+            dpg.set_value("contrast_slider", self.app.state.display_settings.contrast)
+            dpg.set_value("gamma_slider", self.app.state.display_settings.gamma)
+
+            # Hide conductor effects section
+            dpg.configure_item("conductor_effects_header", show=False)
 
     def update_region_properties_panel(self) -> None:
-        """Update region properties panel based on current selection."""
+        """Update region properties panel based on current selection.
+
+        This is called when selection changes. Delegates to update_context_ui.
+        """
+        self.update_context_ui()
+
+    # ------------------------------------------------------------------
+    # Region toggle callback
+    # ------------------------------------------------------------------
+
+    def on_region_toggle(self, sender=None, app_data=None) -> None:
+        """Handle Surface/Interior region toggle."""
         if dpg is None:
             return
+
+        self.selected_region = "surface" if app_data == "Surface" else "interior"
+        self.update_context_ui()
+
+    # ------------------------------------------------------------------
+    # Enable Override callback
+    # ------------------------------------------------------------------
+
+    def on_enable_override(self, sender=None, app_data=None) -> None:
+        """Toggle postprocessing override for current region."""
+        if dpg is None:
+            return
+
+        is_enabled = bool(app_data)
 
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             if selected and selected.id is not None:
-                settings = self.app.state.conductor_color_settings.get(selected.id)
-                if settings:
-                    # Update palette current text based on enabled state
-                    if settings.surface.enabled:
-                        dpg.set_value("surface_palette_current_text", f"Current: {settings.surface.palette}")
-                    else:
-                        dpg.set_value("surface_palette_current_text", "Current: Global")
+                if is_enabled:
+                    # Initialize with global values
+                    global_brightness = self.app.state.display_settings.brightness
+                    global_contrast = self.app.state.display_settings.contrast
+                    global_gamma = self.app.state.display_settings.gamma
+                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, global_brightness)
+                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, global_contrast)
+                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, global_gamma)
+                else:
+                    # Reset to None (inherit from global)
+                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, None)
+                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, None)
+                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, None)
 
-                    if settings.interior.enabled:
-                        dpg.set_value("interior_palette_current_text", f"Current: {settings.interior.palette}")
-                    else:
-                        dpg.set_value("interior_palette_current_text", "Current: Global")
-
-                    # Update per-region postprocessing controls
-                    # Surface
-                    surface_has_overrides = (settings.surface.brightness is not None or
-                                            settings.surface.contrast is not None)
-                    dpg.set_value("surface_separate_processing_checkbox", surface_has_overrides)
-                    dpg.configure_item("surface_brightness_slider", show=surface_has_overrides)
-                    dpg.configure_item("surface_contrast_slider", show=surface_has_overrides)
-                    if surface_has_overrides:
-                        brightness_val = settings.surface.brightness if settings.surface.brightness is not None else self.app.state.display_settings.brightness
-                        contrast_val = settings.surface.contrast if settings.surface.contrast is not None else self.app.state.display_settings.contrast
-                        dpg.set_value("surface_brightness_slider", brightness_val)
-                        dpg.set_value("surface_contrast_slider", contrast_val)
-
-                    # Interior
-                    interior_has_overrides = (settings.interior.brightness is not None or
-                                             settings.interior.contrast is not None)
-                    dpg.set_value("interior_separate_processing_checkbox", interior_has_overrides)
-                    dpg.configure_item("interior_brightness_slider", show=interior_has_overrides)
-                    dpg.configure_item("interior_contrast_slider", show=interior_has_overrides)
-                    if interior_has_overrides:
-                        brightness_val = settings.interior.brightness if settings.interior.brightness is not None else self.app.state.display_settings.brightness
-                        contrast_val = settings.interior.contrast if settings.interior.contrast is not None else self.app.state.display_settings.contrast
-                        dpg.set_value("interior_brightness_slider", brightness_val)
-                        dpg.set_value("interior_contrast_slider", contrast_val)
-
-                # Update smear controls
-                dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
-                dpg.set_value("smear_sigma_slider", selected.smear_sigma)
-                # Show/hide slider based on smear enabled
-                dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
+        self.update_context_ui()
+        self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
     # Postprocessing slider callbacks
@@ -573,19 +633,16 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
+        # Clip% always edits global (disabled in conductor mode anyway)
         value = float(app_data)
 
         # IMMEDIATELY update state so other refreshes use the correct value
-        # (otherwise other sliders would trigger refresh with stale clip%)
         with self.app.state_lock:
             self.app.state.display_settings.clip_percent = value
             self.app.state.invalidate_base_rgb()
 
         # Mark pending to trigger refresh after debounce delay
         self.clip_pending_value = value
-
-        # Record the time of THIS slider change (not the last render)
-        # This ensures we wait 300ms after the LAST slider movement
         self.clip_last_update_time = time.time()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
@@ -594,11 +651,19 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.brightness = value
-            self.app.state.invalidate_base_rgb()
 
-        # GPU is fast enough for real-time updates - no debouncing needed!
+        if self._is_conductor_selected() and self._has_override_enabled():
+            # Per-region brightness
+            with self.app.state_lock:
+                selected = self.app.state.get_selected()
+                if selected and selected.id is not None:
+                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, value)
+        else:
+            # Global brightness
+            with self.app.state_lock:
+                self.app.state.display_settings.brightness = value
+                self.app.state.invalidate_base_rgb()
+
         self.app.display_pipeline.refresh_display()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
@@ -607,11 +672,19 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.contrast = value
-            self.app.state.invalidate_base_rgb()
 
-        # GPU is fast enough for real-time updates - no debouncing needed!
+        if self._is_conductor_selected() and self._has_override_enabled():
+            # Per-region contrast
+            with self.app.state_lock:
+                selected = self.app.state.get_selected()
+                if selected and selected.id is not None:
+                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, value)
+        else:
+            # Global contrast
+            with self.app.state_lock:
+                self.app.state.display_settings.contrast = value
+                self.app.state.invalidate_base_rgb()
+
         self.app.display_pipeline.refresh_display()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
@@ -620,11 +693,19 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.gamma = value
-            self.app.state.invalidate_base_rgb()
 
-        # GPU is fast enough for real-time updates - no debouncing needed!
+        if self._is_conductor_selected() and self._has_override_enabled():
+            # Per-region gamma
+            with self.app.state_lock:
+                selected = self.app.state.get_selected()
+                if selected and selected.id is not None:
+                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, value)
+        else:
+            # Global gamma
+            with self.app.state_lock:
+                self.app.state.display_settings.gamma = value
+                self.app.state.invalidate_base_rgb()
+
         self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
@@ -659,6 +740,39 @@ class PostprocessingPanel:
         # Update current palette display
         dpg.set_value("global_palette_current_text", f"Current: {palette_name}")
         dpg.configure_item("global_palette_popup", show=False)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_region_use_global(self, sender=None, app_data=None) -> None:
+        """Handle region 'Use Global Palette' button."""
+        if dpg is None:
+            return
+
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_style_enabled(self.app.state, selected.id, self.selected_region, False)
+
+        # Update display
+        dpg.set_value("region_palette_current_text", "Current: Use Global")
+        dpg.configure_item("region_palette_popup", show=False)
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_region_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
+        """Handle region colormap button click."""
+        if dpg is None or user_data is None:
+            return
+
+        palette_name = user_data
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected and selected.id is not None:
+                actions.set_region_palette(self.app.state, selected.id, self.selected_region, palette_name)
+
+        # Update current palette display
+        dpg.set_value("region_palette_current_text", f"Current: {palette_name}")
+        dpg.configure_item("region_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
 
@@ -787,188 +901,6 @@ class PostprocessingPanel:
                     user_data=palette_name
                 )
 
-    def on_surface_use_global(self, sender=None, app_data=None) -> None:
-        """Handle surface 'Use Global Palette' button."""
-        if dpg is None:
-            return
-
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_style_enabled(self.app.state, selected.id, "surface", False)
-
-        # Update display
-        dpg.set_value("surface_palette_current_text", "Current: Global")
-        dpg.configure_item("surface_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_surface_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
-        """Handle surface colormap button click."""
-        if dpg is None or user_data is None:
-            return
-
-        palette_name = user_data
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_palette(self.app.state, selected.id, "surface", palette_name)
-
-        # Update current palette display
-        dpg.set_value("surface_palette_current_text", f"Current: {palette_name}")
-        dpg.configure_item("surface_palette_popup", show=False)
-
-        # Note: set_region_palette auto-enables the region
-        self.app.display_pipeline.refresh_display()
-
-    def on_interior_use_global(self, sender=None, app_data=None) -> None:
-        """Handle interior 'Use Global Palette' button."""
-        if dpg is None:
-            return
-
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_style_enabled(self.app.state, selected.id, "interior", False)
-
-        # Update display
-        dpg.set_value("interior_palette_current_text", "Current: Global")
-        dpg.configure_item("interior_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_interior_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
-        """Handle interior colormap button click."""
-        if dpg is None or user_data is None:
-            return
-
-        palette_name = user_data
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_palette(self.app.state, selected.id, "interior", palette_name)
-
-        # Update current palette display
-        dpg.set_value("interior_palette_current_text", f"Current: {palette_name}")
-        dpg.configure_item("interior_palette_popup", show=False)
-
-        # Note: set_region_palette auto-enables the region
-        self.app.display_pipeline.refresh_display()
-
-    # ------------------------------------------------------------------
-    # Per-region postprocessing callbacks
-    # ------------------------------------------------------------------
-
-    def on_surface_separate_processing(self, sender=None, app_data=None) -> None:
-        """Toggle separate postprocessing for surface region."""
-        if dpg is None:
-            return
-
-        is_enabled = bool(app_data)
-
-        # Show/hide brightness and contrast sliders
-        dpg.configure_item("surface_brightness_slider", show=is_enabled)
-        dpg.configure_item("surface_contrast_slider", show=is_enabled)
-
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                if is_enabled:
-                    # Initialize with global values
-                    global_brightness = self.app.state.display_settings.brightness
-                    global_contrast = self.app.state.display_settings.contrast
-                    dpg.set_value("surface_brightness_slider", global_brightness)
-                    dpg.set_value("surface_contrast_slider", global_contrast)
-                    actions.set_region_brightness(self.app.state, selected.id, "surface", global_brightness)
-                    actions.set_region_contrast(self.app.state, selected.id, "surface", global_contrast)
-                else:
-                    # Reset to None (inherit from global)
-                    actions.set_region_brightness(self.app.state, selected.id, "surface", None)
-                    actions.set_region_contrast(self.app.state, selected.id, "surface", None)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_surface_brightness(self, sender=None, app_data=None) -> None:
-        """Handle surface brightness slider change."""
-        if dpg is None:
-            return
-
-        value = float(app_data)
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_brightness(self.app.state, selected.id, "surface", value)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_surface_contrast(self, sender=None, app_data=None) -> None:
-        """Handle surface contrast slider change."""
-        if dpg is None:
-            return
-
-        value = float(app_data)
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_contrast(self.app.state, selected.id, "surface", value)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_interior_separate_processing(self, sender=None, app_data=None) -> None:
-        """Toggle separate postprocessing for interior region."""
-        if dpg is None:
-            return
-
-        is_enabled = bool(app_data)
-
-        # Show/hide brightness and contrast sliders
-        dpg.configure_item("interior_brightness_slider", show=is_enabled)
-        dpg.configure_item("interior_contrast_slider", show=is_enabled)
-
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                if is_enabled:
-                    # Initialize with global values
-                    global_brightness = self.app.state.display_settings.brightness
-                    global_contrast = self.app.state.display_settings.contrast
-                    dpg.set_value("interior_brightness_slider", global_brightness)
-                    dpg.set_value("interior_contrast_slider", global_contrast)
-                    actions.set_region_brightness(self.app.state, selected.id, "interior", global_brightness)
-                    actions.set_region_contrast(self.app.state, selected.id, "interior", global_contrast)
-                else:
-                    # Reset to None (inherit from global)
-                    actions.set_region_brightness(self.app.state, selected.id, "interior", None)
-                    actions.set_region_contrast(self.app.state, selected.id, "interior", None)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_interior_brightness(self, sender=None, app_data=None) -> None:
-        """Handle interior brightness slider change."""
-        if dpg is None:
-            return
-
-        value = float(app_data)
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_brightness(self.app.state, selected.id, "interior", value)
-
-        self.app.display_pipeline.refresh_display()
-
-    def on_interior_contrast(self, sender=None, app_data=None) -> None:
-        """Handle interior contrast slider change."""
-        if dpg is None:
-            return
-
-        value = float(app_data)
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                actions.set_region_contrast(self.app.state, selected.id, "interior", value)
-
-        self.app.display_pipeline.refresh_display()
-
     # ------------------------------------------------------------------
     # Smear callbacks
     # ------------------------------------------------------------------
@@ -983,7 +915,7 @@ class PostprocessingPanel:
             if idx >= 0 and idx < len(self.app.state.project.conductors):
                 self.app.state.project.conductors[idx].smear_enabled = bool(app_data)
 
-        self.update_region_properties_panel()
+        self.update_context_ui()
         self.app.display_pipeline.refresh_display()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
@@ -1001,12 +933,10 @@ class PostprocessingPanel:
         self.smear_pending_value = float(app_data)
 
         # Record the time of THIS slider change (not the last render)
-        # This ensures we wait 300ms after the LAST slider movement
         self.smear_last_update_time = time.time()
 
     def _apply_clip_update(self, value: float) -> None:
         """Apply clip percent refresh (state already updated in on_clip_slider)."""
-        # State was already updated in on_clip_slider - just trigger the deferred refresh
         self.app.display_pipeline.refresh_display()
 
     def _apply_smear_update(self) -> None:
