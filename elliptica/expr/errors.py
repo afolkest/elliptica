@@ -29,3 +29,8 @@ class UnknownFunctionError(ExprError):
 class LimitExceededError(ExprError):
     """Expression exceeds safety limits."""
     pass
+
+
+class RuntimeExprError(ExprError):
+    """Error during expression evaluation (invalid arguments, etc.)."""
+    pass

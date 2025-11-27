@@ -21,6 +21,7 @@ from .errors import (
     ValidationError,
     UnknownVariableError,
     LimitExceededError,
+    RuntimeExprError,
 )
 from .functions import FUNCTIONS, CONSTANTS, clear_percentile_cache
 
@@ -89,4 +90,5 @@ __all__ = [
     'ValidationError',
     'UnknownVariableError',
     'LimitExceededError',
+    'RuntimeExprError',
 ]

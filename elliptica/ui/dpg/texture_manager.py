@@ -143,9 +143,15 @@ class TextureManager:
     def refresh_render_texture(self) -> None:
         """Update render texture with postprocessed image from cache."""
         from PIL import Image
+        from elliptica.expr import ExprError
 
         if dpg is None or self.texture_registry_id is None:
             return
+
+        width = None
+        height = None
+        data = None
+        expr_error_msg = None
 
         with self.app.state_lock:
             cache = self.app.state.render_cache
@@ -170,36 +176,52 @@ class TextureManager:
                     if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
                         lic_percentiles = cache.lic_percentiles
 
-                final_rgb, used_percentiles = apply_full_postprocess_hybrid(
-                    scalar_array=cache.result.array,  # Full resolution!
-                    conductor_masks=cache.conductor_masks,  # Full resolution!
-                    interior_masks=cache.interior_masks,  # Full resolution!
-                    conductor_color_settings=self.app.state.conductor_color_settings,
-                    conductors=self.app.state.project.conductors,
-                    render_shape=cache.result.array.shape,  # Full resolution shape
-                    canvas_resolution=self.app.state.project.canvas_resolution,
-                    clip_percent=clip_percent,
-                    brightness=self.app.state.display_settings.brightness,
-                    contrast=self.app.state.display_settings.contrast,
-                    gamma=self.app.state.display_settings.gamma,
-                    color_enabled=self.app.state.display_settings.color_enabled,
-                    palette=self.app.state.display_settings.palette,
-                    lic_percentiles=lic_percentiles,
-                    use_gpu=True,
-                    scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
-                    conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
-                    interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
-                    color_config=self.app.state.color_config,  # Expression-based coloring (if set)
-                    ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
-                    ey_tensor=cache.ey_gpu,
-                )
+                try:
+                    final_rgb, used_percentiles = apply_full_postprocess_hybrid(
+                        scalar_array=cache.result.array,  # Full resolution!
+                        conductor_masks=cache.conductor_masks,  # Full resolution!
+                        interior_masks=cache.interior_masks,  # Full resolution!
+                        conductor_color_settings=self.app.state.conductor_color_settings,
+                        conductors=self.app.state.project.conductors,
+                        render_shape=cache.result.array.shape,  # Full resolution shape
+                        canvas_resolution=self.app.state.project.canvas_resolution,
+                        clip_percent=clip_percent,
+                        brightness=self.app.state.display_settings.brightness,
+                        contrast=self.app.state.display_settings.contrast,
+                        gamma=self.app.state.display_settings.gamma,
+                        color_enabled=self.app.state.display_settings.color_enabled,
+                        palette=self.app.state.display_settings.palette,
+                        lic_percentiles=lic_percentiles,
+                        use_gpu=True,
+                        scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
+                        conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
+                        interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
+                        color_config=self.app.state.color_config,  # Expression-based coloring (if set)
+                        ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
+                        ey_tensor=cache.ey_gpu,
+                    )
 
-                # Update cache so future refreshes reuse the correct clip percent bounds.
-                cache.lic_percentiles = used_percentiles
-                cache.lic_percentiles_clip_percent = clip_percent
+                    # Update cache so future refreshes reuse the correct clip percent bounds.
+                    cache.lic_percentiles = used_percentiles
+                    cache.lic_percentiles_clip_percent = clip_percent
 
-                # Fast path: convert RGB→RGBA directly (no PIL roundtrip!)
-                width, height, data = _rgb_array_to_texture_data(final_rgb)
+                    # Fast path: convert RGB→RGBA directly (no PIL roundtrip!)
+                    width, height, data = _rgb_array_to_texture_data(final_rgb)
+
+                except ExprError as e:
+                    # Expression evaluation error - keep previous display, show error
+                    expr_error_msg = str(e)
+
+        # Update expression error display if postprocessing panel has one
+        if hasattr(self.app, 'postprocess_panel') and self.app.postprocess_panel is not None:
+            if dpg.does_item_exist("expr_error_text"):
+                if expr_error_msg:
+                    dpg.set_value("expr_error_text", f"Error: {expr_error_msg}")
+                # Don't clear error on success - let the panel manage that
+
+        # If there was an error, don't update the texture (keep previous valid display)
+        if data is None:
+            return
 
         # Create or update texture
         if self.render_texture_id is None or self.render_texture_size != (width, height):
