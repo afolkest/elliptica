@@ -40,8 +40,11 @@ class CacheManagementPanel:
         if dpg is None:
             return
 
-        dpg.add_text("Render Cache", parent=parent)
-        self.cache_status_text_id = dpg.add_text("No cached render", parent=parent)
+        # Compact cache status on one line, subtle gray
+        SUBTLE = (90, 90, 90)
+        with dpg.group(horizontal=True, parent=parent):
+            dpg.add_text("Cache:", color=SUBTLE)
+            self.cache_status_text_id = dpg.add_text("none", color=SUBTLE)
         with dpg.group(parent=parent) as cache_warning_group:
             self.cache_warning_group_id = cache_warning_group
             dpg.add_text("⚠️  Project modified since render", color=(255, 200, 100))
@@ -85,21 +88,21 @@ class CacheManagementPanel:
             if cache is None:
                 # No cache
                 if self.cache_status_text_id:
-                    dpg.set_value(self.cache_status_text_id, "No cached render")
+                    dpg.set_value(self.cache_status_text_id, "none")
                 if self.cache_warning_group_id:
                     dpg.configure_item(self.cache_warning_group_id, show=False)
                 return
 
-            # Cache exists - show resolution
+            # Cache exists - compact status: "1920×1080 @2×" or with warning
             shape = cache.result.array.shape
-            status_text = f"✓ {shape[1]}×{shape[0]} @ {cache.supersample}×"
+            status_text = f"{shape[1]}×{shape[0]} @{cache.supersample}×"
 
             # Check if dirty (fingerprint mismatch)
             current_fp = compute_project_fingerprint(self.app.state.project)
             is_dirty = (cache.project_fingerprint != current_fp)
 
             if is_dirty:
-                status_text = f"⚠️  {shape[1]}×{shape[0]} @ {cache.supersample}× (modified)"
+                status_text = f"{shape[1]}×{shape[0]} @{cache.supersample}× ⚠"
                 if self.cache_warning_group_id:
                     dpg.configure_item(self.cache_warning_group_id, show=True)
             else:

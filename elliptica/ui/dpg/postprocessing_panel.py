@@ -171,12 +171,12 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        dpg.add_text("Colorization", parent=parent)
-        dpg.add_spacer(height=10, parent=parent)
+        # Text color hierarchy
+        LABEL_TEXT = (150, 150, 150)  # Readable but slightly dimmed
 
-        # Mode toggle: Palette / Expressions
+        # Color mode toggle
         with dpg.group(horizontal=True, parent=parent):
-            dpg.add_text("Mode:")
+            dpg.add_text("Color Mode:", color=LABEL_TEXT)
             dpg.add_radio_button(
                 items=["Palette", "Expressions"],
                 default_value="Palette",
@@ -311,20 +311,16 @@ class PostprocessingPanel:
         from elliptica.render import list_color_palettes
         palette_names = list(list_color_palettes())
 
-        # Global palette selection with popup menu
-        dpg.add_text("Global Palette", parent=parent)
+        # Palette label and button showing current selection
+        LABEL_TEXT = (150, 150, 150)
+        dpg.add_text("Palette", parent=parent, color=LABEL_TEXT)
+
+        # Button shows current palette name directly
+        initial_label = self.app.state.display_settings.palette if self.app.state.display_settings.color_enabled else "Grayscale"
         global_palette_button = dpg.add_button(
-            label="Choose Palette...",
+            label=initial_label,
             width=200,
             tag="global_palette_button",
-            parent=parent,
-        )
-
-        # Show current state (Grayscale or palette name)
-        initial_text = self.app.state.display_settings.palette if self.app.state.display_settings.color_enabled else "Grayscale"
-        dpg.add_text(
-            f"Current: {initial_text}",
-            tag="global_palette_current_text",
             parent=parent,
         )
 
@@ -381,18 +377,15 @@ class PostprocessingPanel:
         from elliptica.render import list_color_palettes
         palette_names = list(list_color_palettes())
 
-        # Region palette selection with popup menu
-        dpg.add_text("Region Palette", parent=parent)
+        # Region palette label and button showing current selection
+        LABEL_TEXT = (150, 150, 150)
+        dpg.add_text("Region Palette", parent=parent, color=LABEL_TEXT)
+
+        # Button shows current selection directly
         region_palette_button = dpg.add_button(
-            label="Choose Palette...",
+            label="Use Global",
             width=200,
             tag="region_palette_button",
-            parent=parent,
-        )
-
-        dpg.add_text(
-            "Current: Use Global",
-            tag="region_palette_current_text",
             parent=parent,
         )
 
@@ -571,12 +564,12 @@ class PostprocessingPanel:
             has_override = self._has_override_enabled()
             dpg.set_value("enable_override_checkbox", has_override)
 
-            # Update region palette display and grayed state
+            # Update region palette button label and grayed state
             region_style = self._get_current_region_style()
             if region_style and region_style.enabled:
-                dpg.set_value("region_palette_current_text", f"Current: {region_style.palette}")
+                dpg.configure_item("region_palette_button", label=region_style.palette)
             else:
-                dpg.set_value("region_palette_current_text", "Current: Use Global")
+                dpg.configure_item("region_palette_button", label="Use Global")
             self._set_button_grayed("region_palette_button", not has_override)
 
             # Clip% always shows global, grayed in conductor mode
@@ -784,8 +777,8 @@ class PostprocessingPanel:
         with self.app.state_lock:
             actions.set_color_enabled(self.app.state, False)
 
-        # Update display
-        dpg.set_value("global_palette_current_text", "Current: Grayscale")
+        # Update button label to show current selection
+        dpg.configure_item("global_palette_button", label="Grayscale")
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
@@ -801,8 +794,8 @@ class PostprocessingPanel:
             actions.set_color_enabled(self.app.state, True)
             actions.set_palette(self.app.state, palette_name)
 
-        # Update current palette display
-        dpg.set_value("global_palette_current_text", f"Current: {palette_name}")
+        # Update button label to show current selection
+        dpg.configure_item("global_palette_button", label=palette_name)
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
@@ -817,8 +810,8 @@ class PostprocessingPanel:
             if selected and selected.id is not None:
                 actions.set_region_style_enabled(self.app.state, selected.id, self.selected_region, False)
 
-        # Update display
-        dpg.set_value("region_palette_current_text", "Current: Use Global")
+        # Update button label to show current selection
+        dpg.configure_item("region_palette_button", label="Use Global")
         dpg.configure_item("region_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
@@ -834,8 +827,8 @@ class PostprocessingPanel:
             if selected and selected.id is not None:
                 actions.set_region_palette(self.app.state, selected.id, self.selected_region, palette_name)
 
-        # Update current palette display
-        dpg.set_value("region_palette_current_text", f"Current: {palette_name}")
+        # Update button label to show current selection
+        dpg.configure_item("region_palette_button", label=palette_name)
         dpg.configure_item("region_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
