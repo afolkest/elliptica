@@ -17,22 +17,9 @@ except ImportError:
 
 
 # Constants for render settings
-SUPERSAMPLE_CHOICES = [1.0, 1.25, 1.5, 2.0, 3.0, 4.0]
-SUPERSAMPLE_LABELS = ["1× (fastest)", "1.25×", "1.5×", "2×", "3×", "4× (highest quality)"]
-SUPERSAMPLE_LOOKUP = dict(zip(SUPERSAMPLE_LABELS, SUPERSAMPLE_CHOICES))
-
 RESOLUTION_CHOICES = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
 RESOLUTION_LABELS = ["1× (canvas)", "1.5×", "2×", "3×", "4×", "6×", "8×"]
 RESOLUTION_LOOKUP = dict(zip(RESOLUTION_LABELS, RESOLUTION_CHOICES))
-
-
-def _label_for_supersample(value: float) -> str:
-    """Get radio button label for supersample value."""
-    try:
-        idx = SUPERSAMPLE_CHOICES.index(value)
-        return SUPERSAMPLE_LABELS[idx]
-    except (ValueError, IndexError):
-        return SUPERSAMPLE_LABELS[0]
 
 
 def _label_for_multiplier(value: float) -> str:
@@ -60,7 +47,6 @@ class RenderModalController:
         self.modal_open: bool = False
 
         # Widget IDs for form controls
-        self.supersample_radio_id: Optional[int] = None
         self.multiplier_radio_id: Optional[int] = None
         self.passes_input_id: Optional[int] = None
         self.streamlength_input_id: Optional[int] = None
@@ -97,13 +83,6 @@ class RenderModalController:
             height=550,
         ) as modal:
             self.modal_id = modal
-
-            dpg.add_text("Supersample Factor")
-            self.supersample_radio_id = dpg.add_radio_button(
-                SUPERSAMPLE_LABELS,
-                horizontal=True,
-            )
-            dpg.add_spacer(height=10)
 
             dpg.add_text("Render Resolution")
             self.multiplier_radio_id = dpg.add_radio_button(
@@ -357,9 +336,6 @@ class RenderModalController:
             streamlength = self.app.state.project.streamlength_factor
             project = self.app.state.project
 
-        if self.supersample_radio_id is not None:
-            dpg.set_value(self.supersample_radio_id, _label_for_supersample(settings.supersample))
-
         if self.multiplier_radio_id is not None:
             dpg.set_value(self.multiplier_radio_id, _label_for_multiplier(settings.multiplier))
 
@@ -434,10 +410,7 @@ class RenderModalController:
             return
 
         # Read form values
-        supersample_label = dpg.get_value(self.supersample_radio_id) if self.supersample_radio_id else SUPERSAMPLE_LABELS[0]
         multiplier_label = dpg.get_value(self.multiplier_radio_id) if self.multiplier_radio_id else RESOLUTION_LABELS[0]
-
-        supersample = SUPERSAMPLE_LOOKUP.get(supersample_label, SUPERSAMPLE_CHOICES[0])
         multiplier = RESOLUTION_LOOKUP.get(multiplier_label, RESOLUTION_CHOICES[0])
 
         passes = int(dpg.get_value(self.passes_input_id)) if self.passes_input_id is not None else defaults.DEFAULT_RENDER_PASSES
@@ -492,7 +465,6 @@ class RenderModalController:
 
         # Update app state
         with self.app.state_lock:
-            actions.set_supersample(self.app.state, supersample)
             actions.set_render_multiplier(self.app.state, multiplier)
             actions.set_num_passes(self.app.state, passes)
             actions.set_margin(self.app.state, margin)

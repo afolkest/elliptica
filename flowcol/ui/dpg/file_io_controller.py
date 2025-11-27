@@ -468,8 +468,6 @@ class FileIOController:
 
             # Display settings
             panel = self.app.postprocess_panel
-            if panel.postprocess_downsample_slider_id is not None:
-                dpg.set_value(panel.postprocess_downsample_slider_id, self.app.state.display_settings.downsample_sigma)
             if panel.postprocess_clip_slider_id is not None:
                 dpg.set_value(panel.postprocess_clip_slider_id, self.app.state.display_settings.clip_percent)
             if panel.postprocess_brightness_slider_id is not None:
