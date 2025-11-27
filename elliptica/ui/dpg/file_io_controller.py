@@ -490,11 +490,23 @@ class FileIOController:
             if panel.postprocess_gamma_slider_id is not None:
                 dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
 
-            # Sync global palette UI text
+        # Sync global palette UI text (outside lock - no state modification)
+        self.sync_palette_ui()
+
+    def sync_palette_ui(self) -> None:
+        """Sync global palette UI text to match current state.
+
+        Called when switching to render mode or loading a project.
+        """
+        if dpg is None:
+            return
+
+        with self.app.state_lock:
             palette_text = (self.app.state.display_settings.palette
                           if self.app.state.display_settings.color_enabled
                           else "Grayscale")
-            dpg.set_value("global_palette_current_text", f"Current: {palette_text}")
+
+        dpg.set_value("global_palette_current_text", f"Current: {palette_text}")
 
     def auto_save_cache(self) -> None:
         """Auto-save render cache to disk (called after successful render)."""

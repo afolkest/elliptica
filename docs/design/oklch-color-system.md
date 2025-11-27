@@ -136,6 +136,55 @@ flowcol/
 5. **Backward compatible** — Palette mode unchanged, OKLCH is opt-in
 6. **PDE agnostic** — Field definitions come from solvers, not hardcoded
 
+### Backend Dispatch Strategy
+
+The colorspace and expression modules must work with both numpy arrays and torch tensors. We use a lightweight dispatch approach:
+
+```python
+# colorspace/_backend.py
+"""Backend dispatch for numpy/torch compatibility."""
+
+import numpy as np
+
+def get_backend(x):
+    """Detect backend from input type."""
+    if hasattr(x, 'device'):  # torch tensor
+        import torch
+        return torch
+    return np
+
+def dispatch(np_func, torch_func):
+    """Create a function that dispatches based on input type."""
+    def fn(x, *args, **kwargs):
+        if hasattr(x, 'device'):
+            import torch
+            return torch_func(x, *args, **kwargs)
+        return np_func(x, *args, **kwargs)
+    return fn
+
+# Common operations
+sin = dispatch(np.sin, lambda x: __import__('torch').sin(x))
+cos = dispatch(np.cos, lambda x: __import__('torch').cos(x))
+sqrt = dispatch(np.sqrt, lambda x: __import__('torch').sqrt(x))
+clip = dispatch(np.clip, lambda x, lo, hi: __import__('torch').clamp(x, lo, hi))
+where = dispatch(np.where, lambda c, t, f: __import__('torch').where(c, t, f))
+stack = dispatch(np.stack, lambda arrs, axis: __import__('torch').stack(arrs, dim=axis))
+# ... etc
+```
+
+Usage in colorspace functions:
+
+```python
+from ._backend import sin, cos, sqrt, clip, where, stack
+
+def oklch_to_srgb(L, C, H):
+    H_rad = H * (pi / 180)
+    a = C * cos(H_rad)  # Dispatches automatically
+    # ...
+```
+
+This keeps the colorspace code clean while handling both backends. The torch import is lazy to avoid loading torch when not needed.
+
 ---
 
 ## PDE-Agnostic Architecture
@@ -378,15 +427,44 @@ def gamut_clip_rgb(L, C, H):
     return clip(rgb, 0, 1)
 ```
 
-**Gamut Mapping Considerations:**
+**Gamut Mapping Strategy:**
 
-The binary search approach in `max_chroma_for_lh` is accurate but expensive. Options for optimization:
+The binary search approach in `max_chroma_for_lh` is accurate but expensive (~16 iterations per pixel). For real-time use, we use a precomputed LUT:
 
-1. **Precomputed LUT** — 256×360 table of max chroma for (L, H) pairs, ~360KB
-2. **Analytical approximation** — Björn Ottosson has published closed-form approximations
-3. **Adaptive precision** — Fewer binary search steps for interactive preview, more for export
+```python
+# gamut.py (continued)
 
-For interactive use, recommend: coarse LUT + linear interpolation.
+# Precomputed LUT: max chroma for each (L, H) pair
+# Shape: (256, 360) — L in 256 steps, H in 1-degree steps
+# Size: ~360KB, computed once at module load
+_MAX_CHROMA_LUT: np.ndarray | None = None
+
+def _build_max_chroma_lut() -> np.ndarray:
+    """Build max chroma lookup table. Called once at import."""
+    L_steps, H_steps = 256, 360
+    L = np.linspace(0, 1, L_steps)[:, None]
+    H = np.arange(H_steps)[None, :]
+    L_grid = np.broadcast_to(L, (L_steps, H_steps))
+    H_grid = np.broadcast_to(H, (L_steps, H_steps))
+    return max_chroma_for_lh(L_grid.ravel(), H_grid.ravel(), steps=20).reshape(L_steps, H_steps)
+
+def get_max_chroma_lut() -> np.ndarray:
+    """Get or build the max chroma LUT."""
+    global _MAX_CHROMA_LUT
+    if _MAX_CHROMA_LUT is None:
+        _MAX_CHROMA_LUT = _build_max_chroma_lut()
+    return _MAX_CHROMA_LUT
+
+def max_chroma_fast(L, C, H):
+    """Fast max chroma lookup via LUT + bilinear interpolation."""
+    lut = get_max_chroma_lut()
+    # Bilinear interpolation into LUT
+    L_idx = L * 255
+    H_idx = H % 360
+    # ... scipy.ndimage.map_coordinates or manual bilinear ...
+```
+
+**Decision:** Use LUT for interactive (Phase 2), binary search available for high-quality export if needed. The ~360KB LUT is negligible and builds in <1s.
 
 ---
 
@@ -654,11 +732,57 @@ class CompiledExpr:
                 return impl(*evaluated_args)
 
 
-def compile(source: str) -> CompiledExpr:
-    """Parse and compile expression in one step."""
+def compile(source: str, max_depth: int = 32, max_nodes: int = 100) -> CompiledExpr:
+    """Parse and compile expression in one step.
+
+    Args:
+        source: Expression string
+        max_depth: Maximum AST nesting depth (prevents stack overflow)
+        max_nodes: Maximum AST node count (prevents pathological expressions)
+
+    Raises:
+        ParseError: If expression is invalid
+        ExprError: If expression exceeds complexity limits
+    """
     from .parser import parse
     ast = parse(source)
+
+    # Check complexity limits
+    depth = _ast_depth(ast)
+    if depth > max_depth:
+        raise ExprError(f"Expression too deeply nested ({depth} > {max_depth})")
+
+    nodes = _ast_node_count(ast)
+    if nodes > max_nodes:
+        raise ExprError(f"Expression too complex ({nodes} nodes > {max_nodes})")
+
     return CompiledExpr(ast)
+
+
+def _ast_depth(node: Expr) -> int:
+    """Calculate maximum depth of AST."""
+    match node:
+        case Const(_) | Var(_):
+            return 1
+        case BinOp(_, left, right):
+            return 1 + max(_ast_depth(left), _ast_depth(right))
+        case UnaryOp(_, arg):
+            return 1 + _ast_depth(arg)
+        case FuncCall(_, args):
+            return 1 + max((_ast_depth(a) for a in args), default=0)
+
+
+def _ast_node_count(node: Expr) -> int:
+    """Count total nodes in AST."""
+    match node:
+        case Const(_) | Var(_):
+            return 1
+        case BinOp(_, left, right):
+            return 1 + _ast_node_count(left) + _ast_node_count(right)
+        case UnaryOp(_, arg):
+            return 1 + _ast_node_count(arg)
+        case FuncCall(_, args):
+            return 1 + sum(_ast_node_count(a) for a in args)
 ```
 
 #### functions.py
@@ -1561,6 +1685,8 @@ from .compose import OKLCHConfig
 from .presets import PRESETS, get_preset
 
 
+CONFIG_VERSION = 1  # Increment when format changes
+
 @dataclass
 class ColorConfig:
     """Unified color configuration supporting both palette and OKLCH modes.
@@ -1580,22 +1706,30 @@ class ColorConfig:
     # === OKLCH Mode ===
     oklch_preset: str | None = None       # Use named preset
     oklch_custom: OKLCHConfig | None = None  # Or custom config
+    pde_type: str = 'universal'           # PDE type for preset resolution
 
     def get_oklch(self) -> OKLCHConfig:
-        """Get effective OKLCH config (preset or custom)."""
-        if self.oklch_preset and self.oklch_preset in PRESETS:
-            return get_preset(self.oklch_preset)
+        """Get effective OKLCH config (preset or custom).
+
+        Uses pde_type to resolve PDE-specific presets.
+        """
+        if self.oklch_preset:
+            presets = get_presets_for_pde(self.pde_type)
+            if self.oklch_preset in presets:
+                return presets[self.oklch_preset]
         if self.oklch_custom:
             return self.oklch_custom
-        # Fallback
-        return get_preset('Grayscale')
+        # Fallback to universal grayscale
+        return UNIVERSAL_PRESETS['Grayscale']
 
     # === Serialization ===
 
     def to_dict(self) -> dict:
         """Serialize to dict for JSON storage."""
         d = {
+            'version': CONFIG_VERSION,
             'mode': self.mode,
+            'pde_type': self.pde_type,
             'palette_name': self.palette_name,
             'brightness': self.brightness,
             'contrast': self.contrast,
@@ -1610,13 +1744,24 @@ class ColorConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> 'ColorConfig':
-        """Deserialize from dict."""
+        """Deserialize from dict.
+
+        Handles version migration if needed.
+        """
+        version = data.get('version', 0)
+        if version > CONFIG_VERSION:
+            raise ValueError(f"Config version {version} is newer than supported {CONFIG_VERSION}")
+
+        # Version 0 (pre-versioning) had no pde_type
+        pde_type = data.get('pde_type', 'universal')
+
         oklch_custom = None
         if 'oklch_custom' in data:
             oklch_custom = _oklch_config_from_dict(data['oklch_custom'])
 
         return cls(
             mode=data.get('mode', 'palette'),
+            pde_type=pde_type,
             palette_name=data.get('palette_name', 'Ink Wash'),
             brightness=data.get('brightness', 0.0),
             contrast=data.get('contrast', 1.0),
@@ -2115,36 +2260,39 @@ Move palette code from `render.py` to `color/palette.py`:
 
 ---
 
+## Resolved Decisions
+
+1. **Gamut LUT**: Yes — precompute 256×360 LUT (~360KB). Build lazily on first use. Use bilinear interpolation for lookups.
+
+2. **Backend dispatch**: Use `_backend.py` shim with lazy torch import. Dispatch based on `hasattr(x, 'device')`.
+
+3. **PDE/preset wiring**: `ColorConfig` stores `pde_type` field. `get_oklch()` uses it to resolve presets. Serialization includes version and pde_type.
+
+4. **Expression safety**: Enforce `max_depth=32` and `max_nodes=100` limits in `compile()`.
+
 ## Open Questions
 
-1. **Gamut LUT**: Should we precompute max-chroma lookup table? Adds ~360KB but speeds up gamut compression significantly.
-
-2. **PDE-specific derived fields**: Each PDE type may want specialized derived fields:
+1. **PDE-specific derived fields**: Each PDE type may want specialized derived fields:
    - Electrostatics: divergence ∇·E, distance to conductors
    - Fluids: vorticity ∇×v, strain rate, Q-criterion
    - Heat: Laplacian ∇²T
-   - General: spatial derivatives require grid spacing info
+   - General: spatial derivatives require grid spacing info from solver
 
-3. **Expression DSL extensions**: Would any of these be valuable?
+2. **Expression DSL extensions**: Would any of these be valuable?
    - Conditional: `if(cond, then, else)`
    - Noise: `noise(x, y, scale)`
    - Spatial filters: `blur(field, sigma)`
 
-4. **Preset discovery UX**: How do users find presets when switching PDEs?
+3. **Preset discovery UX**: How do users find presets when switching PDEs?
    - Show only compatible presets?
    - Gray out incompatible ones with explanation?
    - Auto-switch to universal preset when changing PDE?
 
-5. **Per-region color**: Should OKLCH mode support per-region overrides like palette mode does?
+4. **Per-region color**: Should OKLCH mode support per-region overrides like palette mode does?
 
-6. **Custom user presets**: Should users be able to save presets?
+5. **Custom user presets**: Should users be able to save presets?
    - Per-project vs. global?
    - How to handle presets that reference PDE-specific fields?
-
-7. **Field provider registration**: How do new PDE solvers register their fields?
-   - Protocol/interface approach (current design)
-   - Plugin/discovery system?
-   - Configuration file?
 
 ---
 

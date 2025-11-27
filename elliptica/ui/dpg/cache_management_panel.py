@@ -148,6 +148,7 @@ class CacheManagementPanel:
             self.app.state.view_mode = "render"
 
         self.app._update_control_visibility()
+        self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode
         self.app.display_pipeline.refresh_display()
         dpg.set_value("status_text", "Viewing cached render")
 
