@@ -442,3 +442,21 @@ def set_region_contrast(state: AppState, conductor_id: int, region: str, contras
         settings.surface.contrast = contrast
     elif region == "interior":
         settings.interior.contrast = contrast
+
+
+def set_region_gamma(state: AppState, conductor_id: int, region: str, gamma: float | None) -> None:
+    """Set per-region gamma override (None = inherit from global).
+
+    Args:
+        conductor_id: Conductor ID
+        region: "surface" or "interior"
+        gamma: Gamma value, or None to inherit from global
+    """
+    settings = state.conductor_color_settings.get(conductor_id)
+    if settings is None:
+        return
+
+    if region == "surface":
+        settings.surface.gamma = gamma
+    elif region == "interior":
+        settings.interior.gamma = gamma
