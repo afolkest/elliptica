@@ -3,6 +3,8 @@
 import numpy as np
 from typing import Any
 
+from .errors import RuntimeExprError
+
 Array = Any
 
 # Lazy torch reference
@@ -28,6 +30,14 @@ def clear_percentile_cache():
 
 def _get_percentiles(x, lo_pct, hi_pct, use_torch: bool) -> tuple[float, float]:
     """Get percentile values, using cache if available."""
+    # Validate percentile bounds
+    if not (0 <= lo_pct <= 100):
+        raise RuntimeExprError(f"clipnorm/pclip: lo percentile must be in [0, 100], got {lo_pct}")
+    if not (0 <= hi_pct <= 100):
+        raise RuntimeExprError(f"clipnorm/pclip: hi percentile must be in [0, 100], got {hi_pct}")
+    if lo_pct >= hi_pct:
+        raise RuntimeExprError(f"clipnorm/pclip: lo ({lo_pct}) must be < hi ({hi_pct})")
+
     key = (id(x), lo_pct, hi_pct)
     if key in _percentile_cache:
         return _percentile_cache[key]
