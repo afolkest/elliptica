@@ -9,7 +9,13 @@ import numpy as np
 
 @dataclass
 class BCField:
-    """Metadata for a boundary condition field (per edge)."""
+    """Metadata for a boundary condition field (per edge).
+
+    Attributes:
+        visible_when: Optional dict mapping field_name -> required_value.
+            If specified, this field is only shown when all conditions are met.
+            Example: {"type": 0} means show only when the "type" field equals 0.
+    """
     name: str
     display_name: str
     field_type: str  # "enum", "float", "int", "bool"
@@ -18,6 +24,7 @@ class BCField:
     max_value: float | None = None
     choices: list[tuple[str, Any]] = field(default_factory=list)  # For enum: [(label, value)]
     description: str = ""
+    visible_when: dict[str, Any] | None = None
 
 
 @dataclass

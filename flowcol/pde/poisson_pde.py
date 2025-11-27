@@ -128,7 +128,7 @@ def extract_electric_field(solution: dict[str, np.ndarray], project: Any) -> tup
 POISSON_PDE = PDEDefinition(
     name="poisson",
     display_name="Electrostatics",
-    description="Solve Poisson equation ∇²φ = 0 for electric potential and field",
+    description="Solve Laplace equation for electric potential and field",
     solve=solve_poisson,
     extract_lic_field=extract_electric_field,
     boundary_params=[

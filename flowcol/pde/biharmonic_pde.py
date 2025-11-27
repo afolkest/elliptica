@@ -400,17 +400,17 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
 BIHARMONIC_PDE = PDEDefinition(
     name="biharmonic",
     display_name="Biharmonic Flow (Stokes)",
-    description="Solve biharmonic equation Δ²φ = 0 (clamped plate)",
+    description="Solve biharmonic equation (clamped plate / Stokes flow)",
     solve=solve_biharmonic,
     extract_lic_field=extract_electric_field,  # Same E = -grad(phi)
     boundary_params=[
         BoundaryParameter(
             name="voltage",
-            display_name="Value",
+            display_name="Potential",
             min_value=-1.0,
             max_value=1.0,
             default_value=0.0,
-            description="Potential value"
+            description="Stream function value at the boundary"
         )
     ],
     bc_fields=[
@@ -419,35 +419,37 @@ BIHARMONIC_PDE = PDEDefinition(
             display_name="Boundary Type",
             field_type="enum",
             default=DIRICHLET,
-            choices=[("Dirichlet (φ fixed)", DIRICHLET), ("Neumann / free", NEUMANN)],
-            description="Primary boundary condition for φ."
+            choices=[("Dirichlet (fixed)", DIRICHLET), ("Neumann (free)", NEUMANN)],
+            description="Dirichlet = fixed potential, Neumann = zero normal derivative."
         ),
         BCField(
             name="value",
-            display_name="φ Value",
+            display_name="Value",
             field_type="float",
             default=0.0,
             min_value=-10.0,
             max_value=10.0,
-            description="Dirichlet value along the edge (φ)."
+            description="Fixed potential value along the edge.",
+            visible_when={"type": DIRICHLET},
         ),
         BCField(
             name="slope",
-            display_name="Normal Slope (∂nφ)",
+            display_name="Normal Slope",
             field_type="float",
             default=0.0,
             min_value=-10.0,
             max_value=10.0,
-            description="Outward normal derivative for Neumann edges."
+            description="Outward normal derivative at the edge.",
+            visible_when={"type": NEUMANN},
         ),
         BCField(
             name="laplacian",
-            display_name="Δφ (edge)",
+            display_name="Laplacian",
             field_type="float",
             default=0.0,
             min_value=-10.0,
             max_value=10.0,
-            description="Laplacian of φ along the edge (used in mixed biharmonic solve)."
+            description="Laplacian value at edge (for mixed biharmonic solve)."
         ),
     ],
 )
