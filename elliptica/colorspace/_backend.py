@@ -136,3 +136,28 @@ def from_numpy(arr: np.ndarray, reference: Array) -> Array:
     if is_torch(reference):
         return _get_torch().from_numpy(arr).to(device=reference.device, dtype=reference.dtype)
     return arr
+
+
+def broadcast_arrays(*arrays: Array) -> tuple[Array, ...]:
+    """Broadcast arrays to common shape, handling scalars."""
+    if not arrays:
+        return ()
+
+    # Check if any are torch tensors
+    use_torch = any(is_torch(a) for a in arrays if hasattr(a, 'shape'))
+
+    if use_torch:
+        torch = _get_torch()
+        # Convert scalars to 0-d tensors, then broadcast
+        tensors = []
+        ref = next((a for a in arrays if is_torch(a)), None)
+        for a in arrays:
+            if not hasattr(a, 'shape') or not is_torch(a):
+                t = torch.as_tensor(a, device=ref.device, dtype=ref.dtype)
+            else:
+                t = a
+            tensors.append(t)
+        return torch.broadcast_tensors(*tensors)
+
+    # NumPy path
+    return np.broadcast_arrays(*arrays)

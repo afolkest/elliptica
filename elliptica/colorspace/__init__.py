@@ -1,21 +1,24 @@
-"""OKLCH color space conversions and gamut mapping.
+"""OKLCH color space conversions, gamut mapping, and expression-based color mapping.
 
 This module provides:
 - OKLCH <-> sRGB conversions
 - Gamut mapping (clip or chroma compression)
+- ColorMapping: map field arrays to RGB via OKLCH expressions
 - Backend-agnostic: works with numpy arrays or torch tensors
 
 Example:
     import numpy as np
-    from flowcol.colorspace import oklch_to_srgb, gamut_map_to_srgb
+    from elliptica.colorspace import ColorMapping
 
-    # Create OKLCH values
-    L = np.full((100, 100), 0.7)
-    C = np.full((100, 100), 0.15)
-    H = np.linspace(0, 360, 100)[None, :] * np.ones((100, 1))
+    # Define how fields map to color channels
+    mapping = ColorMapping(
+        L="0.3 + 0.5 * normalize(lic)",
+        C="0.15 * normalize(mag)",
+        H="180",
+    )
 
-    # Convert to sRGB with gamut handling
-    rgb = gamut_map_to_srgb(L, C, H, method='compress')
+    # Render to RGB
+    rgb = mapping.render({'lic': lic_array, 'mag': mag_array})
 """
 
 from .oklch import (
@@ -41,7 +44,12 @@ from .gamut import (
     get_max_chroma_lut,
 )
 
+from .mapping import ColorMapping, ColorConfig
+
 __all__ = [
+    # High-level API
+    'ColorMapping',
+    'ColorConfig',
     # OKLCH conversions
     'oklch_to_oklab',
     'oklab_to_oklch',

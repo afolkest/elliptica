@@ -219,6 +219,22 @@ class TestBuiltinFunctions:
         assert result.min() >= 9
         assert result.max() <= 90
 
+    def test_clipnorm(self):
+        """clipnorm should percentile clip and normalize to [0, 1]."""
+        fn = compile_expression("clipnorm(x, 10, 90)")
+        x = np.arange(100, dtype=float)
+        result = fn({'x': x})
+        # Should be normalized to [0, 1]
+        assert result.min() == pytest.approx(0, abs=1e-6)
+        assert result.max() == pytest.approx(1, abs=1e-6)
+
+    def test_clipnorm_constant_array(self):
+        """clipnorm on constant array should return zeros."""
+        fn = compile_expression("clipnorm(x, 0.5, 99.5)")
+        x = np.array([5.0, 5.0, 5.0])
+        result = fn({'x': x})
+        np.testing.assert_allclose(result, [0, 0, 0])
+
 
 class TestGetVariables:
     """Test variable extraction."""
@@ -520,13 +536,13 @@ class TestListHelpers:
         assert funcs['clamp'] == 3
 
     def test_list_functions_complete(self):
-        """All 17 functions should be listed."""
+        """All 18 functions should be listed."""
         funcs = list_functions()
         expected = {
             'sin', 'cos', 'tan', 'sqrt', 'abs', 'exp', 'log', 'log10',
             'clamp', 'lerp', 'smoothstep',
             'min', 'max', 'mean', 'std',
-            'normalize', 'pclip'
+            'normalize', 'pclip', 'clipnorm'
         }
         assert set(funcs.keys()) == expected
 
