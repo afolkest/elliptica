@@ -44,6 +44,16 @@ class PostprocessingPanel:
         self.interior_brightness_slider_id: Optional[int] = None
         self.interior_contrast_slider_id: Optional[int] = None
 
+        # Widget IDs for expression editor
+        self.expr_L_input_id: Optional[int] = None
+        self.expr_C_input_id: Optional[int] = None
+        self.expr_H_input_id: Optional[int] = None
+        self.expr_error_text_id: Optional[int] = None
+        self.expr_preset_combo_id: Optional[int] = None
+
+        # Color mode: "palette" or "expressions"
+        self.color_mode: str = "palette"
+
         # Delete confirmation modal
         self.delete_confirmation_modal_id: Optional[int] = None
         self.pending_delete_palette: Optional[str] = None
@@ -57,6 +67,11 @@ class PostprocessingPanel:
         self.clip_pending_value: Optional[float] = None
         self.clip_last_update_time: float = 0.0
         self.clip_debounce_delay: float = 0.3  # 300ms delay
+
+        # Debouncing for expression updates
+        self.expr_pending_update: bool = False
+        self.expr_last_update_time: float = 0.0
+        self.expr_debounce_delay: float = 0.3  # 300ms delay
 
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
@@ -82,46 +97,62 @@ class PostprocessingPanel:
             parent=parent,
         )
 
-        self.postprocess_brightness_slider_id = dpg.add_slider_float(
-            label="Brightness",
-            default_value=self.app.state.display_settings.brightness,
-            min_value=defaults.MIN_BRIGHTNESS,
-            max_value=defaults.MAX_BRIGHTNESS,
-            format="%.2f",
-            callback=self.on_brightness_slider,
-            width=200,
-            parent=parent,
-        )
-
-        self.postprocess_contrast_slider_id = dpg.add_slider_float(
-            label="Contrast",
-            default_value=self.app.state.display_settings.contrast,
-            min_value=defaults.MIN_CONTRAST,
-            max_value=defaults.MAX_CONTRAST,
-            format="%.2f",
-            callback=self.on_contrast_slider,
-            width=200,
-            parent=parent,
-        )
-
-        self.postprocess_gamma_slider_id = dpg.add_slider_float(
-            label="Gamma",
-            default_value=self.app.state.display_settings.gamma,
-            min_value=defaults.MIN_GAMMA,
-            max_value=defaults.MAX_GAMMA,
-            format="%.2f",
-            callback=self.on_gamma_slider,
-            width=200,
-            parent=parent,
-        )
-
         dpg.add_spacer(height=10, parent=parent)
         dpg.add_separator(parent=parent)
         dpg.add_text("Colorization", parent=parent)
         dpg.add_spacer(height=10, parent=parent)
 
-        # Build global palette selection UI (no checkbox - selecting palette enables color)
-        self._build_global_palette_ui(parent, palette_colormaps)
+        # Mode toggle: Palette / Expressions
+        with dpg.group(horizontal=True, parent=parent):
+            dpg.add_text("Mode:")
+            dpg.add_radio_button(
+                items=["Palette", "Expressions"],
+                default_value="Palette",
+                horizontal=True,
+                callback=self.on_color_mode_change,
+                tag="color_mode_radio",
+            )
+
+        dpg.add_spacer(height=10, parent=parent)
+
+        # Palette mode container (shown by default)
+        with dpg.group(tag="palette_mode_group", parent=parent):
+            # Build global palette selection UI
+            self._build_global_palette_ui("palette_mode_group", palette_colormaps)
+
+            # Brightness/contrast/gamma only apply in palette mode
+            dpg.add_spacer(height=10)
+            self.postprocess_brightness_slider_id = dpg.add_slider_float(
+                label="Brightness",
+                default_value=self.app.state.display_settings.brightness,
+                min_value=defaults.MIN_BRIGHTNESS,
+                max_value=defaults.MAX_BRIGHTNESS,
+                format="%.2f",
+                callback=self.on_brightness_slider,
+                width=200,
+            )
+            self.postprocess_contrast_slider_id = dpg.add_slider_float(
+                label="Contrast",
+                default_value=self.app.state.display_settings.contrast,
+                min_value=defaults.MIN_CONTRAST,
+                max_value=defaults.MAX_CONTRAST,
+                format="%.2f",
+                callback=self.on_contrast_slider,
+                width=200,
+            )
+            self.postprocess_gamma_slider_id = dpg.add_slider_float(
+                label="Gamma",
+                default_value=self.app.state.display_settings.gamma,
+                min_value=defaults.MIN_GAMMA,
+                max_value=defaults.MAX_GAMMA,
+                format="%.2f",
+                callback=self.on_gamma_slider,
+                width=200,
+            )
+
+        # Expressions mode container (hidden by default)
+        with dpg.group(tag="expressions_mode_group", parent=parent, show=False):
+            self._build_expression_editor_ui("expressions_mode_group")
 
         dpg.add_spacer(height=10, parent=parent)
         dpg.add_separator(parent=parent)
@@ -198,6 +229,126 @@ class PostprocessingPanel:
                             callback=lambda s, a, u: self._open_delete_confirmation(u),
                             user_data=palette_name
                         )
+
+    def _build_expression_editor_ui(self, parent) -> None:
+        """Build the expression editor UI for OKLCH color mapping.
+
+        Args:
+            parent: Parent widget ID
+        """
+        if dpg is None:
+            return
+
+        from elliptica.colorspace import list_presets, get_preset, AVAILABLE_VARIABLES, AVAILABLE_FUNCTIONS
+
+        preset_names = list_presets()
+
+        # Preset selector
+        with dpg.group(horizontal=True, parent=parent):
+            dpg.add_text("Preset:")
+            self.expr_preset_combo_id = dpg.add_combo(
+                items=preset_names,
+                default_value=preset_names[0] if preset_names else "",
+                width=180,
+                callback=self.on_expression_preset_change,
+                tag="expr_preset_combo",
+            )
+
+        dpg.add_spacer(height=10, parent=parent)
+
+        # L expression
+        dpg.add_text("Lightness (L)  [0-1]", parent=parent)
+        self.expr_L_input_id = dpg.add_input_text(
+            default_value="clipnorm(lic, 0.5, 99.5)",
+            width=280,
+            height=50,
+            multiline=True,
+            callback=self.on_expression_change,
+            on_enter=False,
+            tag="expr_L_input",
+            parent=parent,
+        )
+
+        dpg.add_spacer(height=8, parent=parent)
+
+        # C expression
+        dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
+        self.expr_C_input_id = dpg.add_input_text(
+            default_value="0",
+            width=280,
+            height=50,
+            multiline=True,
+            callback=self.on_expression_change,
+            on_enter=False,
+            tag="expr_C_input",
+            parent=parent,
+        )
+
+        dpg.add_spacer(height=8, parent=parent)
+
+        # H expression
+        dpg.add_text("Hue (H)  [0-360 degrees]", parent=parent)
+        self.expr_H_input_id = dpg.add_input_text(
+            default_value="0",
+            width=280,
+            height=50,
+            multiline=True,
+            callback=self.on_expression_change,
+            on_enter=False,
+            tag="expr_H_input",
+            parent=parent,
+        )
+
+        dpg.add_spacer(height=8, parent=parent)
+
+        # Error display
+        self.expr_error_text_id = dpg.add_text(
+            "",
+            color=(255, 100, 100),
+            tag="expr_error_text",
+            parent=parent,
+            wrap=280,
+        )
+
+        dpg.add_spacer(height=10, parent=parent)
+
+        # Reference section (collapsible)
+        with dpg.collapsing_header(label="Reference", default_open=False, parent=parent):
+            dpg.add_text("Variables:", color=(150, 200, 255))
+            for var_name, var_desc in AVAILABLE_VARIABLES:
+                dpg.add_text(f"  {var_name}", color=(200, 200, 200))
+                dpg.add_text(f"    {var_desc}", color=(150, 150, 150), wrap=260)
+
+            dpg.add_spacer(height=8)
+            dpg.add_text("Functions:", color=(150, 200, 255))
+            for func_sig, func_desc in AVAILABLE_FUNCTIONS:
+                dpg.add_text(f"  {func_sig}", color=(200, 200, 200))
+                dpg.add_text(f"    {func_desc}", color=(150, 150, 150), wrap=260)
+
+        # Load first preset
+        if preset_names:
+            self._load_preset(preset_names[0])
+
+    def _load_preset(self, preset_name: str) -> None:
+        """Load a preset into the expression inputs."""
+        if dpg is None:
+            return
+
+        from elliptica.colorspace import get_preset
+
+        preset = get_preset(preset_name)
+        if preset is None:
+            return
+
+        dpg.set_value("expr_L_input", preset.L)
+        dpg.set_value("expr_C_input", preset.C)
+        dpg.set_value("expr_H_input", preset.H)
+
+        # Clear any error
+        dpg.set_value("expr_error_text", "")
+
+        # Trigger update
+        self._update_color_config_from_expressions()
 
     def _build_region_properties_ui(self, parent, palette_colormaps: dict) -> None:
         """Build region properties UI (surface/interior palettes + smear).
@@ -895,3 +1046,90 @@ class PostprocessingPanel:
         # Only apply if enough time has passed since the last slider movement
         if current_time - self.smear_last_update_time >= self.smear_debounce_delay:
             self._apply_smear_update()
+
+    # ------------------------------------------------------------------
+    # Expression editor callbacks
+    # ------------------------------------------------------------------
+
+    def on_color_mode_change(self, sender=None, app_data=None) -> None:
+        """Handle color mode toggle (Palette / Expressions)."""
+        if dpg is None:
+            return
+
+        mode = app_data  # "Palette" or "Expressions"
+        self.color_mode = "palette" if mode == "Palette" else "expressions"
+
+        # Show/hide the appropriate UI groups
+        dpg.configure_item("palette_mode_group", show=(self.color_mode == "palette"))
+        dpg.configure_item("expressions_mode_group", show=(self.color_mode == "expressions"))
+
+        # Update color_config based on mode
+        with self.app.state_lock:
+            if self.color_mode == "palette":
+                # Clear color_config to use legacy palette mode
+                self.app.state.color_config = None
+            else:
+                # Build ColorConfig from current expressions
+                self._update_color_config_from_expressions()
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_expression_preset_change(self, sender=None, app_data=None) -> None:
+        """Handle preset selection change."""
+        if dpg is None or app_data is None:
+            return
+
+        self._load_preset(app_data)
+
+    def on_expression_change(self, sender=None, app_data=None) -> None:
+        """Handle expression text change (debounced)."""
+        if dpg is None:
+            return
+
+        # Mark pending update and record time
+        self.expr_pending_update = True
+        self.expr_last_update_time = time.time()
+
+    def check_expression_debounce(self) -> None:
+        """Check if expression update should be applied (called every frame)."""
+        if not self.expr_pending_update:
+            return
+
+        current_time = time.time()
+        if current_time - self.expr_last_update_time >= self.expr_debounce_delay:
+            self._update_color_config_from_expressions()
+            self.expr_pending_update = False
+
+    def _update_color_config_from_expressions(self) -> None:
+        """Build ColorConfig from current expression inputs and update state."""
+        if dpg is None:
+            return
+
+        # Only update if in expressions mode
+        if self.color_mode != "expressions":
+            return
+
+        from elliptica.colorspace import ColorConfig, ColorMapping
+        from elliptica.expr import ExprError
+
+        L_expr = dpg.get_value("expr_L_input").strip()
+        C_expr = dpg.get_value("expr_C_input").strip()
+        H_expr = dpg.get_value("expr_H_input").strip()
+
+        # Try to build ColorConfig
+        try:
+            config = ColorConfig(
+                global_mapping=ColorMapping(L=L_expr, C=C_expr, H=H_expr),
+            )
+
+            # Success - clear error and update state
+            dpg.set_value("expr_error_text", "")
+
+            with self.app.state_lock:
+                self.app.state.color_config = config
+
+            self.app.display_pipeline.refresh_display()
+
+        except ExprError as e:
+            # Show error but don't update config
+            dpg.set_value("expr_error_text", f"Error: {e}")

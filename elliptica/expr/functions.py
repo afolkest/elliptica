@@ -122,6 +122,10 @@ FUNCTIONS: dict[str, tuple] = {
     'log': (np.log, lambda x: _get_torch().log(x), 1),
     'log10': (np.log10, lambda x: _get_torch().log10(x), 1),
 
+    # Two-arg pointwise
+    'pow': (np.power, lambda x, y: _get_torch().pow(x, y), 2),
+    'atan2': (np.arctan2, lambda y, x: _get_torch().atan2(y, x), 2),
+
     # Multi-arg pointwise (3 args)
     'clamp': (
         lambda x, lo, hi: np.clip(x, lo, hi),

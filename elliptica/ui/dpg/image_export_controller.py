@@ -59,6 +59,7 @@ class ImageExportController:
             project = _snapshot_project(self.app.state.project)
             settings = replace(self.app.state.display_settings)
             conductor_color_settings = {k: v for k, v in self.app.state.conductor_color_settings.items()}
+            color_config = self.app.state.color_config  # Expression-based coloring (if set)
             multiplier = cache.multiplier
             supersample = cache.supersample
             # Snapshot cached masks (these are correct - don't regenerate!)
@@ -105,6 +106,7 @@ class ImageExportController:
                 result.offset_y,
                 cached_conductor_masks,
                 cached_interior_masks,
+                color_config,
             )
 
             h_super, w_super = final_rgb_super.shape[:2]
@@ -143,6 +145,7 @@ class ImageExportController:
                 output_offset_y,
                 None,  # Regenerate masks for downsampled resolution
                 None,
+                color_config,
             )
 
             h_output, w_output = final_rgb_output.shape[:2]
@@ -166,6 +169,7 @@ class ImageExportController:
                 result.offset_y,
                 cached_conductor_masks,
                 cached_interior_masks,
+                color_config,
             )
 
             h, w = final_rgb.shape[:2]
@@ -188,6 +192,7 @@ class ImageExportController:
         offset_y: int,
         cached_conductor_masks: list = None,
         cached_interior_masks: list = None,
+        color_config=None,
     ) -> np.ndarray:
         """Apply full post-processing pipeline to LIC array at any resolution.
 
@@ -254,6 +259,7 @@ class ImageExportController:
             lic_percentiles=lic_percentiles,
             use_gpu=True,  # GPU acceleration for faster exports
             scalar_tensor=None,  # Will upload on-demand
+            color_config=color_config,  # Expression-based coloring (if set)
         )
 
         return final_rgb

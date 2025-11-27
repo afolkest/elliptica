@@ -536,10 +536,11 @@ class TestListHelpers:
         assert funcs['clamp'] == 3
 
     def test_list_functions_complete(self):
-        """All 18 functions should be listed."""
+        """All 20 functions should be listed."""
         funcs = list_functions()
         expected = {
             'sin', 'cos', 'tan', 'sqrt', 'abs', 'exp', 'log', 'log10',
+            'pow', 'atan2',
             'clamp', 'lerp', 'smoothstep',
             'min', 'max', 'mean', 'std',
             'normalize', 'pclip', 'clipnorm'

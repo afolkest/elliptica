@@ -110,8 +110,11 @@ class RenderOrchestrator:
                 from elliptica.gpu import GPUContext
                 if GPUContext.is_available():
                     cache.result_gpu = GPUContext.to_gpu(result.array)
-                    cache.ex_gpu = GPUContext.to_gpu(result.ex)
-                    cache.ey_gpu = GPUContext.to_gpu(result.ey)
+                    # Upload field components (may be None for some PDE types)
+                    if result.ex is not None:
+                        cache.ex_gpu = GPUContext.to_gpu(result.ex)
+                    if result.ey is not None:
+                        cache.ey_gpu = GPUContext.to_gpu(result.ey)
 
                     # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
                     if conductor_masks is not None:

@@ -200,7 +200,9 @@ class CacheManagementPanel:
                 from elliptica.gpu import GPUContext
                 if GPUContext.is_available():
                     cache.result_gpu = GPUContext.to_gpu(cache.result.array)
-                    cache.ex_gpu = GPUContext.to_gpu(cache.result.ex)
-                    cache.ey_gpu = GPUContext.to_gpu(cache.result.ey)
+                    if cache.result.ex is not None:
+                        cache.ex_gpu = GPUContext.to_gpu(cache.result.ex)
+                    if cache.result.ey is not None:
+                        cache.ey_gpu = GPUContext.to_gpu(cache.result.ey)
             except Exception as e:
                 pass  # Graceful fallback if GPU upload fails

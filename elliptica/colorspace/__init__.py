@@ -45,11 +45,37 @@ from .gamut import (
 )
 
 from .mapping import ColorMapping, ColorConfig
+from .pipeline import (
+    build_field_bindings,
+    build_region_masks,
+    render_with_color_config,
+    render_with_color_config_gpu,
+)
+from .presets import (
+    ExpressionPreset,
+    BUILTIN_PRESETS,
+    get_preset,
+    list_presets,
+    AVAILABLE_VARIABLES,
+    AVAILABLE_FUNCTIONS,
+)
 
 __all__ = [
     # High-level API
     'ColorMapping',
     'ColorConfig',
+    # Pipeline integration
+    'build_field_bindings',
+    'build_region_masks',
+    'render_with_color_config',
+    'render_with_color_config_gpu',
+    # Presets
+    'ExpressionPreset',
+    'BUILTIN_PRESETS',
+    'get_preset',
+    'list_presets',
+    'AVAILABLE_VARIABLES',
+    'AVAILABLE_FUNCTIONS',
     # OKLCH conversions
     'oklch_to_oklab',
     'oklab_to_oklch',

@@ -189,6 +189,9 @@ class TextureManager:
                     scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
                     conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
                     interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
+                    color_config=self.app.state.color_config,  # Expression-based coloring (if set)
+                    ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
+                    ey_tensor=cache.ey_gpu,
                 )
 
                 # Update cache so future refreshes reuse the correct clip percent bounds.
