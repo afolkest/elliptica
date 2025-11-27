@@ -2,13 +2,16 @@
 
 import torch
 import numpy as np
-from typing import Tuple
+from typing import Tuple, TYPE_CHECKING
 
 from elliptica.gpu import GPUContext
 from elliptica.gpu.pipeline import build_base_rgb_gpu
 from elliptica.gpu.overlay import apply_region_overlays_gpu
 from elliptica.gpu.smear import apply_conductor_smear_gpu
 from elliptica.render import _get_palette_lut
+
+if TYPE_CHECKING:
+    from elliptica.colorspace import ColorConfig
 
 
 def apply_full_postprocess_gpu(
@@ -28,13 +31,16 @@ def apply_full_postprocess_gpu(
     lic_percentiles: Tuple[float, float] | None = None,
     conductor_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
+    color_config: "ColorConfig | None" = None,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, Tuple[float, float]]:
     """Apply full postprocessing pipeline on GPU.
 
     This is the unified entry point that chains:
-    1. Base RGB colorization (GPU)
-    2. Region overlays (GPU)
-    3. Conductor smear (GPU)
+    1. Base RGB colorization (GPU) - via palette LUT or ColorConfig expressions
+    2. Region overlays (GPU) - via conductor_color_settings or ColorConfig regions
+    3. Conductor smear (GPU) - optional, palette mode only
 
     Everything stays on GPU until the final result.
 
@@ -42,7 +48,7 @@ def apply_full_postprocess_gpu(
         scalar_tensor: LIC grayscale field (H, W) on GPU
         conductor_masks_cpu: List of conductor masks (CPU arrays)
         interior_masks_cpu: List of interior masks (CPU arrays)
-        conductor_color_settings: Per-conductor color settings
+        conductor_color_settings: Per-conductor color settings (legacy palette mode)
         conductors: List of Conductor objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
@@ -55,6 +61,11 @@ def apply_full_postprocess_gpu(
         lic_percentiles: Precomputed (vmin, vmax) for smear normalization
         conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
+        color_config: Optional ColorConfig for expression-based coloring.
+                     When provided, uses OKLCH expressions instead of palette mode.
+                     Ignores brightness/contrast/gamma/palette params.
+        ex_tensor: Electric field X component (H, W) on GPU, for ColorConfig mag/ex bindings
+        ey_tensor: Electric field Y component (H, W) on GPU, for ColorConfig mag/ey bindings
 
     Returns:
         Tuple of:
@@ -97,6 +108,39 @@ def apply_full_postprocess_gpu(
     scalar_tensor._lic_cached_clip_percent = float(clip_percent)
     scalar_tensor._lic_cached_percentiles = used_percentiles
 
+    # === ColorConfig path: expression-based OKLCH coloring ===
+    if color_config is not None:
+        from elliptica.colorspace.pipeline import render_with_color_config_gpu
+
+        # Upload masks to GPU if not already done
+        if conductor_masks_gpu is None and conductor_masks_cpu is not None:
+            conductor_masks_gpu = [
+                GPUContext.to_gpu(m) if m is not None else None
+                for m in conductor_masks_cpu
+            ]
+        if interior_masks_gpu is None and interior_masks_cpu is not None:
+            interior_masks_gpu = [
+                GPUContext.to_gpu(m) if m is not None else None
+                for m in interior_masks_cpu
+            ]
+
+        # Render using ColorConfig (handles base + regions)
+        base_rgb = render_with_color_config_gpu(
+            color_config,
+            scalar_tensor,
+            ex_tensor=ex_tensor,
+            ey_tensor=ey_tensor,
+            conductor_masks_gpu=conductor_masks_gpu,
+            interior_masks_gpu=interior_masks_gpu,
+            conductors=conductors,
+        )
+
+        # Note: Smear is not supported in ColorConfig mode (uses palette-specific logic)
+        # Future: add smear support for ColorConfig if needed
+
+        return torch.clamp(base_rgb, 0.0, 1.0), used_percentiles
+
+    # === Legacy palette path: LUT-based coloring ===
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None
     if color_enabled:
@@ -196,6 +240,9 @@ def apply_full_postprocess_hybrid(
     scalar_tensor: torch.Tensor | None = None,
     conductor_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
+    color_config: "ColorConfig | None" = None,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
 ) -> np.ndarray:
     """Hybrid postprocessing pipeline with automatic GPU/CPU fallback.
 
@@ -218,6 +265,9 @@ def apply_full_postprocess_hybrid(
         scalar_tensor: Optional pre-uploaded scalar tensor on GPU (saves upload time)
         conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
+        color_config: Optional ColorConfig for expression-based coloring
+        ex_tensor: Electric field X component on GPU (for ColorConfig)
+        ey_tensor: Electric field Y component on GPU (for ColorConfig)
 
     Returns:
         Tuple of:
@@ -247,6 +297,9 @@ def apply_full_postprocess_hybrid(
                 lic_percentiles,
                 conductor_masks_gpu,
                 interior_masks_gpu,
+                color_config,
+                ex_tensor,
+                ey_tensor,
             )
 
             # Convert to uint8 and download
@@ -266,6 +319,8 @@ def apply_full_postprocess_hybrid(
 
             # Retry with CPU device (PyTorch operations work on CPU too!)
             scalar_tensor_cpu = scalar_tensor.to('cpu') if scalar_tensor.device.type != 'cpu' else scalar_tensor
+            ex_cpu = ex_tensor.to('cpu') if ex_tensor is not None and ex_tensor.device.type != 'cpu' else ex_tensor
+            ey_cpu = ey_tensor.to('cpu') if ey_tensor is not None and ey_tensor.device.type != 'cpu' else ey_tensor
 
             rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor_cpu,
@@ -284,6 +339,9 @@ def apply_full_postprocess_hybrid(
                 lic_percentiles,
                 None,  # GPU masks not available in fallback
                 None,
+                color_config,
+                ex_cpu,
+                ey_cpu,
             )
 
             # Convert to uint8 and return (already on CPU)
@@ -309,6 +367,9 @@ def apply_full_postprocess_hybrid(
             color_enabled,
             palette,
             lic_percentiles,
+            color_config=color_config,
+            ex_tensor=ex_tensor,
+            ey_tensor=ey_tensor,
         )
 
         # Convert to uint8 and return

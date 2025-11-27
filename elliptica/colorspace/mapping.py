@@ -251,19 +251,39 @@ class ColorConfig:
         # Clear cache once at the start, not for each mapping
         clear_percentile_cache()
 
+        # Determine target shape and backend from bindings or masks
+        target_shape = None
+        use_torch = False
+        reference_tensor = None
+
+        # First try bindings (most reliable source of shape and backend)
+        for arr in bindings.values():
+            if hasattr(arr, 'shape') and len(arr.shape) >= 2:
+                target_shape = arr.shape[:2]
+                use_torch = B.is_torch(arr)
+                reference_tensor = arr
+                break
+        # Fall back to masks if bindings are all scalar
+        if target_shape is None:
+            for mask in region_masks.values():
+                if hasattr(mask, 'shape') and len(mask.shape) >= 2:
+                    target_shape = mask.shape
+                    use_torch = B.is_torch(mask)
+                    reference_tensor = mask
+                    break
+
         # Render global mapping
         rgb = self.global_mapping.render(bindings, _clear_cache=False)
 
-        # Determine target shape from masks (if any)
-        target_shape = None
-        for mask in region_masks.values():
-            if hasattr(mask, 'shape') and len(mask.shape) >= 2:
-                target_shape = mask.shape
-                break
-
-        # Broadcast rgb to target shape if needed
+        # Broadcast rgb to target shape if needed (handles solid colors)
         if target_shape is not None and rgb.ndim == 1:
-            if B.is_torch(rgb):
+            if use_torch:
+                import torch
+                # Convert numpy to torch if needed
+                if not B.is_torch(rgb):
+                    rgb = torch.from_numpy(np.asarray(rgb)).to(
+                        device=reference_tensor.device, dtype=reference_tensor.dtype
+                    )
                 rgb = rgb.expand(*target_shape, -1)
             else:
                 rgb = np.broadcast_to(rgb, (*target_shape, 3))
@@ -278,7 +298,13 @@ class ColorConfig:
 
             # Broadcast region_rgb to match mask shape if needed
             if region_rgb.ndim == 1 and mask.ndim >= 2:
-                if B.is_torch(region_rgb):
+                if use_torch:
+                    import torch
+                    # Convert numpy to torch if needed
+                    if not B.is_torch(region_rgb):
+                        region_rgb = torch.from_numpy(np.asarray(region_rgb)).to(
+                            device=reference_tensor.device, dtype=reference_tensor.dtype
+                        )
                     region_rgb = region_rgb.expand(*mask.shape, -1)
                 else:
                     region_rgb = np.broadcast_to(region_rgb, (*mask.shape, 3))

@@ -500,6 +500,7 @@ class EllipticaApp:
                 self.render_orchestrator.poll()
                 self.postprocess_panel.check_clip_debounce()  # Handle debounced clip% updates
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
+                self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates
                 if self.canvas_renderer.canvas_dirty:
                     self.canvas_renderer.draw()
                 dpg.render_dearpygui_frame()

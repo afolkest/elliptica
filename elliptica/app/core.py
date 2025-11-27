@@ -14,6 +14,10 @@ from elliptica.pipeline import RenderResult
 from elliptica.postprocess.color import ColorParams
 from elliptica.types import Project, Conductor
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from elliptica.colorspace import ColorConfig
+
 
 @dataclass
 class RegionStyle:
@@ -161,6 +165,10 @@ class AppState:
 
     # Per-conductor color settings (keyed by conductor.id)
     conductor_color_settings: dict[int, ConductorColorSettings] = field(default_factory=dict)
+
+    # Expression-based color configuration (None = use legacy palette mode)
+    # When set, overrides palette/brightness/contrast/gamma with OKLCH expressions
+    color_config: Optional["ColorConfig"] = None
 
     def set_selected(self, idx: int) -> None:
         """Select conductor at index or clear selection."""

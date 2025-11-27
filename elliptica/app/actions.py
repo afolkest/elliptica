@@ -283,8 +283,10 @@ def ensure_render(state: AppState) -> bool:
     # Upload render result to GPU for fast postprocessing
     if GPUContext.is_available():
         state.render_cache.result_gpu = GPUContext.to_gpu(result.array)
-        state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
-        state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
+        if result.ex is not None:
+            state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
+        if result.ey is not None:
+            state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
 
         # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
         if conductor_masks is not None:
