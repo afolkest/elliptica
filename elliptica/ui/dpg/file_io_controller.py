@@ -272,10 +272,12 @@ class FileIOController:
         ) as dialog:
             self.load_project_dialog_id = dialog
             # Order matters - first extension is the default filter
-            # Use .* first so all project files are visible by default
-            dpg.add_file_extension(".*")
-            dpg.add_file_extension(".elliptica", color=(180, 255, 150, 255))
-            dpg.add_file_extension(".flowcol", color=(150, 180, 255, 255))  # Legacy support
+            # Combined filter shows both .elliptica and .flowcol (but not .cache)
+            dpg.add_file_extension(
+                "Projects (*.elliptica *.flowcol){.elliptica,.flowcol}",
+                color=(180, 255, 150, 255)
+            )
+            dpg.add_file_extension(".*")  # Allow showing all files if needed
 
     def open_save_project_dialog(self, sender=None, app_data=None) -> None:
         """Open the save project dialog."""
