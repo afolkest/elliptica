@@ -6,10 +6,10 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flowcol.serialization import load_project, load_render_cache
-from flowcol.render import _get_palette_lut, _build_palette_lut
-from flowcol.lospec import fetch_random_palette
-from flowcol import defaults
+from elliptica.serialization import load_project, load_render_cache
+from elliptica.render import _get_palette_lut, _build_palette_lut
+from elliptica.lospec import fetch_random_palette
+from elliptica import defaults
 
 # Load test project
 project_path = Path("projects/test.flowcol")

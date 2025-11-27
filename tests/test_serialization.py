@@ -4,10 +4,10 @@ import tempfile
 from pathlib import Path
 import numpy as np
 
-from flowcol.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle
-from flowcol.types import Project, Conductor
-from flowcol.serialization import save_project, load_project
-from flowcol import defaults
+from elliptica.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle
+from elliptica.types import Project, Conductor
+from elliptica.serialization import save_project, load_project
+from elliptica import defaults
 
 
 def test_roundtrip_empty_project():
@@ -15,7 +15,7 @@ def test_roundtrip_empty_project():
     state = AppState()
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.flowcol"
+        filepath = Path(tmpdir) / "test.elliptica"
         save_project(state, str(filepath))
 
         assert filepath.exists()
@@ -43,7 +43,7 @@ def test_roundtrip_single_conductor():
     conductor.id = 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.flowcol"
+        filepath = Path(tmpdir) / "test.elliptica"
         save_project(state, str(filepath))
 
         loaded_state = load_project(str(filepath))
@@ -92,7 +92,7 @@ def test_roundtrip_multiple_conductors_with_interior():
     state.project.canvas_resolution = (1024, 768)
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.flowcol"
+        filepath = Path(tmpdir) / "test.elliptica"
         save_project(state, str(filepath))
 
         loaded_state = load_project(str(filepath))
@@ -155,7 +155,7 @@ def test_roundtrip_all_settings():
     state.project.streamlength_factor = 3.5
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.flowcol"
+        filepath = Path(tmpdir) / "test.elliptica"
         save_project(state, str(filepath))
 
         loaded_state = load_project(str(filepath))
@@ -211,7 +211,7 @@ def test_roundtrip_conductor_color_settings():
     state.conductor_color_settings[0] = color_settings
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "test.flowcol"
+        filepath = Path(tmpdir) / "test.elliptica"
         save_project(state, str(filepath))
 
         loaded_state = load_project(str(filepath))
@@ -321,8 +321,8 @@ def test_backward_compatibility_missing_fields():
 
 
 def test_file_extension_handling():
-    """Test that .flowcol extension is added if missing."""
-    from flowcol.serialization import save_project
+    """Test that .elliptica extension is added if missing."""
+    from elliptica.serialization import save_project
 
     state = AppState()
 
@@ -331,8 +331,8 @@ def test_file_extension_handling():
         filepath_no_ext = Path(tmpdir) / "myproject"
         save_project(state, str(filepath_no_ext))
 
-        # Should create .flowcol file
-        expected_path = Path(tmpdir) / "myproject.flowcol"
+        # Should create .elliptica file (new default extension)
+        expected_path = Path(tmpdir) / "myproject.elliptica"
         assert expected_path.exists()
 
         # Should be loadable
@@ -342,9 +342,9 @@ def test_file_extension_handling():
 
 def test_render_cache_roundtrip():
     """Test saving and loading render cache."""
-    from flowcol.serialization import save_render_cache, load_render_cache, compute_project_fingerprint
-    from flowcol.app.core import RenderCache
-    from flowcol.pipeline import RenderResult
+    from elliptica.serialization import save_render_cache, load_render_cache, compute_project_fingerprint
+    from elliptica.app.core import RenderCache
+    from elliptica.pipeline import RenderResult
 
     # Create a simple project
     mask = np.random.rand(100, 100).astype(np.float32)
@@ -377,7 +377,7 @@ def test_render_cache_roundtrip():
     )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        cache_path = Path(tmpdir) / "test.flowcol.cache"
+        cache_path = Path(tmpdir) / "test.elliptica.cache"
 
         # Save cache
         save_render_cache(cache, project, str(cache_path))
@@ -407,7 +407,7 @@ def test_render_cache_roundtrip():
 
 def test_render_cache_fingerprint_detection():
     """Test that fingerprint detects project changes."""
-    from flowcol.serialization import compute_project_fingerprint
+    from elliptica.serialization import compute_project_fingerprint
 
     mask = np.ones((50, 50), dtype=np.float32)
     conductor = Conductor(mask=mask, voltage=0.5, position=(10.0, 20.0), id=0)

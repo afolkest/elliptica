@@ -8,14 +8,14 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "LineIntegralConvolutions" / "src"))
 
-from flowcol.types import Project, Conductor
-from flowcol.field_pde import compute_field_pde
-from flowcol.render import (
+from elliptica.types import Project, Conductor
+from elliptica.field_pde import compute_field_pde
+from elliptica.render import (
     compute_lic,
     apply_gaussian_highpass,
     downsample_lic,
 )
-from flowcol.mask_utils import load_alpha
+from elliptica.mask_utils import load_alpha
 from vegtamr.lic import compute_lic_with_postprocessing
 
 

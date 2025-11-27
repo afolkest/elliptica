@@ -8,10 +8,10 @@ This tests that:
 
 import numpy as np
 import time
-from flowcol.app.core import AppState
-from flowcol.types import Conductor
-from flowcol.app.actions import add_conductor, ensure_render
-from flowcol.postprocess.color import apply_region_overlays, ColorParams
+from elliptica.app.core import AppState
+from elliptica.types import Conductor
+from elliptica.app.actions import add_conductor, ensure_render
+from elliptica.postprocess.color import apply_region_overlays, ColorParams
 
 
 def test_palette_caching_with_shared_palettes():
@@ -40,7 +40,7 @@ def test_palette_caching_with_shared_palettes():
     cache = state.render_cache
 
     # Build base RGB
-    from flowcol.app.actions import ensure_base_rgb
+    from elliptica.app.actions import ensure_base_rgb
     success = ensure_base_rgb(state)
     assert success, "Failed to build base RGB"
     assert cache.base_rgb is not None
@@ -49,7 +49,7 @@ def test_palette_caching_with_shared_palettes():
     # - c1 interior: "Deep Ocean" palette
     # - c2 interior: "Deep Ocean" palette (SAME as c1!)
     # - c3 interior: "Ember Ash" palette (different)
-    from flowcol.app.actions import (
+    from elliptica.app.actions import (
         set_region_palette,
         set_region_style_enabled,
     )
@@ -101,12 +101,12 @@ def test_visual_consistency():
     cache = state.render_cache
 
     # Build base RGB
-    from flowcol.app.actions import ensure_base_rgb
+    from elliptica.app.actions import ensure_base_rgb
     success = ensure_base_rgb(state)
     assert success, "Failed to build base RGB"
 
     # Set up interior palette
-    from flowcol.app.actions import set_region_palette, set_region_style_enabled
+    from elliptica.app.actions import set_region_palette, set_region_style_enabled
     set_region_palette(state, c.id, "interior", "Twilight Magenta")
     set_region_style_enabled(state, c.id, "interior", True)
 
@@ -168,12 +168,12 @@ def benchmark_overlay_performance():
     cache = state.render_cache
 
     # Build base RGB
-    from flowcol.app.actions import ensure_base_rgb
+    from elliptica.app.actions import ensure_base_rgb
     success = ensure_base_rgb(state)
     assert success, "Failed to build base RGB"
 
     # Set up overlays with 2 unique palettes across 5 regions
-    from flowcol.app.actions import set_region_palette, set_region_style_enabled
+    from elliptica.app.actions import set_region_palette, set_region_style_enabled
     palettes = ["Deep Ocean", "Ember Ash", "Deep Ocean", "Ember Ash", "Deep Ocean"]
 
     for i, conductor in enumerate(state.project.conductors):
@@ -246,12 +246,12 @@ def test_solid_color_fills():
     cache = state.render_cache
 
     # Build base RGB
-    from flowcol.app.actions import ensure_base_rgb
+    from elliptica.app.actions import ensure_base_rgb
     success = ensure_base_rgb(state)
     assert success, "Failed to build base RGB"
 
     # Set up solid color fill (not palette)
-    from flowcol.app.actions import set_region_solid_color, set_region_style_enabled
+    from elliptica.app.actions import set_region_solid_color, set_region_style_enabled
     set_region_solid_color(state, c.id, "interior", (1.0, 0.0, 0.0))  # Red
     set_region_style_enabled(state, c.id, "interior", True)
 
@@ -294,7 +294,7 @@ def test_empty_case():
     cache = state.render_cache
 
     # Build base RGB
-    from flowcol.app.actions import ensure_base_rgb
+    from elliptica.app.actions import ensure_base_rgb
     success = ensure_base_rgb(state)
     assert success, "Failed to build base RGB"
 

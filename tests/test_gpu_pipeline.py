@@ -8,16 +8,16 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from flowcol.types import Project, Conductor
+from elliptica.types import Project, Conductor
 
 
 def test_gpu_pipeline_imports():
     """Test that GPU pipeline modules can be imported."""
     try:
-        from flowcol.gpu.ops import apply_highpass_gpu
-        from flowcol.gpu.smear import apply_conductor_smear_gpu
-        from flowcol.gpu.overlay import apply_region_overlays_gpu
-        from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
+        from elliptica.gpu.ops import apply_highpass_gpu
+        from elliptica.gpu.smear import apply_conductor_smear_gpu
+        from elliptica.gpu.overlay import apply_region_overlays_gpu
+        from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
         print("✓ All GPU modules import successfully")
         return True
     except ImportError as e:
@@ -27,7 +27,7 @@ def test_gpu_pipeline_imports():
 
 def test_hybrid_cpu_fallback():
     """Test that hybrid pipeline falls back to CPU gracefully."""
-    from flowcol.gpu.postprocess import apply_full_postprocess_hybrid
+    from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
 
     # Create simple test data
     lic_array = np.random.rand(100, 100).astype(np.float32)

@@ -13,10 +13,10 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flowcol.types import Project, BoundaryObject
-from flowcol.pde.register import register_all_pdes, list_pde_names
-from flowcol.pde import PDERegistry
-from flowcol.field_pde import compute_field_pde, compute_field_legacy
+from elliptica.types import Project, BoundaryObject
+from elliptica.pde.register import register_all_pdes, list_pde_names
+from elliptica.pde import PDERegistry
+from elliptica.field_pde import compute_field_pde, compute_field_legacy
 
 
 def create_test_project() -> Project:
