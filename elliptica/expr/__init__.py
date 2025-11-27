@@ -22,7 +22,7 @@ from .errors import (
     UnknownVariableError,
     LimitExceededError,
 )
-from .functions import FUNCTIONS, CONSTANTS
+from .functions import FUNCTIONS, CONSTANTS, clear_percentile_cache
 
 
 def compile_expression(
