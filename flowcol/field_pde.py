@@ -176,9 +176,6 @@ def compute_field_pde(
     return solution, (ex, ey)
 
 
-    return ex, ey
-
-
 def _match_shape(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
     """Crop or pad array (edge mode) to match target shape."""
     target_h, target_w = target_shape

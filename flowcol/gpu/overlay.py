@@ -1,7 +1,6 @@
 """GPU-accelerated region overlay blending."""
 
 import torch
-import numpy as np
 from typing import Tuple
 
 from flowcol.gpu import GPUContext
