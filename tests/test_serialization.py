@@ -82,7 +82,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         position=(100.0, 150.0),
         edge_smooth_sigma=0.0,
         smear_enabled=True,
-        smear_sigma=3.0,
+        smear_sigma=0.003,  # Fractional format (0.3% of canvas width)
         id=1,
     )
 
@@ -119,7 +119,7 @@ def test_roundtrip_multiple_conductors_with_interior():
         assert c2.position == (100.0, 150.0)
         assert c2.edge_smooth_sigma == 0.0
         assert c2.smear_enabled is True
-        assert c2.smear_sigma == 3.0
+        assert c2.smear_sigma == 0.003
         assert c2.id == 1
         assert c2.mask.shape == mask2.shape
         assert c2.interior_mask is None

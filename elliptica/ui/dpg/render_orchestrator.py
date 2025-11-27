@@ -217,6 +217,7 @@ class RenderOrchestrator:
             with self.app.state_lock:
                 self.app.state.view_mode = "render"
             self.app._update_control_visibility()
+            self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode
             self.app.cache_panel.update_cache_status_display()
 
             # Auto-save cache if project has been saved before
