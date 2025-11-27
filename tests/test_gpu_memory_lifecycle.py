@@ -1,10 +1,10 @@
 """Test GPU memory lifecycle management."""
 
 import numpy as np
-from flowcol.types import Conductor
-from flowcol.app.core import AppState
-from flowcol.app.actions import add_conductor, ensure_render, set_canvas_resolution
-from flowcol.gpu import GPUContext
+from elliptica.types import Conductor
+from elliptica.app.core import AppState
+from elliptica.app.actions import add_conductor, ensure_render, set_canvas_resolution
+from elliptica.gpu import GPUContext
 
 
 def test_gpu_cleanup_on_clear():

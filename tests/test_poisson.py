@@ -10,14 +10,14 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# Add parent directory to path to import flowcol
+# Add parent directory to path to import elliptica
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from flowcol.poisson import solve_poisson_system, DIRICHLET, NEUMANN
-from flowcol.field_pde import compute_field_pde
-from flowcol.pde.relaxation import build_relaxation_mask, relax_potential_band
-from flowcol.types import Project, Conductor
-from flowcol.pde import PDERegistry
-from flowcol.pde.poisson_pde import POISSON_PDE
+from elliptica.poisson import solve_poisson_system, DIRICHLET, NEUMANN
+from elliptica.field_pde import compute_field_pde
+from elliptica.pde.relaxation import build_relaxation_mask, relax_potential_band
+from elliptica.types import Project, Conductor
+from elliptica.pde import PDERegistry
+from elliptica.pde.poisson_pde import POISSON_PDE
 
 # Ensure PDE is registered for tests
 try:

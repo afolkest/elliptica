@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flowcol.mask_utils import load_alpha, create_masks, save_mask
+from elliptica.mask_utils import load_alpha, create_masks, save_mask
 
 source_path = "assets/source/disciples.png"
 masks_dir = Path("assets/masks")

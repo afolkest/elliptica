@@ -1,9 +1,9 @@
 """Quick test of Phase 1 colorization infrastructure."""
 
 import numpy as np
-from flowcol.types import Conductor, Project
-from flowcol.app.core import AppState, DisplaySettings
-from flowcol.app.actions import add_conductor, set_color_enabled, set_palette, ensure_render, ensure_base_rgb
+from elliptica.types import Conductor, Project
+from elliptica.app.core import AppState, DisplaySettings
+from elliptica.app.actions import add_conductor, set_color_enabled, set_palette, ensure_render, ensure_base_rgb
 
 def test_conductor_ids():
     """Test conductor ID assignment and style dict sync."""
@@ -28,7 +28,7 @@ def test_conductor_ids():
     assert state.project.next_conductor_id == 2, "Counter not incremented correctly"
 
     # Test removal
-    from flowcol.app.actions import remove_conductor
+    from elliptica.app.actions import remove_conductor
     remove_conductor(state, 0)
 
     assert 0 not in state.conductor_color_settings, "Color settings entry not removed"

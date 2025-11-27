@@ -1,8 +1,8 @@
-# FlowCol
+# Elliptica
 
 **Physics-based generative art framework**
 
-FlowCol is a modular framework for creating visual art using physics simulations. While it originated as an electrostatics visualizer, it has evolved into a generic engine for **Partial Differential Equation (PDE)** based art.
+Elliptica is a modular framework for creating visual art using physics simulations. While it originated as an electrostatics visualizer, it has evolved into a generic engine for **Partial Differential Equation (PDE)** based art.
 
 You draw with physics: place boundary objects (conductors, obstacles, sources) on a canvas, solve a physical system (like the Poisson equation for electric fields), and visualize the resulting vector fields using high-quality Line Integral Convolution (LIC).
 
@@ -27,12 +27,12 @@ You draw with physics: place boundary objects (conductors, obstacles, sources) o
 pip install -r requirements.txt
 
 # Launch the GUI (defaults to Electrostatics mode)
-python -m flowcol.ui.dpg
+python -m elliptica.ui.dpg
 ```
 
 ## Core Concept
 
-FlowCol transforms mathematical physics into visual art through a four-step pipeline:
+Elliptica transforms mathematical physics into visual art through a four-step pipeline:
 
 1.  **Define Geometry** - Import shapes as "Boundary Objects" (formerly Conductors) using PNG masks.
 2.  **Select Physics** - Choose a PDE solver from the registry (e.g., Electrostatics).
@@ -78,14 +78,14 @@ pip install -r requirements.txt
 
 ### Programmatic Usage
 
-FlowCol can be used as a library. The new API supports the generic PDE system:
+Elliptica can be used as a library. The new API supports the generic PDE system:
 
 ```python
-from flowcol.types import Project, BoundaryObject
-from flowcol.field_pde import compute_field_pde
-from flowcol.pipeline import perform_render
-from flowcol.mask_utils import load_mask_from_png
-from flowcol.pde import PDERegistry
+from elliptica.types import Project, BoundaryObject
+from elliptica.field_pde import compute_field_pde
+from elliptica.pipeline import perform_render
+from elliptica.mask_utils import load_mask_from_png
+from elliptica.pde import PDERegistry
 
 # Ensure the desired PDE is active (defaults to 'poisson')
 PDERegistry.set_active("poisson")
@@ -117,12 +117,12 @@ result = perform_render(
 
 ## Architecture
 
-FlowCol has evolved into a layered architecture separating the generic physics engine from the rendering and UI layers.
+Elliptica has evolved into a layered architecture separating the generic physics engine from the rendering and UI layers.
 
 ### Core Components
 
 ```
-flowcol/
+elliptica/
    pde/                 # Pluggable Physics System
       base.py           # PDEDefinition interface
       registry.py       # Global PDE registry
@@ -145,7 +145,7 @@ flowcol/
 
 ## Project File Format
 
-Projects are saved as `.flowcol` ZIP archives. The format has been updated to support generic metadata:
+Projects are saved as `.elliptica` ZIP archives. The format has been updated to support generic metadata:
 
 ```json
 {
@@ -172,8 +172,8 @@ Projects are saved as `.flowcol` ZIP archives. The format has been updated to su
 
 ### Contributing
 To add a new physics engine:
-1.  Implement `PDEDefinition` in `flowcol/pde/`.
-2.  Register it in `flowcol/pde/__init__.py`.
+1.  Implement `PDEDefinition` in `elliptica/pde/`.
+2.  Register it in `elliptica/pde/__init__.py`.
 3.  Ensure it returns a vector field `(ex, ey)` for LIC visualization.
 
 ## License

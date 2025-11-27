@@ -1,9 +1,9 @@
 """Test per-region colorization features."""
 
 import numpy as np
-from flowcol.types import Conductor
-from flowcol.app.core import AppState
-from flowcol.app.actions import (
+from elliptica.types import Conductor
+from elliptica.app.core import AppState
+from elliptica.app.actions import (
     add_conductor,
     set_region_style_enabled,
     set_region_palette,
@@ -11,7 +11,7 @@ from flowcol.app.actions import (
     ensure_render,
     ensure_base_rgb,
 )
-from flowcol.postprocess.color import apply_region_overlays
+from elliptica.postprocess.color import apply_region_overlays
 
 
 def test_region_style_settings():

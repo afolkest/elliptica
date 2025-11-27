@@ -21,10 +21,10 @@ from PIL import Image
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from flowcol.serialization import load_project, load_render_cache
-from flowcol.render import _RUNTIME_PALETTES, _get_palette_lut, add_palette, USER_PALETTES_PATH
-from flowcol.gpu import GPUContext
-from flowcol.gpu.pipeline import build_base_rgb_gpu
+from elliptica.serialization import load_project, load_render_cache
+from elliptica.render import _RUNTIME_PALETTES, _get_palette_lut, add_palette, USER_PALETTES_PATH
+from elliptica.gpu import GPUContext
+from elliptica.gpu.pipeline import build_base_rgb_gpu
 
 try:
     import dearpygui.dearpygui as dpg
@@ -68,7 +68,7 @@ class PaletteExplorer:
             self.lic_tensor = None
 
         # Current settings (use defaults if not set)
-        from flowcol import defaults
+        from elliptica import defaults
         self.current_palette = self.state.display_settings.palette
         self.brightness = self.state.display_settings.brightness if self.state.display_settings.brightness != 1.0 else defaults.DEFAULT_BRIGHTNESS
         self.contrast = self.state.display_settings.contrast
@@ -225,7 +225,7 @@ class PaletteExplorer:
             lut_tensor = GPUContext.to_gpu(lut_numpy)
 
             # Use proper clipping like main app
-            from flowcol import defaults
+            from elliptica import defaults
             rgb_tensor = build_base_rgb_gpu(
                 self.lic_tensor,
                 clip_percent=defaults.DEFAULT_CLIP_PERCENT,
@@ -246,7 +246,7 @@ class PaletteExplorer:
             lic = self.lic_array.copy()
 
             # Percentile clipping (match GPU path)
-            from flowcol import defaults
+            from elliptica import defaults
             clip_percent = defaults.DEFAULT_CLIP_PERCENT
             if clip_percent > 0:
                 lower = clip_percent / 100.0

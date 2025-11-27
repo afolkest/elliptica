@@ -8,8 +8,8 @@ import matplotlib.patches as mpatches
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flowcol.lospec import fetch_random_palette
-from flowcol.render import _build_palette_lut
+from elliptica.lospec import fetch_random_palette
+from elliptica.render import _build_palette_lut
 
 # Fetch a random palette
 print("Fetching random Lospec palette...")

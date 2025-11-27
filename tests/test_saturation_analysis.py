@@ -6,7 +6,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from flowcol.lospec import fetch_random_palette
+from elliptica.lospec import fetch_random_palette
 
 def rgb_to_hsv(rgb):
     """Convert RGB to HSV to measure saturation."""

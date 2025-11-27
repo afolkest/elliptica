@@ -2,9 +2,9 @@
 
 import numpy as np
 import time
-from flowcol.types import Conductor
-from flowcol.app.core import AppState
-from flowcol.app.actions import add_conductor, ensure_render
+from elliptica.types import Conductor
+from elliptica.app.core import AppState
+from elliptica.app.actions import add_conductor, ensure_render
 
 
 def test_masks_cached_in_result():
@@ -89,7 +89,7 @@ def test_performance_improvement():
     times = []
     for _ in range(num_renders):
         # Change resolution to trigger new render
-        from flowcol.app.actions import set_canvas_resolution
+        from elliptica.app.actions import set_canvas_resolution
         w = 180 + _ * 20
         set_canvas_resolution(state, w, w)
 
