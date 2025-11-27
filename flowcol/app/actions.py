@@ -281,37 +281,27 @@ def ensure_render(state: AppState) -> bool:
     )
 
     # Upload render result to GPU for fast postprocessing
-    try:
-        print(f"DEBUG render: GPU available? {GPUContext.is_available()}")
-        print(f"DEBUG render: result has ex? {hasattr(result, 'ex')}")
-        print(f"DEBUG render: result has ey? {hasattr(result, 'ey')}")
-        if GPUContext.is_available():
-            state.render_cache.result_gpu = GPUContext.to_gpu(result.array)
-            state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
-            state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
-            print(f"DEBUG render: result_gpu = {state.render_cache.result_gpu is not None}")
-            print(f"DEBUG render: ex_gpu = {state.render_cache.ex_gpu is not None}")
-            print(f"DEBUG render: ey_gpu = {state.render_cache.ey_gpu is not None}")
+    if GPUContext.is_available():
+        state.render_cache.result_gpu = GPUContext.to_gpu(result.array)
+        state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
+        state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
 
-            # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
-            if conductor_masks is not None:
-                state.render_cache.conductor_masks_gpu = []
-                for mask in conductor_masks:
-                    if mask is not None:
-                        state.render_cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
-                    else:
-                        state.render_cache.conductor_masks_gpu.append(None)
+        # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
+        if conductor_masks is not None:
+            state.render_cache.conductor_masks_gpu = []
+            for mask in conductor_masks:
+                if mask is not None:
+                    state.render_cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
+                else:
+                    state.render_cache.conductor_masks_gpu.append(None)
 
-            if interior_masks is not None:
-                state.render_cache.interior_masks_gpu = []
-                for mask in interior_masks:
-                    if mask is not None:
-                        state.render_cache.interior_masks_gpu.append(GPUContext.to_gpu(mask))
-                    else:
-                        state.render_cache.interior_masks_gpu.append(None)
-    except Exception as e:
-        print(f"DEBUG render: EXCEPTION during GPU upload: {e}")
-        pass  # Graceful fallback if GPU upload fails
+        if interior_masks is not None:
+            state.render_cache.interior_masks_gpu = []
+            for mask in interior_masks:
+                if mask is not None:
+                    state.render_cache.interior_masks_gpu.append(GPUContext.to_gpu(mask))
+                else:
+                    state.render_cache.interior_masks_gpu.append(None)
 
     state.field_dirty = False
     state.render_dirty = False
