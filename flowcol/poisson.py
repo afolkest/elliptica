@@ -22,46 +22,61 @@ def _build_poisson_system(
     boundary_top=DIRICHLET,
     boundary_bottom=DIRICHLET,
     boundary_left=DIRICHLET,
-    boundary_right=DIRICHLET
+    boundary_right=DIRICHLET,
+    neumann_mask=None,
     ):
-    """ 
-
-    Explanation: 
+    """
+    Build the Poisson system matrix and RHS.
 
     In units of dx=1 we have
     (laplacian f)[i,j] = -4 f[i,j] + f[i+1,j] + f[i-1,j] + f[i,j+1] + f[i, j-1]
-    If (i, j) is a conductor point, we simply enforce phi[i, j] = V[i, j] at this point
-    If (i, j) is an interior point next to a dirichelet pt, we move the fix conductor values to the rhs 
+
+    Boundary handling:
+    - dirichlet_mask: pixels where φ = V (fixed potential)
+    - neumann_mask: pixels that are interior obstacles with zero normal flux (∂φ/∂n = 0)
+      These are cut out of the domain; adjacent free-space pixels use reflection.
     """
+    # Handle None neumann_mask (for backwards compatibility)
+    has_neumann = neumann_mask is not None
 
     N = height * width
-    total_nonzero = 5*N #5 point stencil 
-    
+    total_nonzero = 5*N #5 point stencil
+
     row_index = np.empty(total_nonzero, dtype=np.int32) #parametrizes which equation
     col_index = np.empty(total_nonzero, dtype=np.int32)
 
     #sparse matrix operator, equal to laplacian except at or adjacent to conductors
     almost_laplacian = np.empty(total_nonzero, dtype=PRECISION)
 
-    #rhs, equalling negative charge density except at or adjacent to conductor 
+    #rhs, equalling negative charge density except at or adjacent to conductor
     rhs = np.empty(N, dtype=PRECISION)
 
-    n_nonzero = 0 
+    n_nonzero = 0
 
     for i in range(height):
         for j in range(width):
             k = j + i * width
 
+            # Check if this pixel is in a Neumann region (cut out of domain)
+            in_neumann = has_neumann and neumann_mask[i, j]
+
             if dirichlet_mask[i, j]:
                 #enforce phi = V
                 row_index[n_nonzero] = k
                 col_index[n_nonzero] = k
-                almost_laplacian[n_nonzero] = 1.0 
-                n_nonzero += 1 
-
+                almost_laplacian[n_nonzero] = 1.0
+                n_nonzero += 1
                 rhs[k] = dirichlet_voltage[i, j]
+            elif in_neumann:
+                # Neumann interior pixel - not part of the solve domain
+                # Set phi = 0 as a placeholder (won't affect solution in free space)
+                row_index[n_nonzero] = k
+                col_index[n_nonzero] = k
+                almost_laplacian[n_nonzero] = 1.0
+                n_nonzero += 1
+                rhs[k] = 0.0
             else:
-                diagonal = -4.0 
+                diagonal = -4.0
                 rhs[k] = -charge_density[i, j]
 
                 #off-diagonal entries
@@ -71,8 +86,14 @@ def _build_poisson_system(
 
                     if 0 <= ii < height and 0 <= jj < width:
                         if dirichlet_mask[ii, jj]:
+                            # Neighbor is Dirichlet - move to RHS
                             rhs[k] -= dirichlet_voltage[ii, jj]
+                        elif has_neumann and neumann_mask[ii, jj]:
+                            # Neighbor is in Neumann region - apply reflection (∂φ/∂n = 0)
+                            # Ghost value equals this pixel's value, so add 1 to diagonal
+                            diagonal += 1
                         else:
+                            # Normal interior neighbor
                             row_index[n_nonzero] = k
                             col_index[n_nonzero] = kk
                             almost_laplacian[n_nonzero] = 1.0
@@ -91,8 +112,8 @@ def _build_poisson_system(
 
                 row_index[n_nonzero] = k
                 col_index[n_nonzero] = k
-                almost_laplacian[n_nonzero] = diagonal 
-                n_nonzero += 1 
+                almost_laplacian[n_nonzero] = diagonal
+                n_nonzero += 1
 
 
     return row_index[:n_nonzero], col_index[:n_nonzero], almost_laplacian[:n_nonzero], rhs
@@ -115,11 +136,16 @@ def build_poisson_solver(
     boundary_bottom=DIRICHLET,
     boundary_left=DIRICHLET,
     boundary_right=DIRICHLET,
-    charge_density=None
+    charge_density=None,
+    neumann_mask=None,
 ) -> PoissonSolverContext:
     """
     Build the system matrix and preconditioner for the Poisson equation.
     Returns a context object that can be used with solve_poisson_fast.
+
+    Args:
+        neumann_mask: Optional boolean mask for interior Neumann boundaries.
+            Pixels in this mask are treated as insulating obstacles (∂φ/∂n = 0).
     """
     height, width = dirichlet_mask.shape
     if charge_density is None:
@@ -138,7 +164,8 @@ def build_poisson_solver(
         boundary_top,
         boundary_bottom,
         boundary_left,
-        boundary_right
+        boundary_right,
+        neumann_mask,
     )
 
     N = height * width
@@ -238,9 +265,16 @@ def solve_poisson_system(
     boundary_bottom=DIRICHLET,
     boundary_left=DIRICHLET,
     boundary_right=DIRICHLET,
-    charge_density=None
+    charge_density=None,
+    neumann_mask=None,
 ):
-    """Legacy wrapper for backward compatibility."""
+    """
+    Solve the Poisson equation with Dirichlet and optional Neumann boundaries.
+
+    Args:
+        neumann_mask: Optional boolean mask for interior Neumann boundaries.
+            Pixels in this mask are treated as insulating obstacles (∂φ/∂n = 0).
+    """
     context = build_poisson_solver(
         dirichlet_mask,
         dirichlet_values,
@@ -248,6 +282,7 @@ def solve_poisson_system(
         boundary_bottom,
         boundary_left,
         boundary_right,
-        charge_density
+        charge_density,
+        neumann_mask,
     )
     return solve_poisson_fast(context, dirichlet_values, charge_density, tol, maxiter)

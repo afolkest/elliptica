@@ -67,4 +67,8 @@ class PDEDefinition:
     
     # Rich boundary condition fields (preferred over global_bc_options)
     bc_fields: list[BCField] = field(default_factory=list)
-    """List of parameters that can be adjusted for each boundary object."""
+    """Fields for domain edge boundary conditions (top/bottom/left/right)."""
+
+    # Rich fields for interior boundary objects (conductors)
+    boundary_fields: list[BCField] = field(default_factory=list)
+    """Fields for interior boundary objects (enums, floats, etc.). Supplements boundary_params."""

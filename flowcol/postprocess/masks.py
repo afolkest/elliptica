@@ -4,6 +4,8 @@ import numpy as np
 from scipy.ndimage import distance_transform_edt, binary_fill_holes, zoom
 from typing import Optional
 
+from flowcol.mask_utils import blur_mask
+
 
 def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.ndarray]:
     """Derive interior from hollow conductor mask using morphological hole filling.
@@ -67,7 +69,10 @@ def rasterize_conductor_masks(
     interior_masks = []
 
     for conductor in conductors:
-        # Rasterize surface mask
+        # Get edge smoothing sigma (same as used in field solver and LIC mask)
+        edge_smooth_sigma = getattr(conductor, 'edge_smooth_sigma', 0.0)
+
+        # Rasterize surface mask with edge smoothing
         surface = _rasterize_single_mask(
             conductor.mask,
             conductor.position,
@@ -76,10 +81,11 @@ def rasterize_conductor_masks(
             scale,
             offset_x,
             offset_y,
+            edge_smooth_sigma=edge_smooth_sigma,
         )
         surface_masks.append(surface)
 
-        # Rasterize interior mask if present
+        # Rasterize interior mask if present (no smoothing - interior is derived region)
         if conductor.interior_mask is not None:
             interior = _rasterize_single_mask(
                 conductor.interior_mask,
@@ -89,6 +95,7 @@ def rasterize_conductor_masks(
                 scale,
                 offset_x,
                 offset_y,
+                edge_smooth_sigma=0.0,  # Interior doesn't need smoothing
             )
             interior_masks.append(interior)
         else:
@@ -106,6 +113,7 @@ def _rasterize_single_mask(
     scale: float,
     offset_x: int = 0,
     offset_y: int = 0,
+    edge_smooth_sigma: float = 0.0,
 ) -> np.ndarray:
     """Rasterize a single mask onto target grid with proper alignment.
 
@@ -117,6 +125,7 @@ def _rasterize_single_mask(
         scale: Scaling factor applied to canvas
         offset_x: Crop offset in x direction (to align with cropped array)
         offset_y: Crop offset in y direction (to align with cropped array)
+        edge_smooth_sigma: Edge smoothing in canvas pixels (will be scaled)
 
     Returns:
         Rasterized mask at target_shape resolution
@@ -137,6 +146,13 @@ def _rasterize_single_mask(
     zoom_x = new_w / mask_w
     scaled_mask = zoom(mask, (zoom_y, zoom_x), order=1)
     scaled_mask = np.clip(scaled_mask, 0.0, 1.0).astype(np.float32)
+
+    # Apply edge smoothing (same as field solver and LIC mask)
+    # This ensures smear region matches where field actually stops
+    if edge_smooth_sigma > 0:
+        # Scale sigma to match render resolution
+        scaled_sigma = edge_smooth_sigma * scale
+        scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
     # Compute integer placement on target grid
     x0 = int(round(grid_x))
