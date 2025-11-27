@@ -3,10 +3,38 @@
 DearPyGui's default font (ProggyClean) only supports basic Latin characters.
 This module loads DejaVu Sans from matplotlib's bundled fonts, which has
 excellent Unicode coverage including mathematical symbols.
+
+Note on font crispness:
+DearPyGui disables Retina framebuffer on macOS (GLFW_COCOA_RETINA_FRAMEBUFFER=FALSE),
+meaning the entire UI is rendered at logical pixels then scaled up by the OS.
+To compensate, we detect the display scale factor and rasterize fonts at 2x size,
+then use set_global_font_scale(0.5) so they render at the intended visual size
+but with 2x the glyph detail.
 """
 
 from pathlib import Path
+import sys
 import dearpygui.dearpygui as dpg
+
+
+def _get_display_scale() -> float:
+    """Detect display scale factor (Retina = 2.0, normal = 1.0)."""
+    if sys.platform != "darwin":
+        return 1.0
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["system_profiler", "SPDisplaysDataType"],
+            capture_output=True, text=True, timeout=2
+        )
+        # Look for "Retina" in output
+        if "Retina" in result.stdout:
+            return 2.0
+    except Exception:
+        pass
+
+    return 1.0
 
 
 def _find_dejavu_font() -> Path | None:
@@ -47,8 +75,11 @@ def setup_fonts(size: int = 14) -> int | None:
 
     Must be called after dpg.create_context() and before any widgets are created.
 
+    On Retina displays, fonts are rasterized at 2x size and globally scaled down
+    to achieve crisp rendering despite DearPyGui's disabled Retina framebuffer.
+
     Args:
-        size: Font size in pixels
+        size: Desired visual font size in logical pixels
 
     Returns:
         Font ID if successful, None if font not found
@@ -58,8 +89,12 @@ def setup_fonts(size: int = 14) -> int | None:
         print("Warning: DejaVu Sans not found, using default font (math symbols may not render)")
         return None
 
+    # Detect display scale and rasterize at higher resolution for crispness
+    display_scale = _get_display_scale()
+    raster_size = int(size * display_scale)
+
     with dpg.font_registry():
-        with dpg.font(str(font_path), size) as font_id:
+        with dpg.font(str(font_path), raster_size) as font_id:
             # Add default Latin range (this is automatic but explicit is clearer)
             dpg.add_font_range_hint(dpg.mvFontRangeHint_Default)
 
@@ -77,5 +112,9 @@ def setup_fonts(size: int = 14) -> int | None:
 
     # Bind as global default font
     dpg.bind_font(font_id)
+
+    # Scale down to intended visual size (glyphs have 2x detail on Retina)
+    if display_scale > 1.0:
+        dpg.set_global_font_scale(1.0 / display_scale)
 
     return font_id
