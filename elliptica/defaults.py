@@ -50,7 +50,7 @@ MIN_GAMMA: float = 0.3
 MAX_GAMMA: float = 3.0
 
 # Colorization defaults
-DEFAULT_COLOR_ENABLED: bool = False
+DEFAULT_COLOR_ENABLED: bool = True
 DEFAULT_COLOR_PALETTE: str = "Ink Wash"
 
 # Smear defaults (stored as fraction of canvas width for resolution independence)
