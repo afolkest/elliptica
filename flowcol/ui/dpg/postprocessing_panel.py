@@ -27,7 +27,6 @@ class PostprocessingPanel:
         self.app = app
 
         # Widget IDs for postprocessing sliders
-        self.postprocess_downsample_slider_id: Optional[int] = None
         self.postprocess_clip_slider_id: Optional[int] = None
         self.postprocess_brightness_slider_id: Optional[int] = None
         self.postprocess_contrast_slider_id: Optional[int] = None
@@ -71,17 +70,6 @@ class PostprocessingPanel:
 
         dpg.add_text("Post-processing", parent=parent)
         dpg.add_spacer(height=10, parent=parent)
-
-        self.postprocess_downsample_slider_id = dpg.add_slider_float(
-            label="Downsampling Blur",
-            default_value=self.app.state.display_settings.downsample_sigma,
-            min_value=0.0,
-            max_value=defaults.MAX_DOWNSAMPLE_SIGMA,
-            format="%.2f",
-            callback=self.on_downsample_slider,
-            width=200,
-            parent=parent,
-        )
 
         self.postprocess_clip_slider_id = dpg.add_slider_float(
             label="Clip %",
@@ -436,18 +424,6 @@ class PostprocessingPanel:
     # ------------------------------------------------------------------
     # Postprocessing slider callbacks
     # ------------------------------------------------------------------
-
-    def on_downsample_slider(self, sender=None, app_data=None) -> None:
-        """Handle downsampling blur sigma slider change (real-time with GPU acceleration)."""
-        if dpg is None:
-            return
-
-        value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.downsample_sigma = value
-
-        # GPU is fast enough for real-time updates - no debouncing needed!
-        self.app.display_pipeline.invalidate_and_refresh()
 
     def on_clip_slider(self, sender=None, app_data=None) -> None:
         """Handle clip percent slider change with debouncing (percentile computation is expensive at high res)."""
