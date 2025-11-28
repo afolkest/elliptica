@@ -7,7 +7,7 @@ from typing import Tuple, TYPE_CHECKING
 from elliptica.gpu import GPUContext
 from elliptica.gpu.pipeline import build_base_rgb_gpu
 from elliptica.gpu.overlay import apply_region_overlays_gpu
-from elliptica.gpu.smear import apply_conductor_smear_gpu
+from elliptica.gpu.smear import apply_region_smear_gpu, _has_any_smear_enabled
 from elliptica.render import _get_palette_lut
 
 if TYPE_CHECKING:
@@ -274,21 +274,23 @@ def apply_full_postprocess_gpu(
             normalized_tensor=normalized_tensor,  # Reuse normalized tensor
         )
 
-    # Step 3: Apply conductor smear (if any conductors have smear enabled)
+    # Step 3: Apply region smear (if any region has smear enabled)
     # Comes AFTER region overlays so smear applies to custom colored regions
-    has_smear = any(c.smear_enabled for c in conductors)
-    if has_smear and conductor_masks_cpu is not None:
-        base_rgb = apply_conductor_smear_gpu(
+    has_smear = _has_any_smear_enabled(conductor_color_settings, conductors)
+    if has_smear:
+        base_rgb = apply_region_smear_gpu(
             base_rgb,
             scalar_tensor,
             conductor_masks_cpu,
+            interior_masks_cpu,
             conductors,
             render_shape,
             canvas_resolution,
             lut_tensor,
             used_percentiles,
             conductor_color_settings,
-            conductor_masks_gpu,  # Pass pre-uploaded GPU masks
+            conductor_masks_gpu,
+            interior_masks_gpu,
             brightness,
             contrast,
             gamma,
