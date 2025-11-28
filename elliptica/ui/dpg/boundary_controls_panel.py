@@ -119,20 +119,21 @@ class BoundaryControlsPanel:
                 for param in params_meta:
                     current_val = conductor.params.get(param.name, param.default_value)
 
-                    slider_id = dpg.add_slider_float(
-                        label=param.display_name,
-                        default_value=float(current_val),
-                        min_value=param.min_value,
-                        max_value=param.max_value,
-                        format="%.3f",
-                        callback=self.on_param_slider,
-                        user_data={"idx": idx, "param": param.name},
-                    )
+                    with dpg.group(horizontal=True):
+                        slider_id = dpg.add_slider_float(
+                            label="",
+                            default_value=float(current_val),
+                            min_value=param.min_value,
+                            max_value=param.max_value,
+                            format="%.3f",
+                            callback=self.on_param_slider,
+                            user_data={"idx": idx, "param": param.name},
+                        )
+                        param_label = dpg.add_text(param.display_name)
+                        if param.description:
+                            with dpg.tooltip(param_label):
+                                dpg.add_text(param.description)
                     self.slider_ids[idx][param.name] = slider_id
-
-                    if param.description:
-                        with dpg.tooltip(slider_id):
-                            dpg.add_text(param.description)
 
                 # Standard edge smoothing slider (always present)
                 dpg.add_slider_float(
@@ -185,11 +186,13 @@ class BoundaryControlsPanel:
             dpg.configure_item(header_id, label=label)
 
     def _build_field_widget(self, idx: int, field, current_val) -> Optional[int]:
-        """Build a widget for a boundary field. Returns widget ID."""
+        """Build a widget for a boundary field. Returns group ID (for visibility control)."""
         if dpg is None:
             return None
 
-        widget_id = None
+        # Wrap in a horizontal group: widget first, then label with tooltip
+        group_id = dpg.add_group(horizontal=True)
+
         if field.field_type == "enum":
             labels = [lbl for lbl, _ in field.choices]
             # Find current label
@@ -198,47 +201,53 @@ class BoundaryControlsPanel:
                 if val == current_val:
                     current_label = lbl
                     break
-            widget_id = dpg.add_combo(
-                label=field.display_name,
+            dpg.add_combo(
+                label="",
                 items=labels,
                 default_value=current_label,
                 width=180,
                 callback=self._on_field_changed,
                 user_data={"idx": idx, "field": field.name},
+                parent=group_id,
             )
         elif field.field_type == "bool":
-            widget_id = dpg.add_checkbox(
-                label=field.display_name,
+            dpg.add_checkbox(
+                label="",
                 default_value=bool(current_val),
                 callback=self._on_field_changed,
                 user_data={"idx": idx, "field": field.name},
+                parent=group_id,
             )
         elif field.field_type == "int":
-            widget_id = dpg.add_input_int(
-                label=field.display_name,
+            dpg.add_input_int(
+                label="",
                 default_value=int(current_val),
                 width=120,
                 min_value=int(field.min_value) if field.min_value is not None else 0,
                 max_value=int(field.max_value) if field.max_value is not None else 2147483647,
                 callback=self._on_field_changed,
                 user_data={"idx": idx, "field": field.name},
+                parent=group_id,
             )
         else:  # float
-            widget_id = dpg.add_slider_float(
-                label=field.display_name,
+            dpg.add_slider_float(
+                label="",
                 default_value=float(current_val),
                 min_value=field.min_value if field.min_value is not None else -1e9,
                 max_value=field.max_value if field.max_value is not None else 1e9,
                 format="%.3f",
                 callback=self._on_field_changed,
                 user_data={"idx": idx, "field": field.name},
+                parent=group_id,
             )
 
-        if widget_id is not None and field.description:
-            with dpg.tooltip(widget_id):
+        # Label with tooltip (after widget)
+        field_label = dpg.add_text(field.display_name, parent=group_id)
+        if field.description:
+            with dpg.tooltip(field_label):
                 dpg.add_text(field.description)
 
-        return widget_id
+        return group_id
 
     def _on_field_changed(self, sender, app_data, user_data) -> None:
         """Handle boundary field change."""
@@ -283,6 +292,16 @@ class BoundaryControlsPanel:
         if field_name == "bc_type":
             self.update_header_labels()
 
+    def _get_widget_from_group(self, group_id: int) -> Optional[int]:
+        """Get the actual widget (combo/slider/etc) from a field group. Returns None if not found."""
+        if dpg is None or not dpg.does_item_exist(group_id):
+            return None
+        # Children are [widget, label_text] - we want the widget (first child)
+        children = dpg.get_item_children(group_id, 1)  # slot 1 = most children
+        if children and len(children) >= 1:
+            return children[0]  # First child is the widget
+        return None
+
     def _update_field_visibility(self) -> None:
         """Show/hide fields based on their visible_when rules."""
         if dpg is None:
@@ -291,9 +310,12 @@ class BoundaryControlsPanel:
         for idx, field_map in self.field_ids.items():
             # Collect current values for this conductor
             current_values = {}
-            for field_name, widget_id in field_map.items():
+            for field_name, group_id in field_map.items():
                 field_def = self.field_defs.get(field_name)
-                if field_def is None or not dpg.does_item_exist(widget_id):
+                if field_def is None or not dpg.does_item_exist(group_id):
+                    continue
+                widget_id = self._get_widget_from_group(group_id)
+                if widget_id is None:
                     continue
                 if field_def.field_type == "enum":
                     label = dpg.get_value(widget_id)
@@ -304,21 +326,21 @@ class BoundaryControlsPanel:
                 else:
                     current_values[field_name] = dpg.get_value(widget_id)
 
-            # Apply visibility rules
-            for field_name, widget_id in field_map.items():
+            # Apply visibility rules (show/hide the group, which contains label+widget)
+            for field_name, group_id in field_map.items():
                 field_def = self.field_defs.get(field_name)
-                if field_def is None or not dpg.does_item_exist(widget_id):
+                if field_def is None or not dpg.does_item_exist(group_id):
                     continue
 
                 visible_when = getattr(field_def, 'visible_when', None)
                 if visible_when is None:
-                    dpg.configure_item(widget_id, show=True)
+                    dpg.configure_item(group_id, show=True)
                 else:
                     should_show = all(
                         current_values.get(dep_field) == required_value
                         for dep_field, required_value in visible_when.items()
                     )
-                    dpg.configure_item(widget_id, show=should_show)
+                    dpg.configure_item(group_id, show=should_show)
 
     def update_slider_labels(self, skip_idx: Optional[int] = None) -> None:
         """Update slider labels and values to reflect current state."""

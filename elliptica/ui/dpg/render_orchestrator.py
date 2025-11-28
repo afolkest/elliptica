@@ -116,6 +116,13 @@ class RenderOrchestrator:
                     if result.ey is not None:
                         cache.ey_gpu = GPUContext.to_gpu(result.ey)
 
+                    # Upload PDE solution fields to GPU (phi, etc.)
+                    if result.solution:
+                        cache.solution_gpu = {}
+                        for name, array in result.solution.items():
+                            if isinstance(array, np.ndarray) and array.ndim == 2:
+                                cache.solution_gpu[name] = GPUContext.to_gpu(array)
+
                     # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
                     if conductor_masks is not None:
                         cache.conductor_masks_gpu = []

@@ -107,6 +107,7 @@ class ImageExportController:
                 cached_conductor_masks,
                 cached_interior_masks,
                 color_config,
+                result.solution,
             )
 
             h_super, w_super = final_rgb_super.shape[:2]
@@ -133,6 +134,7 @@ class ImageExportController:
             output_offset_y = int(round(result.offset_y / supersample))
 
             # For downsampled version, regenerate masks at output resolution
+            # Note: solution dict not passed here as array shapes won't match downsampled LIC
             final_rgb_output = self._apply_postprocessing_at_resolution(
                 downsampled_lic,
                 project,
@@ -146,6 +148,7 @@ class ImageExportController:
                 None,  # Regenerate masks for downsampled resolution
                 None,
                 color_config,
+                None,  # Solution not available at downsampled resolution
             )
 
             h_output, w_output = final_rgb_output.shape[:2]
@@ -170,6 +173,7 @@ class ImageExportController:
                 cached_conductor_masks,
                 cached_interior_masks,
                 color_config,
+                result.solution,
             )
 
             h, w = final_rgb.shape[:2]
@@ -193,6 +197,7 @@ class ImageExportController:
         cached_conductor_masks: list = None,
         cached_interior_masks: list = None,
         color_config=None,
+        solution: dict = None,
     ) -> np.ndarray:
         """Apply full post-processing pipeline to LIC array at any resolution.
 
@@ -242,6 +247,20 @@ class ImageExportController:
         # Use unified GPU postprocessing pipeline (or CPU fallback)
         from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
 
+        # Upload solution fields to GPU if available
+        solution_gpu = None
+        if solution:
+            try:
+                from elliptica.gpu import GPUContext
+                import numpy as np
+                if GPUContext.is_available():
+                    solution_gpu = {}
+                    for name, array in solution.items():
+                        if isinstance(array, np.ndarray) and array.ndim == 2:
+                            solution_gpu[name] = GPUContext.to_gpu(array)
+            except Exception:
+                pass  # Graceful fallback if GPU upload fails
+
         final_rgb, _ = apply_full_postprocess_hybrid(
             scalar_array=lic_array,
             conductor_masks=conductor_masks,
@@ -261,6 +280,7 @@ class ImageExportController:
             scalar_tensor=None,  # Will upload on-demand
             color_config=color_config,  # Expression-based coloring (if set)
             lightness_expr=settings.lightness_expr,
+            solution_gpu=solution_gpu,
         )
 
         return final_rgb
