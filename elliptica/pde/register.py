@@ -7,6 +7,7 @@ Call register_all_pdes() at application startup to register all available PDEs.
 from .registry import PDERegistry
 from .poisson_pde import POISSON_PDE
 from .biharmonic_pde import BIHARMONIC_PDE
+from .eikonal_pde import EIKONAL_PDE
 
 
 def register_all_pdes() -> None:
@@ -23,6 +24,9 @@ def register_all_pdes() -> None:
     
     # Register Biharmonic equation (Stokes flow)
     PDERegistry.register(BIHARMONIC_PDE)
+
+    # Register Eikonal equation (geometric optics)
+    PDERegistry.register(EIKONAL_PDE)
 
     # Set default active PDE
     PDERegistry.set_active("poisson")

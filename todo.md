@@ -1,6 +1,10 @@
 - undo/redo 
 - progress barrs
 - exports
+- make sure shrinking items in render menu is not posibble (deselect)
+- add lock feature
+- add drawing featur
+- add zoom feature
 
 
 - blue noise? 
