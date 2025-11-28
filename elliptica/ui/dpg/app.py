@@ -241,6 +241,11 @@ class EllipticaApp:
                 dpg.add_menu_item(label="New Project", callback=self.file_io.new_project)
                 dpg.add_menu_item(label="Load Project...", callback=self.file_io.open_load_project_dialog)
                 dpg.add_menu_item(label="Save Project...", callback=self.file_io.open_save_project_dialog)
+            with dpg.menu(label="Export", tag="export_menu"):
+                dpg.add_menu_item(label="Quick Save Image", callback=self.image_export.quick_save,
+                                 tag="quick_save_menu_item")
+                dpg.add_menu_item(label="Export Image...", callback=self.image_export.open_export_dialog,
+                                 tag="export_menu_item")
 
         with dpg.handler_registry() as handler_reg:
             self.mouse_handler_registry_id = handler_reg
@@ -281,9 +286,7 @@ class EllipticaApp:
                 with dpg.group(tag="render_controls_group") as render_group:
                     self.render_controls_id = render_group
                     dpg.add_text("Render View")
-                    with dpg.group(horizontal=True):
-                        dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked, width=140)
-                        dpg.add_button(label="Save Image", callback=self.image_export.export_image, width=140)
+                    dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked, width=140)
                     dpg.add_spacer(height=15)
                     dpg.add_separator()
                     dpg.add_spacer(height=10)
@@ -555,6 +558,7 @@ class EllipticaApp:
         finally:
             self.render_orchestrator.shutdown(wait=False)
             self.display_pipeline.shutdown()
+            self.image_export.shutdown()
             dpg.destroy_context()
 
 
@@ -577,6 +581,13 @@ class EllipticaApp:
         if self.cache_panel.view_postprocessing_button_id is not None:
             show_button = (mode == "edit" and has_cache)
             dpg.configure_item(self.cache_panel.view_postprocessing_button_id, show=show_button)
+
+        # Enable/disable Export menu items based on render mode
+        can_export = (mode == "render" and has_cache)
+        if dpg.does_item_exist("quick_save_menu_item"):
+            dpg.configure_item("quick_save_menu_item", enabled=can_export)
+        if dpg.does_item_exist("export_menu_item"):
+            dpg.configure_item("export_menu_item", enabled=can_export)
 
         self.boundary_controls.update_slider_labels()
 
