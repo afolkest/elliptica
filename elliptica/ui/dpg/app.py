@@ -28,6 +28,7 @@ from elliptica.ui.dpg.canvas_controller import CanvasController
 from elliptica.ui.dpg.canvas_renderer import CanvasRenderer
 from elliptica.ui.dpg.shape_dialog import ShapeDialogController
 from elliptica.ui.dpg.fonts import setup_fonts
+from elliptica.ui.dpg.theme import apply_theme
 from elliptica.types import Conductor, Project
 from elliptica import defaults
 
@@ -227,6 +228,7 @@ class EllipticaApp:
 
         # Load font with math symbol support (must be before any widgets)
         setup_fonts(size=14)
+        apply_theme()
 
         self.display_pipeline.texture_manager.create_registries()
 

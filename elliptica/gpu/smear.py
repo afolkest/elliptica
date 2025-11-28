@@ -64,6 +64,10 @@ def _apply_smear_to_region(
     global_brightness: float,
     global_contrast: float,
     gamma: float,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
+    global_lightness_expr: str | None = None,
 ) -> torch.Tensor:
     """Apply smear effect to a single region.
 
@@ -77,6 +81,9 @@ def _apply_smear_to_region(
         vmin, vmax: Percentiles for normalization
         lut_tensor: Global color palette LUT
         global_brightness, global_contrast, gamma: Global postprocess settings
+        ex_tensor, ey_tensor: Electric field components for lightness expressions
+        solution_gpu: PDE solution fields for lightness expressions
+        global_lightness_expr: Global lightness expression (fallback)
 
     Returns:
         Modified output tensor
@@ -144,6 +151,15 @@ def _apply_smear_to_region(
         else:
             rgb_blur = grayscale_to_rgb_gpu(adjusted)
 
+    # Apply lightness expression (region-specific or global fallback)
+    region_expr = region_style.lightness_expr if region_style.lightness_expr is not None else global_lightness_expr
+    if region_expr is not None:
+        from elliptica.gpu.overlay import _apply_lightness_expr_to_rgb
+        rgb_blur = _apply_lightness_expr_to_rgb(
+            rgb_blur, region_expr, lic_gray_tensor,
+            ex_tensor, ey_tensor, solution_gpu
+        )
+
     # Apply smear inside mask
     weight = (full_mask > 0.5).float().unsqueeze(-1)
     out = out * (1.0 - weight) + rgb_blur * weight
@@ -170,6 +186,10 @@ def apply_region_smear_gpu(
     brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
+    global_lightness_expr: str | None = None,
 ) -> torch.Tensor:
     """Apply smear effect to regions (both surfaces and interiors) on GPU.
 
@@ -191,6 +211,9 @@ def apply_region_smear_gpu(
         brightness: Global brightness adjustment
         contrast: Global contrast multiplier
         gamma: Gamma exponent
+        ex_tensor, ey_tensor: Electric field components for lightness expressions
+        solution_gpu: PDE solution fields for lightness expressions
+        global_lightness_expr: Global lightness expression (fallback)
 
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
@@ -225,7 +248,8 @@ def apply_region_smear_gpu(
                 mask_gpu = conductor_masks_gpu[idx] if conductor_masks_gpu and idx < len(conductor_masks_gpu) else None
                 out = _apply_smear_to_region(
                     out, lic_gray_tensor, mask_cpu, mask_gpu, settings.surface,
-                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma
+                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma,
+                    ex_tensor, ey_tensor, solution_gpu, global_lightness_expr
                 )
 
         # Apply smear to interior if enabled
@@ -235,7 +259,8 @@ def apply_region_smear_gpu(
                 mask_gpu = interior_masks_gpu[idx] if interior_masks_gpu and idx < len(interior_masks_gpu) else None
                 out = _apply_smear_to_region(
                     out, lic_gray_tensor, mask_cpu, mask_gpu, settings.interior,
-                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma
+                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma,
+                    ex_tensor, ey_tensor, solution_gpu, global_lightness_expr
                 )
 
     return torch.clamp(out, 0.0, 1.0)

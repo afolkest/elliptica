@@ -197,54 +197,74 @@ def apply_region_overlays_gpu(
             continue
 
         # Apply interior region first (lower layer)
-        if settings.interior.enabled and idx < len(interior_masks) and interior_masks[idx] is not None:
+        if idx < len(interior_masks) and interior_masks[idx] is not None:
             mask_soft = interior_masks[idx]
             if torch.any(mask_soft > 0):
-                # Threshold mask to match LIC blocking (mask > 0.5)
                 mask = (mask_soft > 0.5).float()
-                if settings.interior.use_palette:
-                    # Resolve per-region params and use cached RGB (stays on GPU!)
-                    region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
-                    region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
-                    region_gamma = settings.interior.gamma if settings.interior.gamma is not None else gamma
-                    cache_key = (settings.interior.palette, region_brightness, region_contrast, region_gamma)
-                    region_rgb = palette_cache[cache_key]
-                    # Apply lightness expression (region-specific or global fallback)
-                    region_expr = settings.interior.lightness_expr if settings.interior.lightness_expr is not None else global_lightness_expr
-                    if region_expr is not None:
-                        region_rgb = _apply_lightness_expr_to_rgb(
-                            region_rgb, region_expr, scalar_tensor,
-                            ex_tensor, ey_tensor, solution_gpu
-                        )
+
+                # Check if this region has a custom lightness expression
+                has_custom_expr = settings.interior.lightness_expr is not None
+
+                if settings.interior.enabled:
+                    # Full palette/color override
+                    if settings.interior.use_palette:
+                        region_brightness = settings.interior.brightness if settings.interior.brightness is not None else brightness
+                        region_contrast = settings.interior.contrast if settings.interior.contrast is not None else contrast
+                        region_gamma = settings.interior.gamma if settings.interior.gamma is not None else gamma
+                        cache_key = (settings.interior.palette, region_brightness, region_contrast, region_gamma)
+                        region_rgb = palette_cache[cache_key]
+                        region_expr = settings.interior.lightness_expr if has_custom_expr else global_lightness_expr
+                        if region_expr is not None:
+                            region_rgb = _apply_lightness_expr_to_rgb(
+                                region_rgb, region_expr, scalar_tensor,
+                                ex_tensor, ey_tensor, solution_gpu
+                            )
+                        result = blend_region_gpu(result, region_rgb, mask)
+                    else:
+                        result = fill_region_gpu(result, settings.interior.solid_color, mask)
+                elif has_custom_expr:
+                    # No palette override, but has custom lightness expression
+                    # Apply expression to base RGB within this region's mask
+                    region_rgb = _apply_lightness_expr_to_rgb(
+                        result, settings.interior.lightness_expr, scalar_tensor,
+                        ex_tensor, ey_tensor, solution_gpu
+                    )
                     result = blend_region_gpu(result, region_rgb, mask)
-                else:
-                    # Solid color fill
-                    result = fill_region_gpu(result, settings.interior.solid_color, mask)
 
         # Apply surface region (upper layer)
-        if settings.surface.enabled and idx < len(conductor_masks) and conductor_masks[idx] is not None:
+        if idx < len(conductor_masks) and conductor_masks[idx] is not None:
             mask_soft = conductor_masks[idx]
             if torch.any(mask_soft > 0):
-                # Threshold mask to match LIC blocking (mask > 0.5)
                 mask = (mask_soft > 0.5).float()
-                if settings.surface.use_palette:
-                    # Resolve per-region params and use cached RGB (stays on GPU!)
-                    region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
-                    region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
-                    region_gamma = settings.surface.gamma if settings.surface.gamma is not None else gamma
-                    cache_key = (settings.surface.palette, region_brightness, region_contrast, region_gamma)
-                    region_rgb = palette_cache[cache_key]
-                    # Apply lightness expression (region-specific or global fallback)
-                    region_expr = settings.surface.lightness_expr if settings.surface.lightness_expr is not None else global_lightness_expr
-                    if region_expr is not None:
-                        region_rgb = _apply_lightness_expr_to_rgb(
-                            region_rgb, region_expr, scalar_tensor,
-                            ex_tensor, ey_tensor, solution_gpu
-                        )
+
+                # Check if this region has a custom lightness expression
+                has_custom_expr = settings.surface.lightness_expr is not None
+
+                if settings.surface.enabled:
+                    # Full palette/color override
+                    if settings.surface.use_palette:
+                        region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
+                        region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
+                        region_gamma = settings.surface.gamma if settings.surface.gamma is not None else gamma
+                        cache_key = (settings.surface.palette, region_brightness, region_contrast, region_gamma)
+                        region_rgb = palette_cache[cache_key]
+                        region_expr = settings.surface.lightness_expr if has_custom_expr else global_lightness_expr
+                        if region_expr is not None:
+                            region_rgb = _apply_lightness_expr_to_rgb(
+                                region_rgb, region_expr, scalar_tensor,
+                                ex_tensor, ey_tensor, solution_gpu
+                            )
+                        result = blend_region_gpu(result, region_rgb, mask)
+                    else:
+                        result = fill_region_gpu(result, settings.surface.solid_color, mask)
+                elif has_custom_expr:
+                    # No palette override, but has custom lightness expression
+                    # Apply expression to base RGB within this region's mask
+                    region_rgb = _apply_lightness_expr_to_rgb(
+                        result, settings.surface.lightness_expr, scalar_tensor,
+                        ex_tensor, ey_tensor, solution_gpu
+                    )
                     result = blend_region_gpu(result, region_rgb, mask)
-                else:
-                    # Solid color fill
-                    result = fill_region_gpu(result, settings.surface.solid_color, mask)
 
     return torch.clamp(result, 0.0, 1.0)
 

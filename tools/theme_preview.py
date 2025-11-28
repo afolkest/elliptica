@@ -115,19 +115,17 @@ OPTIONS = {
     "selection_highlight": {
         "label": "Text Selection",
         "choices": [
-            ("Steel subtle", (70, 80, 95, 120)),
-            ("Steel medium", (80, 90, 110, 150)),
-            ("Steel visible", (90, 100, 120, 180)),
-            ("Blue tint", (60, 80, 120, 140)),
+            ("Steel", (80, 95, 115, 180)),
+            ("Blue", (70, 100, 140, 180)),
+            ("Slate", (90, 100, 115, 160)),
         ],
     },
     "modal_dim": {
         "label": "Modal Dimming",
         "choices": [
-            ("Light", (0, 0, 0, 80)),
-            ("Medium", (0, 0, 0, 120)),
-            ("Dark", (0, 0, 0, 160)),
-            ("Very dark", (0, 0, 0, 200)),
+            ("Subtle", (0, 0, 0, 100)),
+            ("Medium", (0, 0, 0, 140)),
+            ("Strong", (0, 0, 0, 180)),
         ],
     },
 }
@@ -135,8 +133,8 @@ OPTIONS = {
 # Current selections
 current_selection = {
     "rounding": 3,  # Default to 2.5px (user's choice)
-    "selection_highlight": 1,  # Default to medium
-    "modal_dim": 1,  # Default to medium
+    "selection_highlight": 0,  # Default to Steel
+    "modal_dim": 1,  # Default to Medium
 }
 
 theme_id = None

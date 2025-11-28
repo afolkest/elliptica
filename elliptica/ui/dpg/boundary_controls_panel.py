@@ -32,8 +32,6 @@ class BoundaryControlsPanel:
         self.enum_choices: Dict[str, list] = {}
         # Cache for field definitions by name
         self.field_defs: Dict[str, Any] = {}
-        # Theme for subtle "Advanced" headers
-        self.subtle_header_theme_id: Optional[int] = None
 
     def build_container(self, parent) -> None:
         """Build controls container in edit controls panel."""
@@ -49,22 +47,6 @@ class BoundaryControlsPanel:
             no_scroll_with_mouse=False,
             parent=parent,
         )
-
-    def _ensure_subtle_header_theme(self) -> None:
-        """Create subtle gray theme for Advanced headers (only once)."""
-        if dpg is None or self.subtle_header_theme_id is not None:
-            return
-        # Subtle gray colors
-        gray = (70, 70, 70, 255)
-        gray_hover = (80, 80, 80, 255)
-        gray_text = (120, 120, 120, 255)
-        with dpg.theme() as theme:
-            with dpg.theme_component(dpg.mvCollapsingHeader):
-                dpg.add_theme_color(dpg.mvThemeCol_Header, gray, category=dpg.mvThemeCat_Core)
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderHovered, gray_hover, category=dpg.mvThemeCat_Core)
-                dpg.add_theme_color(dpg.mvThemeCol_HeaderActive, gray_hover, category=dpg.mvThemeCat_Core)
-                dpg.add_theme_color(dpg.mvThemeCol_Text, gray_text, category=dpg.mvThemeCat_Core)
-        self.subtle_header_theme_id = theme
 
     def rebuild_controls(self) -> None:
         """Rebuild all sliders based on active PDE metadata."""
@@ -153,19 +135,16 @@ class BoundaryControlsPanel:
                                 dpg.add_text(param.description)
                     self.slider_ids[idx][param.name] = slider_id
 
-                # Advanced section (collapsed by default, subtle styling)
-                self._ensure_subtle_header_theme()
-                with dpg.collapsing_header(label="Advanced", default_open=False) as advanced_header:
-                    dpg.add_slider_float(
-                        label="Edge Smooth",
-                        default_value=float(conductor.edge_smooth_sigma),
-                        min_value=0.0,
-                        max_value=5.0,
-                        format="%.1f px",
-                        callback=self.on_edge_smooth_slider,
-                        user_data=idx,
-                    )
-                dpg.bind_item_theme(advanced_header, self.subtle_header_theme_id)
+                # Edge smoothing slider (inline, no header)
+                dpg.add_slider_float(
+                    label="Edge Smooth",
+                    default_value=float(conductor.edge_smooth_sigma),
+                    min_value=0.0,
+                    max_value=5.0,
+                    format="%.1f px",
+                    callback=self.on_edge_smooth_slider,
+                    user_data=idx,
+                )
 
         # Set initial visibility based on field values
         self._update_field_visibility()
