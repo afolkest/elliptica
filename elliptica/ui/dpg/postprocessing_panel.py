@@ -883,19 +883,20 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        # Capture the target NOW (not at debounce time)
-        # This ensures we update the right target even if user clicks away
-        region_style = self._get_current_region_style()
-        has_custom_lightness = region_style is not None and region_style.lightness_expr is not None
-
-        if self._is_conductor_selected() and has_custom_lightness:
-            with self.app.state_lock:
-                selected = self.app.state.get_selected()
-                region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    self.lightness_expr_pending_target = (selected.id, region_type)
-                else:
-                    self.lightness_expr_pending_target = "global"
+        # Capture the target NOW based on UI state (radio button), not region_style state
+        # The radio button reflects the user's intent directly
+        if self._is_conductor_selected():
+            mode = dpg.get_value("lightness_expr_mode_radio")
+            if mode == "Custom":
+                with self.app.state_lock:
+                    selected = self.app.state.get_selected()
+                    region_type = self.app.state.selected_region_type
+                    if selected and selected.id is not None:
+                        self.lightness_expr_pending_target = (selected.id, region_type)
+                    else:
+                        self.lightness_expr_pending_target = "global"
+            else:
+                self.lightness_expr_pending_target = "global"
         else:
             self.lightness_expr_pending_target = "global"
 
@@ -1004,12 +1005,11 @@ class PostprocessingPanel:
             settings = self.app.state.conductor_color_settings[conductor_id]
             region_style = settings.surface if region_type == "surface" else settings.interior
 
-            # Only update if this region has custom expr enabled
-            if region_style.lightness_expr is not None:
-                region_style.lightness_expr = expr
-                # Also update cache so switching Global->Custom restores latest edit
-                cache_key = (conductor_id, region_type)
-                self._cached_custom_lightness_exprs[cache_key] = expr
+            # Set the expression (we're targeting this region, so apply it)
+            region_style.lightness_expr = expr
+            # Also update cache so switching Global->Custom restores latest edit
+            cache_key = (conductor_id, region_type)
+            self._cached_custom_lightness_exprs[cache_key] = expr
 
         self.app.display_pipeline.refresh_display()
 

@@ -223,6 +223,9 @@ def apply_full_postprocess_gpu(
         normalized_tensor=normalized_tensor,  # Reuse normalized tensor
     )
 
+    # Keep original base RGB before global lightness expr (needed for per-region custom exprs)
+    base_rgb_no_expr = base_rgb
+
     # Step 1b: Apply lightness expression if set (palette mode only)
     if lightness_expr is not None:
         base_rgb = apply_lightness_expr_gpu(
@@ -276,6 +279,7 @@ def apply_full_postprocess_gpu(
             ey_tensor=ey_tensor,
             solution_gpu=solution_gpu,
             global_lightness_expr=lightness_expr,
+            base_rgb_no_expr=base_rgb_no_expr,  # For custom expr regions without palette override
         )
 
     # Step 3: Apply region smear (if any region has smear enabled)
