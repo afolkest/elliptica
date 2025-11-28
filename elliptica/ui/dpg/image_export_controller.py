@@ -1,14 +1,15 @@
 """Image export controller for Elliptica UI.
 
 Handles saving rendered images to disk with support for:
-- Supersampled exports (saves 2 versions)
-- Arbitrary resolution exports
+- Quick save (current display as-is)
+- High-resolution export with re-rendering
 - Postprocessing pipeline at export resolution
 """
 
+from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from PIL import Image
@@ -37,6 +38,396 @@ class ImageExportController:
             app: The main EllipticaApp instance
         """
         self.app = app
+        self.export_modal_id: Optional[int] = None
+        self.export_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+        self.export_future: Optional[Future] = None
+        # Pending export settings (stored when file dialog opens)
+        self._pending_export_multiplier: float = 1.0
+        self._pending_export_solve_scale: float = 1.0
+
+    def quick_save(self, sender=None, app_data=None) -> None:
+        """Save the current display buffer directly to disk.
+
+        This is a fast operation - no re-rendering, just saves what's currently shown.
+        """
+        if dpg is None:
+            return
+
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            if cache is None or cache.result is None:
+                dpg.set_value("status_text", "No render to save.")
+                return
+
+        # Get the current display texture data from texture manager
+        texture_manager = self.app.display_pipeline.texture_manager
+        if texture_manager.render_texture_id is None:
+            dpg.set_value("status_text", "No display to save.")
+            return
+
+        # Create file dialog if needed
+        if not dpg.does_item_exist("quick_save_file_dialog"):
+            with dpg.file_dialog(
+                directory_selector=False,
+                show=False,
+                callback=self._on_quick_save_file_selected,
+                tag="quick_save_file_dialog",
+                width=700,
+                height=400,
+                default_filename="elliptica_quicksave.png",
+            ):
+                dpg.add_file_extension(".png", color=(0, 255, 0, 255))
+                dpg.add_file_extension(".jpg", color=(0, 255, 255, 255))
+
+        # Set default path to outputs directory
+        output_dir = Path.cwd() / "outputs"
+        output_dir.mkdir(exist_ok=True)
+        dpg.configure_item("quick_save_file_dialog", default_path=str(output_dir))
+        dpg.configure_item("quick_save_file_dialog", show=True)
+
+    def _on_quick_save_file_selected(self, sender=None, app_data=None) -> None:
+        """Handle file selection for quick save."""
+        if dpg is None:
+            return
+
+        if app_data is None or 'file_path_name' not in app_data:
+            return
+
+        file_path = Path(app_data['file_path_name'])
+
+        # Get the current display texture data from texture manager
+        texture_manager = self.app.display_pipeline.texture_manager
+        texture_data = dpg.get_value(texture_manager.render_texture_id)
+        if texture_data is None:
+            dpg.set_value("status_text", "Failed to get texture data.")
+            return
+
+        # Convert flat RGBA float data back to image
+        width, height = texture_manager.render_texture_size
+        rgba_flat = np.array(texture_data, dtype=np.float32)
+        rgba = (rgba_flat.reshape(height, width, 4) * 255).astype(np.uint8)
+        rgb = rgba[:, :, :3]  # Drop alpha
+
+        # Save
+        pil_img = Image.fromarray(rgb, mode='RGB')
+        pil_img.save(file_path)
+        dpg.set_value("status_text", f"Saved {file_path.name}")
+
+    def open_export_dialog(self, sender=None, app_data=None) -> None:
+        """Open the export settings dialog."""
+        if dpg is None:
+            return
+
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            if cache is None or cache.result is None:
+                dpg.set_value("status_text", "No render to export.")
+                return
+
+        self._ensure_export_modal()
+
+        # Get current render info for display
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            current_h, current_w = cache.result.array.shape
+            current_multiplier = cache.multiplier
+            current_solve_scale = self.app.state.render_settings.solve_scale
+
+        # Update info text
+        dpg.set_value("export_current_res_text", f"Current: {current_w} x {current_h}")
+
+        # Set defaults
+        dpg.set_value("export_multiplier_input", current_multiplier)
+        dpg.set_value("export_solve_scale_slider", current_solve_scale)
+
+        # Update preview
+        self._update_export_preview()
+
+        # Center and show modal
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        modal_width = 400
+        modal_height = 300
+        dpg.configure_item(
+            self.export_modal_id,
+            pos=((viewport_width - modal_width) // 2, (viewport_height - modal_height) // 2),
+            show=True
+        )
+
+    def _ensure_export_modal(self) -> None:
+        """Create the export modal dialog if it doesn't exist."""
+        if dpg is None or self.export_modal_id is not None:
+            return
+
+        with dpg.window(
+            label="Export Image",
+            modal=True,
+            show=False,
+            tag="export_modal",
+            no_resize=True,
+            no_collapse=True,
+            width=400,
+            height=300,
+        ) as modal:
+            self.export_modal_id = modal
+
+            dpg.add_text("Export Settings", color=(200, 200, 255))
+            dpg.add_separator()
+            dpg.add_spacer(height=10)
+
+            # Current resolution info
+            dpg.add_text("", tag="export_current_res_text", color=(150, 150, 150))
+            dpg.add_spacer(height=10)
+
+            # Resolution multiplier
+            with dpg.group(horizontal=True):
+                dpg.add_text("Resolution multiplier:")
+                dpg.add_input_float(
+                    default_value=1.0,
+                    min_value=0.25,
+                    max_value=16.0,
+                    step=0.25,
+                    width=100,
+                    tag="export_multiplier_input",
+                    callback=self._update_export_preview,
+                )
+
+            # Preview resolution
+            dpg.add_text("", tag="export_preview_res_text", color=(100, 200, 100))
+            dpg.add_spacer(height=10)
+
+            # PDE solve scale
+            with dpg.group(horizontal=True):
+                dpg.add_text("PDE solve scale:")
+                dpg.add_slider_float(
+                    default_value=1.0,
+                    min_value=0.1,
+                    max_value=1.0,
+                    format="%.2f",
+                    width=100,
+                    tag="export_solve_scale_slider",
+                )
+            dpg.add_text("1 = best quality, lower = faster", color=(150, 150, 150))
+
+            dpg.add_spacer(height=20)
+            dpg.add_separator()
+            dpg.add_spacer(height=10)
+
+            # Buttons
+            with dpg.group(horizontal=True):
+                dpg.add_button(
+                    label="Export...",
+                    width=100,
+                    callback=self._on_export_clicked,
+                )
+                dpg.add_button(
+                    label="Cancel",
+                    width=100,
+                    callback=lambda: dpg.configure_item("export_modal", show=False),
+                )
+
+    def _update_export_preview(self, sender=None, app_data=None) -> None:
+        """Update the export preview resolution text."""
+        if dpg is None:
+            return
+
+        multiplier = dpg.get_value("export_multiplier_input")
+
+        with self.app.state_lock:
+            canvas_w, canvas_h = self.app.state.project.canvas_resolution
+
+        export_w = int(round(canvas_w * multiplier))
+        export_h = int(round(canvas_h * multiplier))
+
+        dpg.set_value("export_preview_res_text", f"Export size: {export_w} x {export_h}")
+
+    def _on_export_clicked(self, sender=None, app_data=None) -> None:
+        """Handle export button click - open file dialog."""
+        if dpg is None:
+            return
+
+        # Get and store export settings
+        self._pending_export_multiplier = dpg.get_value("export_multiplier_input")
+        self._pending_export_solve_scale = float(dpg.get_value("export_solve_scale_slider"))
+
+        with self.app.state_lock:
+            canvas_w, canvas_h = self.app.state.project.canvas_resolution
+
+        export_w = int(round(canvas_w * self._pending_export_multiplier))
+        export_h = int(round(canvas_h * self._pending_export_multiplier))
+
+        # Create file dialog if needed
+        if not dpg.does_item_exist("export_file_dialog"):
+            with dpg.file_dialog(
+                directory_selector=False,
+                show=False,
+                callback=self._on_export_file_selected,
+                tag="export_file_dialog",
+                width=700,
+                height=400,
+            ):
+                dpg.add_file_extension(".png", color=(0, 255, 0, 255))
+                dpg.add_file_extension(".tiff", color=(255, 255, 0, 255))
+
+        # Set default filename and path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_filename = f"elliptica_{export_w}x{export_h}_{timestamp}.png"
+
+        output_dir = Path.cwd() / "outputs"
+        output_dir.mkdir(exist_ok=True)
+
+        dpg.configure_item("export_file_dialog", default_path=str(output_dir))
+        dpg.configure_item("export_file_dialog", default_filename=default_filename)
+        dpg.configure_item("export_file_dialog", show=True)
+
+    def _on_export_file_selected(self, sender=None, app_data=None) -> None:
+        """Handle file selection for export."""
+        if dpg is None:
+            return
+
+        if app_data is None or 'file_path_name' not in app_data:
+            return
+
+        file_path = Path(app_data['file_path_name'])
+
+        # Close the modal
+        dpg.configure_item("export_modal", show=False)
+
+        # Start export in background with stored settings
+        self._start_export(file_path, self._pending_export_multiplier, self._pending_export_solve_scale)
+
+    def _start_export(self, file_path: Path, multiplier: float, solve_scale: float) -> None:
+        """Start the export process in a background thread."""
+        if dpg is None:
+            return
+
+        dpg.set_value("status_text", f"Exporting at {multiplier}x resolution...")
+
+        # Snapshot all settings for thread-safe export
+        with self.app.state_lock:
+            from elliptica.ui.dpg.app import _snapshot_project
+            project = _snapshot_project(self.app.state.project)
+            settings = replace(self.app.state.display_settings)
+            render_settings = replace(self.app.state.render_settings)
+            conductor_color_settings = {k: v for k, v in self.app.state.conductor_color_settings.items()}
+            color_config = self.app.state.color_config
+
+        def export_job():
+            """Background export job."""
+            from elliptica.pipeline import perform_render
+            from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
+
+            # Perform render at export resolution
+            result = perform_render(
+                project,
+                multiplier,
+                render_settings.supersample,
+                render_settings.num_passes,
+                render_settings.margin,
+                render_settings.noise_seed,
+                render_settings.noise_sigma,
+                project.streamlength_factor,
+                render_settings.use_mask,
+                render_settings.edge_gain_strength,
+                render_settings.edge_gain_power,
+                solve_scale,
+            )
+
+            if result is None:
+                return ('error', 'Render failed')
+
+            # Rasterize masks at export resolution
+            conductor_masks = None
+            interior_masks = None
+            if project.conductors:
+                conductor_masks, interior_masks = rasterize_conductor_masks(
+                    project.conductors,
+                    result.array.shape,
+                    result.margin,
+                    multiplier * render_settings.supersample,
+                    result.offset_x,
+                    result.offset_y,
+                )
+
+            # Upload solution to GPU if available
+            solution_gpu = None
+            if result.solution:
+                try:
+                    from elliptica.gpu import GPUContext
+                    if GPUContext.is_available():
+                        solution_gpu = {}
+                        for name, array in result.solution.items():
+                            if isinstance(array, np.ndarray) and array.ndim == 2:
+                                solution_gpu[name] = GPUContext.to_gpu(array)
+                except Exception:
+                    pass
+
+            # Apply postprocessing
+            canvas_w, canvas_h = project.canvas_resolution
+            final_rgb, _ = apply_full_postprocess_hybrid(
+                scalar_array=result.array,
+                conductor_masks=conductor_masks,
+                interior_masks=interior_masks,
+                conductor_color_settings=conductor_color_settings,
+                conductors=project.conductors,
+                render_shape=result.array.shape,
+                canvas_resolution=(canvas_w, canvas_h),
+                clip_percent=settings.clip_percent,
+                brightness=settings.brightness,
+                contrast=settings.contrast,
+                gamma=settings.gamma,
+                color_enabled=settings.color_enabled,
+                palette=settings.palette,
+                lic_percentiles=None,
+                use_gpu=True,
+                color_config=color_config,
+                lightness_expr=settings.lightness_expr,
+                solution_gpu=solution_gpu,
+            )
+
+            # Handle supersampling if enabled
+            if render_settings.supersample > 1.0:
+                # Downsample to final resolution
+                output_h = int(round(canvas_h * multiplier))
+                output_w = int(round(canvas_w * multiplier))
+                output_shape = (output_h, output_w)
+
+                # Downsample each channel
+                from scipy.ndimage import zoom
+                scale_factor = 1.0 / render_settings.supersample
+                final_rgb_downsampled = zoom(
+                    final_rgb,
+                    (scale_factor, scale_factor, 1),
+                    order=1,
+                )
+                final_rgb = np.clip(final_rgb_downsampled, 0, 255).astype(np.uint8)
+
+            # Save image
+            pil_img = Image.fromarray(final_rgb, mode='RGB')
+            pil_img.save(file_path)
+
+            return ('success', file_path.name)
+
+        def on_complete(future):
+            """Handle export completion on main thread."""
+            try:
+                result = future.result()
+                if result[0] == 'success':
+                    if dpg is not None:
+                        dpg.set_value("status_text", f"Exported {result[1]}")
+                else:
+                    if dpg is not None:
+                        dpg.set_value("status_text", f"Export failed: {result[1]}")
+            except Exception as e:
+                if dpg is not None:
+                    dpg.set_value("status_text", f"Export error: {e}")
+
+        self.export_future = self.export_executor.submit(export_job)
+        self.export_future.add_done_callback(on_complete)
+
+    def shutdown(self) -> None:
+        """Shutdown the export executor."""
+        self.export_executor.shutdown(wait=False)
 
     def export_image(self, sender=None, app_data=None) -> None:
         """Save the final rendered image to disk.
