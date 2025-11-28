@@ -44,8 +44,12 @@ def _get_percentiles(x, lo_pct, hi_pct, use_torch: bool) -> tuple[float, float]:
 
     if use_torch:
         torch = _get_torch()
-        lo = torch.quantile(x.flatten().float(), lo_pct / 100).item()
-        hi = torch.quantile(x.flatten().float(), hi_pct / 100).item()
+        from elliptica.gpu.ops import quantile_safe
+        flat = x.flatten().float()
+        quantiles = torch.tensor([lo_pct / 100, hi_pct / 100], device=flat.device, dtype=flat.dtype)
+        results = quantile_safe(flat, quantiles)
+        lo = results[0].item()
+        hi = results[1].item()
     else:
         lo = np.percentile(x, lo_pct)
         hi = np.percentile(x, hi_pct)
