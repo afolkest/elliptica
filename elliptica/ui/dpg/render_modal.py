@@ -83,7 +83,9 @@ class RenderModalController:
         ) as modal:
             self.modal_id = modal
 
-            dpg.add_text("Render Resolution")
+            resolution_label = dpg.add_text("Render Resolution")
+            with dpg.tooltip(resolution_label):
+                dpg.add_text("Output size relative to canvas. Higher = more detail but slower. 1× matches canvas exactly.")
             self.multiplier_radio_id = dpg.add_radio_button(
                 RESOLUTION_LABELS,
                 horizontal=True,
@@ -93,82 +95,107 @@ class RenderModalController:
             dpg.add_separator()
             dpg.add_spacer(height=12)
 
-            self.passes_input_id = dpg.add_input_int(
-                label="LIC Passes",
-                min_value=1,
-                step=1,
-                min_clamped=True,
-                width=160,
-            )
+            with dpg.group(horizontal=True):
+                self.passes_input_id = dpg.add_slider_int(
+                    label="",
+                    default_value=defaults.DEFAULT_RENDER_PASSES,
+                    min_value=1,
+                    max_value=5,
+                    width=250,
+                )
+                passes_label = dpg.add_text("LIC Passes")
+                with dpg.tooltip(passes_label):
+                    dpg.add_text("Number of line integral convolution iterations. More passes = smoother, more coherent streamlines, but slower.")
 
-            self.streamlength_input_id = dpg.add_input_float(
-                label="Streamline Length",
-                format="%.1f",
-                min_value=1.0,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
-            with dpg.tooltip(self.streamlength_input_id):
-                dpg.add_text("Length in pixels at 1024px resolution. Scales with render size.")
+            with dpg.group(horizontal=True):
+                self.streamlength_input_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_STREAMLENGTH_FACTOR * 1024.0,
+                    min_value=10.0,
+                    max_value=150.0,
+                    format="%.0f",
+                    width=250,
+                )
+                streamlen_label = dpg.add_text("Streamline Length")
+                with dpg.tooltip(streamlen_label):
+                    dpg.add_text("How far each streamline extends. Longer = smoother flow appearance, shorter = more detailed/grainy. Scales with resolution.")
 
-            self.margin_input_id = dpg.add_input_float(
-                label="Padding Margin",
-                format="%.3f",
-                min_value=0.0,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
+            with dpg.group(horizontal=True):
+                self.margin_input_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_PADDING_MARGIN,
+                    min_value=0.0,
+                    max_value=0.2,
+                    format="%.2f",
+                    width=250,
+                )
+                margin_label = dpg.add_text("Padding Margin")
+                with dpg.tooltip(margin_label):
+                    dpg.add_text("Extra space around the canvas for boundary conditions. Prevents edge artifacts. 0.1 = 10% padding on each side.")
+
+            with dpg.group(horizontal=True):
+                self.solve_scale_slider_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_SOLVE_SCALE,
+                    min_value=defaults.MIN_SOLVE_SCALE,
+                    max_value=defaults.MAX_SOLVE_SCALE,
+                    format="%.2f",
+                    width=250,
+                )
+                solve_label = dpg.add_text("Solve Scale")
+                with dpg.tooltip(solve_label):
+                    dpg.add_text("Resolution for solving the PDE. Lower = faster but less precise. The solution is upsampled to full render size.")
+
+            with dpg.group(horizontal=True):
+                self.seed_input_id = dpg.add_input_int(
+                    label="",
+                    step=1,
+                    min_clamped=False,
+                    width=160,
+                )
+                seed_label = dpg.add_text("Noise Seed")
+                with dpg.tooltip(seed_label):
+                    dpg.add_text("Random seed for the noise texture. Same seed = reproducible results. Change to get a different pattern.")
+
+            with dpg.group(horizontal=True):
+                self.sigma_input_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_NOISE_SIGMA,
+                    min_value=0.0,
+                    max_value=2.5,
+                    format="%.2f",
+                    width=250,
+                )
+                blur_label = dpg.add_text("Noise Blur")
+                with dpg.tooltip(blur_label):
+                    dpg.add_text("Blur applied to the noise texture before LIC. Higher = softer, more painterly look. Zero = sharp, grainy texture.")
 
             dpg.add_spacer(height=8)
-            self.solve_scale_slider_id = dpg.add_slider_float(
-                label="Solve Scale",
-                default_value=defaults.DEFAULT_SOLVE_SCALE,
-                min_value=defaults.MIN_SOLVE_SCALE,
-                max_value=defaults.MAX_SOLVE_SCALE,
-                format="%.2f",
-                width=250,
-            )
-            with dpg.tooltip(self.solve_scale_slider_id):
-                dpg.add_text("PDE grid resolution. Lower = faster, upsampled to render size.")
+            with dpg.group(horizontal=True):
+                self.edge_gain_strength_slider_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_EDGE_GAIN_STRENGTH,
+                    min_value=defaults.MIN_EDGE_GAIN_STRENGTH,
+                    max_value=defaults.MAX_EDGE_GAIN_STRENGTH,
+                    format="%.2f",
+                    width=250,
+                )
+                edge_strength_label = dpg.add_text("Edge Halo Strength")
+                with dpg.tooltip(edge_strength_label):
+                    dpg.add_text("Brightness boost near conductor edges. Creates a glowing halo effect around objects.")
 
-            self.seed_input_id = dpg.add_input_int(
-                label="Noise Seed",
-                step=1,
-                min_clamped=False,
-                width=160,
-            )
-
-            self.sigma_input_id = dpg.add_input_float(
-                label="Noise Blur",
-                format="%.2f",
-                min_value=0.0,
-                min_clamped=True,
-                step=0.0,
-                width=200,
-            )
-            with dpg.tooltip(self.sigma_input_id):
-                dpg.add_text("Low-pass blur on noise texture. Scales with render resolution.")
-
-            dpg.add_spacer(height=8)
-            self.edge_gain_strength_slider_id = dpg.add_slider_float(
-                label="Edge Halo Strength",
-                default_value=defaults.DEFAULT_EDGE_GAIN_STRENGTH,
-                min_value=defaults.MIN_EDGE_GAIN_STRENGTH,
-                max_value=defaults.MAX_EDGE_GAIN_STRENGTH,
-                format="%.2f",
-                width=250,
-            )
-
-            self.edge_gain_power_slider_id = dpg.add_slider_float(
-                label="Edge Halo Power",
-                default_value=defaults.DEFAULT_EDGE_GAIN_POWER,
-                min_value=defaults.MIN_EDGE_GAIN_POWER,
-                max_value=defaults.MAX_EDGE_GAIN_POWER,
-                format="%.2f",
-                width=250,
-            )
+            with dpg.group(horizontal=True):
+                self.edge_gain_power_slider_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_EDGE_GAIN_POWER,
+                    min_value=defaults.MIN_EDGE_GAIN_POWER,
+                    max_value=defaults.MAX_EDGE_GAIN_POWER,
+                    format="%.2f",
+                    width=250,
+                )
+                edge_power_label = dpg.add_text("Edge Halo Power")
+                with dpg.tooltip(edge_power_label):
+                    dpg.add_text("Controls how sharply the halo falls off from the edge. Higher = tighter glow, lower = broader spread.")
 
             dpg.add_spacer(height=15)
             dpg.add_separator()

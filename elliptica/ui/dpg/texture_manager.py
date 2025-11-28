@@ -200,6 +200,7 @@ class TextureManager:
                         ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
                         ey_tensor=cache.ey_gpu,
                         lightness_expr=self.app.state.display_settings.lightness_expr,
+                        solution_gpu=cache.solution_gpu,  # PDE solution fields (phi, etc.)
                     )
 
                     # Update cache so future refreshes reuse the correct clip percent bounds.

@@ -20,6 +20,7 @@ def apply_lightness_expr_gpu(
     lic_tensor: torch.Tensor,
     ex_tensor: torch.Tensor | None = None,
     ey_tensor: torch.Tensor | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
 ) -> torch.Tensor:
     """Apply a lightness expression as a multiplier to RGB colors.
 
@@ -31,6 +32,7 @@ def apply_lightness_expr_gpu(
         lic_tensor: LIC texture (H, W) for 'lic' variable
         ex_tensor: Field X component (H, W) for 'ex' variable
         ey_tensor: Field Y component (H, W) for 'ey' variable
+        solution_gpu: PDE solution fields (phi, etc.) on GPU
 
     Returns:
         RGB tensor (H, W, 3) in [0, 1]
@@ -39,12 +41,27 @@ def apply_lightness_expr_gpu(
     from elliptica.colorspace.gamut import gamut_map_to_srgb
     from elliptica.expr import compile_expression
 
+    target_shape = lic_tensor.shape  # (H, W)
+
     # Build bindings for expression evaluation
     bindings = {'lic': lic_tensor}
     if ex_tensor is not None and ey_tensor is not None:
         bindings['ex'] = ex_tensor
         bindings['ey'] = ey_tensor
         bindings['mag'] = torch.sqrt(ex_tensor**2 + ey_tensor**2)
+
+    # Add PDE solution fields (phi, etc.) - resize to match LIC shape if needed
+    if solution_gpu:
+        for name, tensor in solution_gpu.items():
+            if name not in bindings:  # Don't override standard bindings
+                if tensor.shape != target_shape:
+                    # Resize using bilinear interpolation
+                    tensor_4d = tensor.unsqueeze(0).unsqueeze(0)  # (1, 1, H, W)
+                    resized = torch.nn.functional.interpolate(
+                        tensor_4d, size=target_shape, mode='bilinear', align_corners=False
+                    )
+                    tensor = resized.squeeze(0).squeeze(0)  # Back to (H, W)
+                bindings[name] = tensor
 
     # Compile and evaluate expression
     expr_fn = compile_expression(lightness_expr)
@@ -81,6 +98,7 @@ def apply_full_postprocess_gpu(
     ex_tensor: torch.Tensor | None = None,
     ey_tensor: torch.Tensor | None = None,
     lightness_expr: str | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
 ) -> tuple[torch.Tensor, Tuple[float, float]]:
     """Apply full postprocessing pipeline on GPU.
 
@@ -213,6 +231,7 @@ def apply_full_postprocess_gpu(
             scalar_tensor,
             ex_tensor,
             ey_tensor,
+            solution_gpu,
         )
 
     # Step 2: Apply region overlays (if any conductors have custom colors)
@@ -301,6 +320,7 @@ def apply_full_postprocess_hybrid(
     ex_tensor: torch.Tensor | None = None,
     ey_tensor: torch.Tensor | None = None,
     lightness_expr: str | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
 ) -> np.ndarray:
     """Hybrid postprocessing pipeline with automatic GPU/CPU fallback.
 
@@ -359,6 +379,7 @@ def apply_full_postprocess_hybrid(
                 ex_tensor,
                 ey_tensor,
                 lightness_expr,
+                solution_gpu,
             )
 
             # Convert to uint8 and download
@@ -381,6 +402,11 @@ def apply_full_postprocess_hybrid(
             ex_cpu = ex_tensor.to('cpu') if ex_tensor is not None and ex_tensor.device.type != 'cpu' else ex_tensor
             ey_cpu = ey_tensor.to('cpu') if ey_tensor is not None and ey_tensor.device.type != 'cpu' else ey_tensor
 
+            # Move solution tensors to CPU if needed
+            solution_cpu = None
+            if solution_gpu:
+                solution_cpu = {k: v.to('cpu') if v.device.type != 'cpu' else v for k, v in solution_gpu.items()}
+
             rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor_cpu,
                 conductor_masks,
@@ -402,6 +428,7 @@ def apply_full_postprocess_hybrid(
                 ex_cpu,
                 ey_cpu,
                 lightness_expr,
+                solution_cpu,
             )
 
             # Convert to uint8 and return (already on CPU)
@@ -431,6 +458,7 @@ def apply_full_postprocess_hybrid(
             ex_tensor=ex_tensor,
             ey_tensor=ey_tensor,
             lightness_expr=lightness_expr,
+            solution_gpu=solution_gpu,
         )
 
         # Convert to uint8 and return

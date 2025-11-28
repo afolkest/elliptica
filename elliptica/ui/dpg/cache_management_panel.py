@@ -201,11 +201,18 @@ class CacheManagementPanel:
             # Upload to GPU for fast postprocessing (if available)
             try:
                 from elliptica.gpu import GPUContext
+                import numpy as np
                 if GPUContext.is_available():
                     cache.result_gpu = GPUContext.to_gpu(cache.result.array)
                     if cache.result.ex is not None:
                         cache.ex_gpu = GPUContext.to_gpu(cache.result.ex)
                     if cache.result.ey is not None:
                         cache.ey_gpu = GPUContext.to_gpu(cache.result.ey)
+                    # Upload PDE solution fields to GPU (phi, etc.)
+                    if cache.result.solution:
+                        cache.solution_gpu = {}
+                        for name, array in cache.result.solution.items():
+                            if isinstance(array, np.ndarray) and array.ndim == 2:
+                                cache.solution_gpu[name] = GPUContext.to_gpu(array)
             except Exception as e:
                 pass  # Graceful fallback if GPU upload fails
