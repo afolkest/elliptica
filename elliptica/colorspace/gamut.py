@@ -121,37 +121,83 @@ def max_chroma_fast(L: Array, H: Array) -> Array:
     """Fast max chroma lookup via LUT + bilinear interpolation.
 
     Much faster than binary search for large arrays.
+    Uses GPU-accelerated grid_sample when inputs are torch tensors.
     """
     lut = get_max_chroma_lut()
 
-    # Convert to numpy for interpolation
-    L_np = B.to_numpy(L)
-    H_np = B.to_numpy(H)
+    if B.is_torch(L):
+        # GPU path: use grid_sample for fast bilinear interpolation
+        import torch
+        import torch.nn.functional as F
 
-    # Map to LUT indices
-    L_idx = np.clip(L_np * (_LUT_L_STEPS - 1), 0, _LUT_L_STEPS - 1)
-    H_idx = H_np % 360
+        # Upload LUT to GPU once (cached after first call)
+        if not hasattr(max_chroma_fast, '_lut_tensor') or max_chroma_fast._lut_device != L.device:
+            max_chroma_fast._lut_tensor = torch.from_numpy(lut).to(device=L.device, dtype=L.dtype)
+            max_chroma_fast._lut_device = L.device
 
-    # Bilinear interpolation indices
-    L_lo = np.floor(L_idx).astype(int)
-    L_hi = np.minimum(L_lo + 1, _LUT_L_STEPS - 1)
-    L_frac = L_idx - L_lo
+        lut_tensor = max_chroma_fast._lut_tensor
 
-    H_lo = np.floor(H_idx).astype(int) % _LUT_H_STEPS
-    H_hi = (H_lo + 1) % _LUT_H_STEPS
-    H_frac = H_idx - np.floor(H_idx)
+        # grid_sample expects input (N, C, H, W) and grid (N, H_out, W_out, 2)
+        # LUT is (L_steps, H_steps), treat as (1, 1, L_steps, H_steps)
+        lut_4d = lut_tensor.unsqueeze(0).unsqueeze(0)
 
-    # Bilinear interpolation
-    c00 = lut[L_lo, H_lo]
-    c01 = lut[L_lo, H_hi]
-    c10 = lut[L_hi, H_lo]
-    c11 = lut[L_hi, H_hi]
+        # Normalize coordinates to [-1, 1] for grid_sample
+        # L: [0, 1] -> [-1, 1] (clamped to valid range)
+        # H: [0, 360) -> [-1, 1] (wrapped)
+        L_clamped = torch.clamp(L, 0.0, 1.0)
+        L_norm = L_clamped * 2 - 1  # [0,1] -> [-1,1]
+        H_norm = (H % 360) / 180 - 1  # [0,360) -> [-1,1]
 
-    c0 = c00 * (1 - H_frac) + c01 * H_frac
-    c1 = c10 * (1 - H_frac) + c11 * H_frac
-    result = c0 * (1 - L_frac) + c1 * L_frac
+        # Build sampling grid: (1, N, 1, 2) where N is flattened input size
+        orig_shape = L.shape
+        L_flat = L_norm.flatten()
+        H_flat = H_norm.flatten()
 
-    return B.from_numpy(result.astype(np.float32), L)
+        # grid_sample grid is (x, y) = (W, H) dimension order
+        # Our LUT is (L, H) so x=H, y=L
+        grid = torch.stack([H_flat, L_flat], dim=-1)  # (N, 2)
+        grid = grid.unsqueeze(0).unsqueeze(2)  # (1, N, 1, 2)
+
+        # Sample with bilinear interpolation
+        # Use 'zeros' padding (MPS doesn't support 'border'), but we've already
+        # clamped L and wrapped H so coordinates are always in valid range
+        result = F.grid_sample(
+            lut_4d, grid,
+            mode='bilinear',
+            padding_mode='zeros',
+            align_corners=True
+        )
+
+        # Reshape back to original shape
+        return result.squeeze().reshape(orig_shape)
+
+    else:
+        # NumPy path (for CPU-only usage)
+        L_np = L
+        H_np = H
+
+        # Map to LUT indices
+        L_idx = np.clip(L_np * (_LUT_L_STEPS - 1), 0, _LUT_L_STEPS - 1)
+        H_idx = H_np % 360
+
+        # Bilinear interpolation indices
+        L_lo = np.floor(L_idx).astype(int)
+        L_hi = np.minimum(L_lo + 1, _LUT_L_STEPS - 1)
+        L_frac = L_idx - L_lo
+
+        H_lo = np.floor(H_idx).astype(int) % _LUT_H_STEPS
+        H_hi = (H_lo + 1) % _LUT_H_STEPS
+        H_frac = H_idx - np.floor(H_idx)
+
+        # Bilinear interpolation
+        c00 = lut[L_lo, H_lo]
+        c01 = lut[L_lo, H_hi]
+        c10 = lut[L_hi, H_lo]
+        c11 = lut[L_hi, H_hi]
+
+        c0 = c00 * (1 - H_frac) + c01 * H_frac
+        c1 = c10 * (1 - H_frac) + c11 * H_frac
+        return c0 * (1 - L_frac) + c1 * L_frac
 
 
 def gamut_compress_fast(L: Array, C: Array, H: Array) -> tuple[Array, Array, Array]:
