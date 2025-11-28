@@ -44,6 +44,9 @@ class ImageExportController:
         # Pending export settings (stored when file dialog opens)
         self._pending_export_multiplier: float = 1.0
         self._pending_export_solve_scale: float = 1.0
+        self._pending_quick_save_path: Optional[Path] = None
+        self._pending_export_path: Optional[Path] = None
+        self._overwrite_confirm_id: Optional[int] = None
 
     def quick_save(self, sender=None, app_data=None) -> None:
         """Save the current display buffer directly to disk.
@@ -95,6 +98,16 @@ class ImageExportController:
 
         file_path = Path(app_data['file_path_name'])
 
+        # Check if file exists and confirm overwrite
+        if file_path.exists():
+            self._pending_quick_save_path = file_path
+            self._show_overwrite_confirm("quick_save")
+            return
+
+        self._do_quick_save(file_path)
+
+    def _do_quick_save(self, file_path: Path) -> None:
+        """Actually perform the quick save."""
         # Get the current display texture data from texture manager
         texture_manager = self.app.display_pipeline.texture_manager
         texture_data = dpg.get_value(texture_manager.render_texture_id)
@@ -256,6 +269,9 @@ class ImageExportController:
         export_w = int(round(canvas_w * self._pending_export_multiplier))
         export_h = int(round(canvas_h * self._pending_export_multiplier))
 
+        # Hide the export settings modal before showing file dialog
+        dpg.configure_item("export_modal", show=False)
+
         # Create file dialog if needed
         if not dpg.does_item_exist("export_file_dialog"):
             with dpg.file_dialog(
@@ -290,11 +306,80 @@ class ImageExportController:
 
         file_path = Path(app_data['file_path_name'])
 
-        # Close the modal
-        dpg.configure_item("export_modal", show=False)
+        # Check if file exists and confirm overwrite
+        if file_path.exists():
+            self._pending_export_path = file_path
+            self._show_overwrite_confirm("export")
+            return
 
         # Start export in background with stored settings
         self._start_export(file_path, self._pending_export_multiplier, self._pending_export_solve_scale)
+
+    def _show_overwrite_confirm(self, mode: str) -> None:
+        """Show overwrite confirmation dialog."""
+        if dpg is None:
+            return
+
+        # Create dialog if needed
+        if self._overwrite_confirm_id is None:
+            with dpg.window(
+                label="Confirm Overwrite",
+                modal=True,
+                show=False,
+                tag="overwrite_confirm_modal",
+                no_resize=True,
+                no_collapse=True,
+                width=350,
+                height=120,
+            ) as modal:
+                self._overwrite_confirm_id = modal
+                dpg.add_text("", tag="overwrite_confirm_text")
+                dpg.add_spacer(height=10)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Overwrite", width=100, callback=self._on_overwrite_confirmed)
+                    dpg.add_button(label="Cancel", width=100, callback=self._on_overwrite_cancelled)
+
+        # Set the message
+        if mode == "quick_save":
+            filename = self._pending_quick_save_path.name if self._pending_quick_save_path else "file"
+        else:
+            filename = self._pending_export_path.name if self._pending_export_path else "file"
+
+        dpg.set_value("overwrite_confirm_text", f"'{filename}' already exists. Overwrite?")
+        dpg.set_item_user_data("overwrite_confirm_modal", mode)
+
+        # Center and show
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        dpg.configure_item(
+            self._overwrite_confirm_id,
+            pos=((viewport_width - 350) // 2, (viewport_height - 120) // 2),
+            show=True
+        )
+
+    def _on_overwrite_confirmed(self, sender=None, app_data=None) -> None:
+        """Handle overwrite confirmation."""
+        if dpg is None:
+            return
+
+        mode = dpg.get_item_user_data("overwrite_confirm_modal")
+        dpg.configure_item("overwrite_confirm_modal", show=False)
+
+        if mode == "quick_save" and self._pending_quick_save_path:
+            self._do_quick_save(self._pending_quick_save_path)
+            self._pending_quick_save_path = None
+        elif mode == "export" and self._pending_export_path:
+            self._start_export(self._pending_export_path, self._pending_export_multiplier, self._pending_export_solve_scale)
+            self._pending_export_path = None
+
+    def _on_overwrite_cancelled(self, sender=None, app_data=None) -> None:
+        """Handle overwrite cancellation."""
+        if dpg is None:
+            return
+
+        dpg.configure_item("overwrite_confirm_modal", show=False)
+        self._pending_quick_save_path = None
+        self._pending_export_path = None
 
     def _start_export(self, file_path: Path, multiplier: float, solve_scale: float) -> None:
         """Start the export process in a background thread."""
