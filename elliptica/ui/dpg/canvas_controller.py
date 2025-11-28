@@ -73,8 +73,7 @@ class CanvasController:
         self.ctrl_c_down_last: bool = False
         self.ctrl_v_down_last: bool = False
 
-        # Selection state
-        self.selected_region: Optional[str] = None  # "surface" or "interior"
+        # Selection state (region type now in app.state.selected_region_type)
         self.clipboard_conductor: Optional[Conductor] = None
 
     def on_mouse_wheel(self, sender, app_data) -> None:
@@ -232,7 +231,9 @@ class CanvasController:
                     # Use region detection in render mode for colorization
                     hit_idx, hit_region = self.detect_region_at_point(x, y)
                     self.app.state.set_selected(hit_idx)
-                    self.selected_region = hit_region
+                    if hit_region is not None:
+                        self.app.state.selected_region_type = hit_region
+                self.app.canvas_renderer.invalidate_selection_contour()
                 self.app.boundary_controls.update_header_labels()
                 self.app.postprocess_panel.update_region_properties_panel()
                 self.app.canvas_renderer.mark_dirty()  # Redraw to update selection outline
@@ -251,7 +252,8 @@ class CanvasController:
                         break
 
                 self.app.state.set_selected(hit_idx)
-                self.selected_region = None  # Region detection only in render mode
+                # Reset to surface when selecting in edit mode
+                self.app.state.selected_region_type = "surface"
                 if hit_idx >= 0:
                     self.drag_active = True
                     self.drag_last_pos = (x, y)

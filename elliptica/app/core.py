@@ -157,7 +157,8 @@ class AppState:
     display_settings: DisplaySettings = field(default_factory=DisplaySettings)
 
     # Interaction state
-    selected_idx: int = -1
+    selected_idx: int = -1  # Conductor index (-1 = none)
+    selected_region_type: str = "surface"  # "surface" or "interior"
     view_mode: str = "edit"  # "edit" or "render"
 
     # Dirty flags – downstream systems decide how to respond.

@@ -113,6 +113,8 @@ class EllipticaApp:
     edit_controls_id: Optional[int] = None
     render_controls_id: Optional[int] = None
     pde_combo_id: Optional[int] = None
+    canvas_size_text_id: Optional[int] = None
+    canvas_size_modal_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
 
@@ -265,29 +267,11 @@ class EllipticaApp:
                     self.cache_panel.build_view_postprocessing_button(edit_group)
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
-                    dpg.add_text("Canvas Size")
                     with dpg.group(horizontal=True):
-                        self.canvas_width_input_id = dpg.add_input_int(
-                            label="Width",
-                            min_value=1,
-                            min_clamped=True,
-                            max_value=32768,
-                            max_clamped=True,
-                            step=0,
-                            width=120,
-                        )
-                        self.canvas_height_input_id = dpg.add_input_int(
-                            label="Height",
-                            min_value=1,
-                            min_clamped=True,
-                            max_value=32768,
-                            max_clamped=True,
-                            step=0,
-                            width=120,
-                        )
-                    with dpg.group(horizontal=True):
-                        dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size, width=180)
-                        dpg.add_button(label="Fit Display", callback=self._fit_canvas_to_window, width=140)
+                        dpg.add_text("Canvas:")
+                        self.canvas_size_text_id = dpg.add_text("", tag="canvas_size_display")
+                        dpg.add_button(label="Change...", callback=self._open_canvas_size_modal, width=70)
+                        dpg.add_button(label="Fit", callback=self._fit_canvas_to_window, width=40)
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
                     self.boundary_controls.build_container(edit_group)
@@ -423,16 +407,76 @@ class EllipticaApp:
 
 
     def _update_canvas_inputs(self) -> None:
+        """Update canvas size display text."""
         if dpg is None:
             return
         with self.state_lock:
             width, height = self.state.project.canvas_resolution
-        if self.canvas_width_input_id is not None:
-            dpg.set_value(self.canvas_width_input_id, int(width))
-        if self.canvas_height_input_id is not None:
-            dpg.set_value(self.canvas_height_input_id, int(height))
+        if self.canvas_size_text_id is not None:
+            dpg.set_value(self.canvas_size_text_id, f"{width} × {height}")
+
+    def _open_canvas_size_modal(self, sender=None, app_data=None) -> None:
+        """Open modal dialog for changing canvas size."""
+        if dpg is None:
+            return
+
+        # Create modal if it doesn't exist
+        if self.canvas_size_modal_id is None:
+            with dpg.window(
+                label="Canvas Size",
+                modal=True,
+                show=False,
+                tag="canvas_size_modal",
+                no_resize=True,
+                width=280,
+                height=140,
+            ) as modal:
+                self.canvas_size_modal_id = modal
+                with dpg.group(horizontal=True):
+                    self.canvas_width_input_id = dpg.add_input_int(
+                        label="Width",
+                        min_value=1,
+                        min_clamped=True,
+                        max_value=32768,
+                        max_clamped=True,
+                        step=0,
+                        width=100,
+                    )
+                with dpg.group(horizontal=True):
+                    self.canvas_height_input_id = dpg.add_input_int(
+                        label="Height",
+                        min_value=1,
+                        min_clamped=True,
+                        max_value=32768,
+                        max_clamped=True,
+                        step=0,
+                        width=100,
+                    )
+                dpg.add_spacer(height=10)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Apply", callback=self._apply_canvas_size, width=80)
+                    dpg.add_button(label="Cancel", callback=self._close_canvas_size_modal, width=80)
+
+        # Populate with current values
+        with self.state_lock:
+            width, height = self.state.project.canvas_resolution
+        dpg.set_value(self.canvas_width_input_id, int(width))
+        dpg.set_value(self.canvas_height_input_id, int(height))
+
+        # Center and show
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        dpg.configure_item(self.canvas_size_modal_id, pos=[(viewport_width - 280) // 2, (viewport_height - 140) // 2])
+        dpg.configure_item(self.canvas_size_modal_id, show=True)
+
+    def _close_canvas_size_modal(self, sender=None, app_data=None) -> None:
+        """Close canvas size modal without applying."""
+        if dpg is None or self.canvas_size_modal_id is None:
+            return
+        dpg.configure_item(self.canvas_size_modal_id, show=False)
 
     def _apply_canvas_size(self, sender=None, app_data=None) -> None:
+        """Apply canvas size from modal inputs."""
         if dpg is None:
             return
 
@@ -445,6 +489,7 @@ class EllipticaApp:
         with self.state_lock:
             current_size = self.state.project.canvas_resolution
             if current_size == (width, height):
+                self._close_canvas_size_modal()
                 return
             actions.set_canvas_resolution(self.state, width, height)
 
@@ -454,8 +499,9 @@ class EllipticaApp:
 
         self._update_canvas_inputs()
         self.canvas_renderer.mark_dirty()
-        self._resize_canvas_window()  # Ensure window stays within viewport bounds
-        self._update_canvas_scale()  # Recalculate display scale for new canvas size
+        self._resize_canvas_window()
+        self._update_canvas_scale()
+        self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
     def _fit_canvas_to_window(self, sender=None, app_data=None) -> None:
