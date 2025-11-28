@@ -95,19 +95,33 @@ class CanvasRenderer:
 
         return contours
 
-    def _get_selection_contours(self, selected_idx: int, render_cache, canvas_w: int, canvas_h: int) -> list[np.ndarray] | None:
-        """Get contours for selected conductor, scaled to canvas coordinates."""
-        if render_cache is None or render_cache.conductor_masks is None:
-            return None
-        if selected_idx < 0 or selected_idx >= len(render_cache.conductor_masks):
+    def _get_selection_contours(self, selected_idx: int, region_type: str, render_cache, canvas_w: int, canvas_h: int) -> list[np.ndarray] | None:
+        """Get contours for selected region, scaled to canvas coordinates.
+
+        Args:
+            selected_idx: Conductor index
+            region_type: "surface" or "interior"
+            render_cache: Render cache with masks
+            canvas_w, canvas_h: Canvas dimensions for scaling
+        """
+        if render_cache is None:
             return None
 
-        mask = render_cache.conductor_masks[selected_idx]
+        # Pick the right mask list based on region type
+        if region_type == "interior":
+            masks = render_cache.interior_masks
+        else:
+            masks = render_cache.conductor_masks
+
+        if masks is None or selected_idx < 0 or selected_idx >= len(masks):
+            return None
+
+        mask = masks[selected_idx]
         if mask is None:
             return None
 
         # Check cache
-        cache_key = (selected_idx, id(render_cache))
+        cache_key = (selected_idx, region_type, id(render_cache))
         if self._selection_contours is not None and self._selection_cache_key == cache_key:
             return self._selection_contours
 
@@ -168,6 +182,7 @@ class CanvasRenderer:
         with self.app.state_lock:
             project = self.app.state.project
             selected_idx = self.app.state.selected_idx
+            selected_region_type = self.app.state.selected_region_type
             canvas_w, canvas_h = project.canvas_resolution
             conductors = list(project.conductors)
             render_cache = self.app.state.render_cache
@@ -221,9 +236,9 @@ class CanvasRenderer:
                     parent=self.app.canvas_layer_id,
                 )
 
-            # Draw selection outline for selected conductor in render mode
+            # Draw selection outline for selected region in render mode
             if selected_idx >= 0:
-                contours = self._get_selection_contours(selected_idx, render_cache, canvas_w, canvas_h)
+                contours = self._get_selection_contours(selected_idx, selected_region_type, render_cache, canvas_w, canvas_h)
                 if contours:
                     for contour in contours:
                         self._draw_dashed_contour(contour, self.app.canvas_layer_id)

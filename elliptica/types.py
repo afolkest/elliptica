@@ -17,7 +17,7 @@ class BoundaryObject:
     original_mask: Optional[np.ndarray] = None
     original_interior_mask: Optional[np.ndarray] = None
     scale_factor: float = 1.0  # Current scale relative to original
-    edge_smooth_sigma: float = 1.5  # Edge anti-aliasing blur in pixels (0-5px range)
+    edge_smooth_sigma: float = 0.0  # Edge anti-aliasing blur in pixels (0-5px range)
     smear_enabled: bool = False  # Enable texture smearing inside boundary
     id: Optional[int] = None  # Assigned when added to project
 
@@ -37,7 +37,7 @@ class BoundaryObject:
         if not hasattr(self, 'original_mask'): self.original_mask = None
         if not hasattr(self, 'original_interior_mask'): self.original_interior_mask = None
         if not hasattr(self, 'scale_factor'): self.scale_factor = 1.0
-        if not hasattr(self, 'edge_smooth_sigma'): self.edge_smooth_sigma = 1.5
+        if not hasattr(self, 'edge_smooth_sigma'): self.edge_smooth_sigma = 0.0
         if not hasattr(self, 'smear_enabled'): self.smear_enabled = False
         if not hasattr(self, 'smear_sigma'): self.smear_sigma = defaults.DEFAULT_SMEAR_SIGMA
         if not hasattr(self, 'id'): self.id = None

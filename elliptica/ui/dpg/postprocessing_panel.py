@@ -50,8 +50,7 @@ class PostprocessingPanel:
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
 
-        # Region editing context: which region we're editing when conductor selected
-        self.selected_region: Literal["surface", "interior"] = "surface"
+        # Note: Region type is now stored in app.state.selected_region_type
 
         # Delete confirmation modal
         self.delete_confirmation_modal_id: Optional[int] = None
@@ -154,7 +153,7 @@ class PostprocessingPanel:
             settings = self.app.state.conductor_color_settings.get(selected.id)
             if settings is None:
                 return None
-            if self.selected_region == "surface":
+            if self.app.state.selected_region_type == "surface":
                 return settings.surface
             else:
                 return settings.interior
@@ -560,8 +559,12 @@ class PostprocessingPanel:
                 conductor_idx = self.app.state.selected_idx
 
             # Update context header text (always visible, just change text)
-            region_label = "Surface" if self.selected_region == "surface" else "Interior"
+            region_type = self.app.state.selected_region_type
+            region_label = "Surface" if region_type == "surface" else "Interior"
             dpg.set_value("context_header_text", f"Conductor {conductor_idx + 1} - {region_label}")
+
+            # Sync radio button with state
+            dpg.set_value("region_toggle_radio", region_label)
 
             # Show region controls, hide placeholder
             dpg.configure_item("region_controls_line", show=True)
@@ -656,7 +659,10 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        self.selected_region = "surface" if app_data == "Surface" else "interior"
+        with self.app.state_lock:
+            self.app.state.selected_region_type = "surface" if app_data == "Surface" else "interior"
+        self.app.canvas_renderer.invalidate_selection_contour()
+        self.app.canvas_renderer.mark_dirty()
         self.update_context_ui()
 
     # ------------------------------------------------------------------
@@ -691,8 +697,9 @@ class PostprocessingPanel:
             # Per-region brightness
             with self.app.state_lock:
                 selected = self.app.state.get_selected()
+                region_type = self.app.state.selected_region_type
                 if selected and selected.id is not None:
-                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, value)
+                    actions.set_region_brightness(self.app.state, selected.id, region_type, value)
         else:
             # Global brightness
             with self.app.state_lock:
@@ -712,8 +719,9 @@ class PostprocessingPanel:
             # Per-region contrast
             with self.app.state_lock:
                 selected = self.app.state.get_selected()
+                region_type = self.app.state.selected_region_type
                 if selected and selected.id is not None:
-                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, value)
+                    actions.set_region_contrast(self.app.state, selected.id, region_type, value)
         else:
             # Global contrast
             with self.app.state_lock:
@@ -733,8 +741,9 @@ class PostprocessingPanel:
             # Per-region gamma
             with self.app.state_lock:
                 selected = self.app.state.get_selected()
+                region_type = self.app.state.selected_region_type
                 if selected and selected.id is not None:
-                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, value)
+                    actions.set_region_gamma(self.app.state, selected.id, region_type, value)
         else:
             # Global gamma
             with self.app.state_lock:
@@ -844,13 +853,14 @@ class PostprocessingPanel:
 
         with self.app.state_lock:
             selected = self.app.state.get_selected()
+            region_type = self.app.state.selected_region_type
             if selected and selected.id is not None:
                 # Disable palette override
-                actions.set_region_style_enabled(self.app.state, selected.id, self.selected_region, False)
+                actions.set_region_style_enabled(self.app.state, selected.id, region_type, False)
                 # Also clear B/C/G (disables slider override)
-                actions.set_region_brightness(self.app.state, selected.id, self.selected_region, None)
-                actions.set_region_contrast(self.app.state, selected.id, self.selected_region, None)
-                actions.set_region_gamma(self.app.state, selected.id, self.selected_region, None)
+                actions.set_region_brightness(self.app.state, selected.id, region_type, None)
+                actions.set_region_contrast(self.app.state, selected.id, region_type, None)
+                actions.set_region_gamma(self.app.state, selected.id, region_type, None)
 
         # Update button label to show current selection
         dpg.configure_item("region_palette_button", label="Global")
@@ -867,16 +877,17 @@ class PostprocessingPanel:
         palette_name = user_data
         with self.app.state_lock:
             selected = self.app.state.get_selected()
+            region_type = self.app.state.selected_region_type
             if selected and selected.id is not None:
                 # Set palette (this also sets enabled=True)
-                actions.set_region_palette(self.app.state, selected.id, self.selected_region, palette_name)
+                actions.set_region_palette(self.app.state, selected.id, region_type, palette_name)
                 # Also initialize B/C/G with global values (enables slider override)
                 global_b = self.app.state.display_settings.brightness
                 global_c = self.app.state.display_settings.contrast
                 global_g = self.app.state.display_settings.gamma
-                actions.set_region_brightness(self.app.state, selected.id, self.selected_region, global_b)
-                actions.set_region_contrast(self.app.state, selected.id, self.selected_region, global_c)
-                actions.set_region_gamma(self.app.state, selected.id, self.selected_region, global_g)
+                actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
+                actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
+                actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
 
         # Update button label to show current selection
         dpg.configure_item("region_palette_button", label=palette_name)
