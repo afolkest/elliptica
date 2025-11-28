@@ -234,6 +234,28 @@ class TextureManager:
         else:
             dpg.set_value(self.render_texture_id, data)
 
+    def update_texture_from_rgb(self, rgb: np.ndarray) -> None:
+        """Update render texture from precomputed RGB array.
+
+        Used by async postprocessing to update texture on main thread.
+
+        Args:
+            rgb: RGB array (H, W, 3) uint8
+        """
+        if dpg is None or self.texture_registry_id is None:
+            return
+
+        width, height, data = _rgb_array_to_texture_data(rgb)
+
+        # Create or update texture
+        if self.render_texture_id is None or self.render_texture_size != (width, height):
+            if self.render_texture_id is not None:
+                dpg.delete_item(self.render_texture_id)
+            self.render_texture_id = dpg.add_dynamic_texture(width, height, data, parent=self.texture_registry_id)
+            self.render_texture_size = (width, height)
+        else:
+            dpg.set_value(self.render_texture_id, data)
+
     def clear_conductor_texture(self, idx: int) -> None:
         """Clear cached conductor texture (forces recreation on next draw)."""
         self.conductor_textures.pop(idx, None)
