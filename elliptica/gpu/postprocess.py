@@ -14,6 +14,52 @@ if TYPE_CHECKING:
     from elliptica.colorspace import ColorConfig
 
 
+def apply_lightness_expr_gpu(
+    rgb: torch.Tensor,
+    lightness_expr: str,
+    lic_tensor: torch.Tensor,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Apply a lightness expression as a multiplier to RGB colors.
+
+    Converts RGB → OKLch, multiplies L by expression result, gamut maps back to RGB.
+
+    Args:
+        rgb: RGB tensor (H, W, 3) in [0, 1]
+        lightness_expr: Expression string that evaluates to a multiplier
+        lic_tensor: LIC texture (H, W) for 'lic' variable
+        ex_tensor: Field X component (H, W) for 'ex' variable
+        ey_tensor: Field Y component (H, W) for 'ey' variable
+
+    Returns:
+        RGB tensor (H, W, 3) in [0, 1]
+    """
+    from elliptica.colorspace.oklch import srgb_to_oklch
+    from elliptica.colorspace.gamut import gamut_map_to_srgb
+    from elliptica.expr import compile_expression
+
+    # Build bindings for expression evaluation
+    bindings = {'lic': lic_tensor}
+    if ex_tensor is not None and ey_tensor is not None:
+        bindings['ex'] = ex_tensor
+        bindings['ey'] = ey_tensor
+        bindings['mag'] = torch.sqrt(ex_tensor**2 + ey_tensor**2)
+
+    # Compile and evaluate expression
+    expr_fn = compile_expression(lightness_expr)
+    multiplier = expr_fn(bindings)
+
+    # Convert RGB to OKLch
+    L, C, H = srgb_to_oklch(rgb)
+
+    # Apply multiplier to L
+    L_adjusted = L * multiplier
+
+    # Gamut map back to RGB
+    return gamut_map_to_srgb(L_adjusted, C, H, method='compress')
+
+
 def apply_full_postprocess_gpu(
     scalar_tensor: torch.Tensor,
     conductor_masks_cpu: list[np.ndarray] | None,
@@ -34,6 +80,7 @@ def apply_full_postprocess_gpu(
     color_config: "ColorConfig | None" = None,
     ex_tensor: torch.Tensor | None = None,
     ey_tensor: torch.Tensor | None = None,
+    lightness_expr: str | None = None,
 ) -> tuple[torch.Tensor, Tuple[float, float]]:
     """Apply full postprocessing pipeline on GPU.
 
@@ -140,7 +187,7 @@ def apply_full_postprocess_gpu(
 
         return torch.clamp(base_rgb, 0.0, 1.0), used_percentiles
 
-    # === Legacy palette path: LUT-based coloring ===
+    # === Palette path: LUT-based coloring ===
     # Step 1: Build base RGB colorization on GPU
     lut_tensor = None
     if color_enabled:
@@ -157,6 +204,16 @@ def apply_full_postprocess_gpu(
         lut_tensor,
         normalized_tensor=normalized_tensor,  # Reuse normalized tensor
     )
+
+    # Step 1b: Apply lightness expression if set (palette mode only)
+    if lightness_expr is not None:
+        base_rgb = apply_lightness_expr_gpu(
+            base_rgb,
+            lightness_expr,
+            scalar_tensor,
+            ex_tensor,
+            ey_tensor,
+        )
 
     # Step 2: Apply region overlays (if any conductors have custom colors)
     # Must come BEFORE smear so that custom colors get smeared too!
@@ -243,6 +300,7 @@ def apply_full_postprocess_hybrid(
     color_config: "ColorConfig | None" = None,
     ex_tensor: torch.Tensor | None = None,
     ey_tensor: torch.Tensor | None = None,
+    lightness_expr: str | None = None,
 ) -> np.ndarray:
     """Hybrid postprocessing pipeline with automatic GPU/CPU fallback.
 
@@ -300,6 +358,7 @@ def apply_full_postprocess_hybrid(
                 color_config,
                 ex_tensor,
                 ey_tensor,
+                lightness_expr,
             )
 
             # Convert to uint8 and download
@@ -342,6 +401,7 @@ def apply_full_postprocess_hybrid(
                 color_config,
                 ex_cpu,
                 ey_cpu,
+                lightness_expr,
             )
 
             # Convert to uint8 and return (already on CPU)
@@ -370,6 +430,7 @@ def apply_full_postprocess_hybrid(
             color_config=color_config,
             ex_tensor=ex_tensor,
             ey_tensor=ey_tensor,
+            lightness_expr=lightness_expr,
         )
 
         # Convert to uint8 and return

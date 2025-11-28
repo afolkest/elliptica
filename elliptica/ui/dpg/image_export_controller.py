@@ -260,6 +260,7 @@ class ImageExportController:
             use_gpu=True,  # GPU acceleration for faster exports
             scalar_tensor=None,  # Will upload on-demand
             color_config=color_config,  # Expression-based coloring (if set)
+            lightness_expr=settings.lightness_expr,
         )
 
         return final_rgb

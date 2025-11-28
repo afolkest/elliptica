@@ -54,7 +54,6 @@ class RenderModalController:
         self.seed_input_id: Optional[int] = None
         self.sigma_input_id: Optional[int] = None
         self.solve_scale_slider_id: Optional[int] = None
-        self.use_mask_checkbox_id: Optional[int] = None
         self.edge_gain_strength_slider_id: Optional[int] = None
         self.edge_gain_power_slider_id: Optional[int] = None
 
@@ -103,13 +102,15 @@ class RenderModalController:
             )
 
             self.streamlength_input_id = dpg.add_input_float(
-                label="Streamlength Factor",
-                format="%.4f",
-                min_value=1e-6,
+                label="Streamline Length",
+                format="%.1f",
+                min_value=1.0,
                 min_clamped=True,
                 step=0.0,
                 width=200,
             )
+            with dpg.tooltip(self.streamlength_input_id):
+                dpg.add_text("Length in pixels at 1024px resolution. Scales with render size.")
 
             self.margin_input_id = dpg.add_input_float(
                 label="Padding Margin",
@@ -129,7 +130,8 @@ class RenderModalController:
                 format="%.2f",
                 width=250,
             )
-            dpg.add_text("PDE grid resolution (lower = faster, upsampled to render size).")
+            with dpg.tooltip(self.solve_scale_slider_id):
+                dpg.add_text("PDE grid resolution. Lower = faster, upsampled to render size.")
 
             self.seed_input_id = dpg.add_input_int(
                 label="Noise Seed",
@@ -139,19 +141,15 @@ class RenderModalController:
             )
 
             self.sigma_input_id = dpg.add_input_float(
-                label="Noise Low-pass Sigma",
+                label="Noise Blur",
                 format="%.2f",
                 min_value=0.0,
                 min_clamped=True,
                 step=0.0,
                 width=200,
             )
-
-            dpg.add_spacer(height=10)
-            self.use_mask_checkbox_id = dpg.add_checkbox(
-                label="Block streamlines at conductors",
-                default_value=defaults.DEFAULT_USE_MASK,
-            )
+            with dpg.tooltip(self.sigma_input_id):
+                dpg.add_text("Low-pass blur on noise texture. Scales with render resolution.")
 
             dpg.add_spacer(height=8)
             self.edge_gain_strength_slider_id = dpg.add_slider_float(
@@ -343,7 +341,8 @@ class RenderModalController:
             dpg.set_value(self.passes_input_id, int(settings.num_passes))
 
         if self.streamlength_input_id is not None:
-            dpg.set_value(self.streamlength_input_id, float(streamlength))
+            # Display as "per 1024px" value (user-friendly)
+            dpg.set_value(self.streamlength_input_id, float(streamlength * 1024.0))
 
         if self.margin_input_id is not None:
             dpg.set_value(self.margin_input_id, float(settings.margin))
@@ -356,9 +355,6 @@ class RenderModalController:
 
         if self.sigma_input_id is not None:
             dpg.set_value(self.sigma_input_id, float(settings.noise_sigma))
-
-        if self.use_mask_checkbox_id is not None:
-            dpg.set_value(self.use_mask_checkbox_id, bool(settings.use_mask))
 
         if self.edge_gain_strength_slider_id is not None:
             dpg.set_value(self.edge_gain_strength_slider_id, float(settings.edge_gain_strength))
@@ -414,12 +410,14 @@ class RenderModalController:
         multiplier = RESOLUTION_LOOKUP.get(multiplier_label, RESOLUTION_CHOICES[0])
 
         passes = int(dpg.get_value(self.passes_input_id)) if self.passes_input_id is not None else defaults.DEFAULT_RENDER_PASSES
-        streamlength = float(dpg.get_value(self.streamlength_input_id)) if self.streamlength_input_id is not None else defaults.DEFAULT_STREAMLENGTH_FACTOR
+        # Convert from "per 1024px" display value to internal factor
+        streamlength_display = float(dpg.get_value(self.streamlength_input_id)) if self.streamlength_input_id is not None else (defaults.DEFAULT_STREAMLENGTH_FACTOR * 1024.0)
+        streamlength = streamlength_display / 1024.0
         margin = float(dpg.get_value(self.margin_input_id)) if self.margin_input_id is not None else defaults.DEFAULT_PADDING_MARGIN
         solve_scale = float(dpg.get_value(self.solve_scale_slider_id)) if self.solve_scale_slider_id is not None else defaults.DEFAULT_SOLVE_SCALE
         noise_seed = int(dpg.get_value(self.seed_input_id)) if self.seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
         noise_sigma = float(dpg.get_value(self.sigma_input_id)) if self.sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
-        use_mask = bool(dpg.get_value(self.use_mask_checkbox_id)) if self.use_mask_checkbox_id is not None else defaults.DEFAULT_USE_MASK
+        use_mask = True  # Always block streamlines at conductors
         edge_gain_strength = float(dpg.get_value(self.edge_gain_strength_slider_id)) if self.edge_gain_strength_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_STRENGTH
         edge_gain_power = float(dpg.get_value(self.edge_gain_power_slider_id)) if self.edge_gain_power_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_POWER
 

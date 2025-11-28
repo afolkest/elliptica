@@ -199,6 +199,7 @@ class TextureManager:
                         color_config=self.app.state.color_config,  # Expression-based coloring (if set)
                         ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
                         ey_tensor=cache.ey_gpu,
+                        lightness_expr=self.app.state.display_settings.lightness_expr,
                     )
 
                     # Update cache so future refreshes reuse the correct clip percent bounds.

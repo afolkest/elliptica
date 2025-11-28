@@ -86,6 +86,7 @@ class DisplaySettings:
     gamma: float = defaults.DEFAULT_GAMMA
     color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
     palette: str = defaults.DEFAULT_COLOR_PALETTE
+    lightness_expr: str | None = None
 
     def to_color_params(self):
         """Convert to pure ColorParams for backend functions."""
