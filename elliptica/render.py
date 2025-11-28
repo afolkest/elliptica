@@ -428,12 +428,16 @@ def compute_lic(
 
     streamlength = max(int(streamlength), 1)
 
+    # Scale noise_sigma with resolution (reference: 1024px on shorter side)
+    scale_factor = min(field_h, field_w) / 1024.0
+    scaled_sigma = noise_sigma * scale_factor
+
     if texture is None:
         texture = generate_noise(
             (field_h, field_w),
             seed,
             oversample=noise_oversample,
-            lowpass_sigma=noise_sigma,
+            lowpass_sigma=scaled_sigma,
         )
     else:
         texture = texture.astype(np.float32, copy=False)

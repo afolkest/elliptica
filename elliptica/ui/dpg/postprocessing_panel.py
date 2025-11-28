@@ -43,6 +43,10 @@ class PostprocessingPanel:
         self.expr_error_text_id: Optional[int] = None
         self.expr_preset_combo_id: Optional[int] = None
 
+        # Widget IDs for lightness expression (palette mode)
+        self.lightness_expr_checkbox_id: Optional[int] = None
+        self.lightness_expr_input_id: Optional[int] = None
+
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
 
@@ -67,6 +71,10 @@ class PostprocessingPanel:
         self.expr_pending_update: bool = False
         self.expr_last_update_time: float = 0.0
         self.expr_debounce_delay: float = 0.3  # 300ms delay
+
+        # Debouncing for lightness expression updates
+        self.lightness_expr_pending_update: bool = False
+        self.lightness_expr_last_update_time: float = 0.0
 
         # Themes for grayed-out appearance
         self.disabled_theme_id: Optional[int] = None
@@ -152,14 +160,12 @@ class PostprocessingPanel:
                 return settings.interior
 
     def _has_override_enabled(self) -> bool:
-        """Check if the current region has postprocessing override enabled."""
+        """Check if the current region has override enabled (palette + sliders)."""
         region_style = self._get_current_region_style()
         if region_style is None:
             return False
-        # Override is enabled if any of brightness/contrast/gamma is set
-        return (region_style.brightness is not None or
-                region_style.contrast is not None or
-                region_style.gamma is not None)
+        # Override is enabled when region.enabled is True (controls both palette and sliders)
+        return region_style.enabled
 
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
@@ -202,12 +208,6 @@ class PostprocessingPanel:
                         horizontal=True,
                         callback=self.on_region_toggle,
                         tag="region_toggle_radio",
-                    )
-                    dpg.add_spacer(width=10)
-                    dpg.add_checkbox(
-                        label="Color Override",
-                        callback=self.on_enable_override,
-                        tag="enable_override_checkbox",
                     )
 
                 # Placeholder spacer - shown in global mode to reserve same vertical space
@@ -267,6 +267,23 @@ class PostprocessingPanel:
                     width=200,
                     tag="gamma_slider",
                 )
+
+                # Lightness expression (palette mode only)
+                dpg.add_spacer(height=10)
+                self.lightness_expr_checkbox_id = dpg.add_checkbox(
+                    label="Lightness expression",
+                    default_value=self.app.state.display_settings.lightness_expr is not None,
+                    callback=self.on_lightness_expr_toggle,
+                    tag="lightness_expr_checkbox",
+                )
+                with dpg.group(tag="lightness_expr_group", show=self.app.state.display_settings.lightness_expr is not None):
+                    self.lightness_expr_input_id = dpg.add_input_text(
+                        default_value=self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)",
+                        width=-1,
+                        callback=self.on_lightness_expr_change,
+                        on_enter=False,
+                        tag="lightness_expr_input",
+                    )
 
             # Expressions mode container (hidden by default)
             with dpg.group(tag="expressions_mode_group", show=False):
@@ -377,7 +394,7 @@ class PostprocessingPanel:
 
         # Button shows current selection directly
         region_palette_button = dpg.add_button(
-            label="Use Global",
+            label="Global",
             width=200,
             tag="region_palette_button",
             parent=parent,
@@ -385,12 +402,12 @@ class PostprocessingPanel:
 
         # Popup menu for region palette selection
         with dpg.popup(region_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="region_palette_popup"):
-            dpg.add_text("Select region palette:")
+            dpg.add_text("Select palette (also enables slider override):")
             dpg.add_separator()
 
-            # Add "Use Global Palette" option at top
+            # Add "Global" option at top (disables override)
             dpg.add_button(
-                label="⊙ Use Global Palette",
+                label="⊙ Global (no override)",
                 width=350,
                 height=30,
                 callback=self.on_region_use_global,
@@ -554,17 +571,15 @@ class PostprocessingPanel:
             dpg.configure_item("global_palette_group", show=False)
             dpg.configure_item("region_palette_group", show=True)
 
-            # Check if override is enabled
+            # Check if override is enabled (controlled by palette selection)
             has_override = self._has_override_enabled()
-            dpg.set_value("enable_override_checkbox", has_override)
 
-            # Update region palette button label and grayed state
+            # Update region palette button label (no graying - always clickable)
             region_style = self._get_current_region_style()
             if region_style and region_style.enabled:
                 dpg.configure_item("region_palette_button", label=region_style.palette)
             else:
-                dpg.configure_item("region_palette_button", label="Use Global")
-            self._set_button_grayed("region_palette_button", not has_override)
+                dpg.configure_item("region_palette_button", label="Global")
 
             # Clip% always shows global, grayed in conductor mode
             self._set_slider_grayed("clip_slider", True)
@@ -643,37 +658,6 @@ class PostprocessingPanel:
 
         self.selected_region = "surface" if app_data == "Surface" else "interior"
         self.update_context_ui()
-
-    # ------------------------------------------------------------------
-    # Enable Override callback
-    # ------------------------------------------------------------------
-
-    def on_enable_override(self, sender=None, app_data=None) -> None:
-        """Toggle postprocessing override for current region."""
-        if dpg is None:
-            return
-
-        is_enabled = bool(app_data)
-
-        with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected and selected.id is not None:
-                if is_enabled:
-                    # Initialize with global values
-                    global_brightness = self.app.state.display_settings.brightness
-                    global_contrast = self.app.state.display_settings.contrast
-                    global_gamma = self.app.state.display_settings.gamma
-                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, global_brightness)
-                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, global_contrast)
-                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, global_gamma)
-                else:
-                    # Reset to None (inherit from global)
-                    actions.set_region_brightness(self.app.state, selected.id, self.selected_region, None)
-                    actions.set_region_contrast(self.app.state, selected.id, self.selected_region, None)
-                    actions.set_region_gamma(self.app.state, selected.id, self.selected_region, None)
-
-        self.update_context_ui()
-        self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
     # Postprocessing slider callbacks
@@ -760,6 +744,65 @@ class PostprocessingPanel:
         self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
+    # Lightness expression callbacks (palette mode)
+    # ------------------------------------------------------------------
+
+    def on_lightness_expr_toggle(self, sender=None, app_data=None) -> None:
+        """Handle lightness expression checkbox toggle."""
+        if dpg is None:
+            return
+
+        is_enabled = bool(app_data)
+
+        # Show/hide the input field
+        dpg.configure_item("lightness_expr_group", show=is_enabled)
+
+        if is_enabled:
+            # Enable with default expression
+            expr = dpg.get_value("lightness_expr_input")
+            with self.app.state_lock:
+                self.app.state.display_settings.lightness_expr = expr
+        else:
+            # Disable
+            with self.app.state_lock:
+                self.app.state.display_settings.lightness_expr = None
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_lightness_expr_change(self, sender=None, app_data=None) -> None:
+        """Handle lightness expression text change (debounced)."""
+        if dpg is None:
+            return
+
+        # Mark pending update and record time
+        self.lightness_expr_pending_update = True
+        self.lightness_expr_last_update_time = time.time()
+
+    def check_lightness_expr_debounce(self) -> None:
+        """Check if lightness expression update should be applied (called every frame)."""
+        if not self.lightness_expr_pending_update:
+            return
+
+        current_time = time.time()
+        if current_time - self.lightness_expr_last_update_time >= self.expr_debounce_delay:
+            self._apply_lightness_expr_update()
+            self.lightness_expr_pending_update = False
+
+    def _apply_lightness_expr_update(self) -> None:
+        """Apply the current lightness expression from the input field."""
+        if dpg is None:
+            return
+
+        expr = dpg.get_value("lightness_expr_input").strip()
+        if not expr:
+            return
+
+        with self.app.state_lock:
+            self.app.state.display_settings.lightness_expr = expr
+
+        self.app.display_pipeline.refresh_display()
+
+    # ------------------------------------------------------------------
     # Color and palette callbacks
     # ------------------------------------------------------------------
 
@@ -795,23 +838,29 @@ class PostprocessingPanel:
         self.app.display_pipeline.refresh_display()
 
     def on_region_use_global(self, sender=None, app_data=None) -> None:
-        """Handle region 'Use Global Palette' button."""
+        """Handle region 'Use Global' button - disables override."""
         if dpg is None:
             return
 
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             if selected and selected.id is not None:
+                # Disable palette override
                 actions.set_region_style_enabled(self.app.state, selected.id, self.selected_region, False)
+                # Also clear B/C/G (disables slider override)
+                actions.set_region_brightness(self.app.state, selected.id, self.selected_region, None)
+                actions.set_region_contrast(self.app.state, selected.id, self.selected_region, None)
+                actions.set_region_gamma(self.app.state, selected.id, self.selected_region, None)
 
         # Update button label to show current selection
-        dpg.configure_item("region_palette_button", label="Use Global")
+        dpg.configure_item("region_palette_button", label="Global")
         dpg.configure_item("region_palette_popup", show=False)
 
+        self.update_context_ui()  # Update slider states
         self.app.display_pipeline.refresh_display()
 
     def on_region_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
-        """Handle region colormap button click."""
+        """Handle region colormap button click - also enables override."""
         if dpg is None or user_data is None:
             return
 
@@ -819,12 +868,21 @@ class PostprocessingPanel:
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             if selected and selected.id is not None:
+                # Set palette (this also sets enabled=True)
                 actions.set_region_palette(self.app.state, selected.id, self.selected_region, palette_name)
+                # Also initialize B/C/G with global values (enables slider override)
+                global_b = self.app.state.display_settings.brightness
+                global_c = self.app.state.display_settings.contrast
+                global_g = self.app.state.display_settings.gamma
+                actions.set_region_brightness(self.app.state, selected.id, self.selected_region, global_b)
+                actions.set_region_contrast(self.app.state, selected.id, self.selected_region, global_c)
+                actions.set_region_gamma(self.app.state, selected.id, self.selected_region, global_g)
 
         # Update button label to show current selection
         dpg.configure_item("region_palette_button", label=palette_name)
         dpg.configure_item("region_palette_popup", show=False)
 
+        self.update_context_ui()  # Update slider states
         self.app.display_pipeline.refresh_display()
 
     def _ensure_delete_confirmation_modal(self) -> None:
