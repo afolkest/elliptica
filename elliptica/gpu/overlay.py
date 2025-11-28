@@ -113,6 +113,7 @@ def apply_region_overlays_gpu(
     ey_tensor: torch.Tensor | None = None,
     solution_gpu: dict[str, torch.Tensor] | None = None,
     global_lightness_expr: str | None = None,
+    base_rgb_no_expr: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Composite per-region color overrides over base RGB on GPU.
 
@@ -224,9 +225,10 @@ def apply_region_overlays_gpu(
                         result = fill_region_gpu(result, settings.interior.solid_color, mask)
                 elif has_custom_expr:
                     # No palette override, but has custom lightness expression
-                    # Apply expression to base RGB within this region's mask
+                    # Apply expression to base RGB WITHOUT global expr (so custom replaces global, not stacks)
+                    source_rgb = base_rgb_no_expr if base_rgb_no_expr is not None else base_rgb
                     region_rgb = _apply_lightness_expr_to_rgb(
-                        result, settings.interior.lightness_expr, scalar_tensor,
+                        source_rgb, settings.interior.lightness_expr, scalar_tensor,
                         ex_tensor, ey_tensor, solution_gpu
                     )
                     result = blend_region_gpu(result, region_rgb, mask)
@@ -259,9 +261,10 @@ def apply_region_overlays_gpu(
                         result = fill_region_gpu(result, settings.surface.solid_color, mask)
                 elif has_custom_expr:
                     # No palette override, but has custom lightness expression
-                    # Apply expression to base RGB within this region's mask
+                    # Apply expression to base RGB WITHOUT global expr (so custom replaces global, not stacks)
+                    source_rgb = base_rgb_no_expr if base_rgb_no_expr is not None else base_rgb
                     region_rgb = _apply_lightness_expr_to_rgb(
-                        result, settings.surface.lightness_expr, scalar_tensor,
+                        source_rgb, settings.surface.lightness_expr, scalar_tensor,
                         ex_tensor, ey_tensor, solution_gpu
                     )
                     result = blend_region_gpu(result, region_rgb, mask)
