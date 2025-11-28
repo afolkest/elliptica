@@ -1119,62 +1119,62 @@ THEMES = {
         },
     },
 
-    "Indigo Graphite": {
-        "description": "Background at (32,34,45) with soot ink and muted brass; cool without sci-fi",
+    "Dusty Ochre": {
+        "description": "Cool slate background with muted sand/ochre warmth; old paper feel",
         "colors": {
             dpg.mvThemeCol_WindowBg: (32, 34, 45, 255),
-            dpg.mvThemeCol_ChildBg: (36, 38, 48, 255),
-            dpg.mvThemeCol_PopupBg: (40, 42, 52, 255),
+            dpg.mvThemeCol_ChildBg: (38, 40, 50, 255),
+            dpg.mvThemeCol_PopupBg: (44, 46, 56, 255),
             dpg.mvThemeCol_MenuBarBg: (32, 34, 45, 255),
 
-            dpg.mvThemeCol_Border: (64, 66, 74, 80),
+            dpg.mvThemeCol_Border: (62, 64, 74, 80),
             dpg.mvThemeCol_BorderShadow: (0, 0, 0, 0),
 
-            dpg.mvThemeCol_FrameBg: (44, 46, 56, 255),
-            dpg.mvThemeCol_FrameBgHovered: (52, 54, 64, 255),
-            dpg.mvThemeCol_FrameBgActive: (60, 62, 72, 255),
+            dpg.mvThemeCol_FrameBg: (46, 48, 58, 255),
+            dpg.mvThemeCol_FrameBgHovered: (54, 56, 66, 255),
+            dpg.mvThemeCol_FrameBgActive: (62, 64, 74, 255),
 
             dpg.mvThemeCol_TitleBg: (26, 28, 38, 255),
             dpg.mvThemeCol_TitleBgActive: (36, 38, 48, 255),
             dpg.mvThemeCol_TitleBgCollapsed: (26, 28, 38, 200),
 
             dpg.mvThemeCol_ScrollbarBg: (32, 34, 45, 255),
-            dpg.mvThemeCol_ScrollbarGrab: (88, 89, 98, 255),
-            dpg.mvThemeCol_ScrollbarGrabHovered: (96, 97, 106, 255),
-            dpg.mvThemeCol_ScrollbarGrabActive: (104, 105, 114, 255),
+            dpg.mvThemeCol_ScrollbarGrab: (92, 86, 76, 255),
+            dpg.mvThemeCol_ScrollbarGrabHovered: (104, 96, 84, 255),
+            dpg.mvThemeCol_ScrollbarGrabActive: (116, 106, 92, 255),
 
-            dpg.mvThemeCol_Button: (88, 89, 98, 255),
-            dpg.mvThemeCol_ButtonHovered: (96, 97, 106, 255),
-            dpg.mvThemeCol_ButtonActive: (104, 105, 114, 255),
+            dpg.mvThemeCol_Button: (78, 74, 68, 255),
+            dpg.mvThemeCol_ButtonHovered: (90, 84, 76, 255),
+            dpg.mvThemeCol_ButtonActive: (100, 94, 84, 255),
 
-            dpg.mvThemeCol_Header: (50, 52, 62, 255),
-            dpg.mvThemeCol_HeaderHovered: (60, 62, 72, 255),
-            dpg.mvThemeCol_HeaderActive: (70, 72, 82, 255),
+            dpg.mvThemeCol_Header: (52, 54, 64, 255),
+            dpg.mvThemeCol_HeaderHovered: (62, 64, 74, 255),
+            dpg.mvThemeCol_HeaderActive: (72, 74, 84, 255),
 
-            dpg.mvThemeCol_Tab: (44, 46, 56, 255),
-            dpg.mvThemeCol_TabHovered: (58, 60, 70, 255),
-            dpg.mvThemeCol_TabActive: (52, 54, 64, 255),
-            dpg.mvThemeCol_TabUnfocused: (40, 42, 52, 255),
-            dpg.mvThemeCol_TabUnfocusedActive: (48, 50, 60, 255),
+            dpg.mvThemeCol_Tab: (46, 48, 58, 255),
+            dpg.mvThemeCol_TabHovered: (60, 62, 72, 255),
+            dpg.mvThemeCol_TabActive: (54, 56, 66, 255),
+            dpg.mvThemeCol_TabUnfocused: (42, 44, 54, 255),
+            dpg.mvThemeCol_TabUnfocusedActive: (50, 52, 62, 255),
 
-            dpg.mvThemeCol_SliderGrab: (126, 126, 134, 255),
-            dpg.mvThemeCol_SliderGrabActive: (142, 142, 150, 255),
+            dpg.mvThemeCol_SliderGrab: (130, 118, 100, 255),
+            dpg.mvThemeCol_SliderGrabActive: (148, 134, 114, 255),
 
-            dpg.mvThemeCol_CheckMark: (182, 172, 160, 255),
+            dpg.mvThemeCol_CheckMark: (178, 162, 140, 255),
 
-            dpg.mvThemeCol_Text: (220, 216, 210, 255),
+            dpg.mvThemeCol_Text: (226, 220, 212, 255),
             dpg.mvThemeCol_TextDisabled: (142, 138, 132, 255),
 
-            dpg.mvThemeCol_Separator: (64, 66, 74, 100),
-            dpg.mvThemeCol_SeparatorHovered: (90, 92, 102, 255),
-            dpg.mvThemeCol_SeparatorActive: (110, 112, 122, 255),
+            dpg.mvThemeCol_Separator: (62, 64, 74, 100),
+            dpg.mvThemeCol_SeparatorHovered: (88, 90, 100, 255),
+            dpg.mvThemeCol_SeparatorActive: (106, 108, 118, 255),
 
-            dpg.mvThemeCol_ResizeGrip: (64, 66, 74, 45),
-            dpg.mvThemeCol_ResizeGripHovered: (90, 92, 102, 180),
-            dpg.mvThemeCol_ResizeGripActive: (110, 112, 122, 255),
+            dpg.mvThemeCol_ResizeGrip: (62, 64, 74, 45),
+            dpg.mvThemeCol_ResizeGripHovered: (88, 90, 100, 180),
+            dpg.mvThemeCol_ResizeGripActive: (106, 108, 118, 255),
 
-            dpg.mvThemeCol_PlotHistogram: (140, 124, 100, 255),
-            dpg.mvThemeCol_PlotHistogramHovered: (166, 146, 120, 255),
+            dpg.mvThemeCol_PlotHistogram: (144, 128, 106, 255),
+            dpg.mvThemeCol_PlotHistogramHovered: (168, 146, 122, 255),
         },
         "styles": {
             dpg.mvStyleVar_FrameRounding: 5,

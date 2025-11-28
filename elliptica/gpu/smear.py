@@ -1,9 +1,8 @@
-"""GPU-accelerated conductor smear effects."""
+"""GPU-accelerated region smear effects."""
 
 import torch
 import numpy as np
 from typing import Tuple, Optional
-from scipy.ndimage import zoom
 
 from elliptica.gpu import GPUContext
 from elliptica.gpu.ops import gaussian_blur_gpu, quantile_safe, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
@@ -40,10 +39,126 @@ def compute_mask_bbox_cpu(mask: np.ndarray, pad: int, max_h: int, max_w: int) ->
     return (y_min_pad, y_max_pad, x_min_pad, x_max_pad)
 
 
-def apply_conductor_smear_gpu(
+def _has_any_smear_enabled(conductor_color_settings: dict | None, conductors: list) -> bool:
+    """Check if any region has smear enabled."""
+    if conductor_color_settings is None:
+        return False
+    for conductor in conductors:
+        if conductor.id in conductor_color_settings:
+            settings = conductor_color_settings[conductor.id]
+            if settings.surface.smear_enabled or settings.interior.smear_enabled:
+                return True
+    return False
+
+
+def _apply_smear_to_region(
+    out: torch.Tensor,
+    lic_gray_tensor: torch.Tensor,
+    mask_cpu: np.ndarray,
+    mask_gpu: torch.Tensor | None,
+    region_style,
+    render_shape: Tuple[int, int],
+    vmin: float,
+    vmax: float,
+    lut_tensor: torch.Tensor | None,
+    global_brightness: float,
+    global_contrast: float,
+    gamma: float,
+) -> torch.Tensor:
+    """Apply smear effect to a single region.
+
+    Args:
+        out: Current output RGB tensor (modified in place)
+        lic_gray_tensor: Original LIC grayscale on GPU
+        mask_cpu: Region mask on CPU
+        mask_gpu: Pre-uploaded GPU mask (or None)
+        region_style: RegionStyle with smear settings
+        render_shape: (height, width)
+        vmin, vmax: Percentiles for normalization
+        lut_tensor: Global color palette LUT
+        global_brightness, global_contrast, gamma: Global postprocess settings
+
+    Returns:
+        Modified output tensor
+    """
+    render_h, render_w = render_shape
+
+    # Use pre-uploaded GPU mask if available, otherwise upload from CPU
+    if mask_gpu is not None:
+        full_mask = mask_gpu
+    else:
+        full_mask = GPUContext.to_gpu(mask_cpu)
+
+    mask_bool = full_mask > 0.5
+    if not torch.any(mask_bool):
+        return out
+
+    # Convert fractional sigma to pixels
+    sigma_px = max(region_style.smear_sigma * render_w, 0.1)
+
+    # Compute bounding box on CPU
+    pad = int(3 * sigma_px) + 1
+    bbox = compute_mask_bbox_cpu(mask_cpu, pad, render_h, render_w)
+    if bbox is None:
+        return out
+
+    y_min_pad, y_max_pad, x_min_pad, x_max_pad = bbox
+
+    # Extract and blur region
+    lic_region = lic_gray_tensor[y_min_pad:y_max_pad, x_min_pad:x_max_pad]
+    lic_blur_region = gaussian_blur_gpu(lic_region, sigma_px)
+
+    # Create full-size blur tensor
+    lic_blur = torch.zeros_like(lic_gray_tensor)
+    lic_blur[y_min_pad:y_max_pad, x_min_pad:x_max_pad] = lic_blur_region
+
+    # Normalize
+    if vmax > vmin:
+        norm = torch.clamp((lic_blur - vmin) / (vmax - vmin), 0.0, 1.0)
+    else:
+        tmin = lic_blur.min()
+        tmax = lic_blur.max()
+        norm = (lic_blur - tmin) / (tmax - tmin) if tmax > tmin else torch.zeros_like(lic_blur)
+
+    # Resolve per-region brightness/contrast
+    region_brightness = region_style.brightness if region_style.brightness is not None else global_brightness
+    region_contrast = region_style.contrast if region_style.contrast is not None else global_contrast
+
+    # Apply brightness/contrast/gamma
+    adjusted = apply_contrast_gamma_gpu(norm, region_brightness, region_contrast, gamma)
+
+    # Colorize based on region settings
+    if region_style.enabled:
+        if region_style.use_palette:
+            custom_lut = _get_palette_lut(region_style.palette)
+            custom_lut_tensor = GPUContext.to_gpu(custom_lut)
+            rgb_blur = apply_palette_lut_gpu(adjusted, custom_lut_tensor)
+        else:
+            solid_color = region_style.solid_color
+            color_tensor = torch.tensor(solid_color, dtype=torch.float32, device=adjusted.device)
+            rgb_blur = adjusted.unsqueeze(-1) * color_tensor
+    else:
+        # Use global palette/grayscale
+        if lut_tensor is not None:
+            rgb_blur = apply_palette_lut_gpu(adjusted, lut_tensor)
+        else:
+            rgb_blur = grayscale_to_rgb_gpu(adjusted)
+
+    # Apply smear inside mask
+    weight = (full_mask > 0.5).float().unsqueeze(-1)
+    out = out * (1.0 - weight) + rgb_blur * weight
+
+    # Clean up
+    del lic_blur, norm, adjusted, rgb_blur, weight
+
+    return out
+
+
+def apply_region_smear_gpu(
     rgb_tensor: torch.Tensor,
     lic_gray_tensor: torch.Tensor,
-    conductor_masks: list[np.ndarray],
+    conductor_masks: list[np.ndarray] | None,
+    interior_masks: list[np.ndarray] | None,
     conductors: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
@@ -51,40 +166,43 @@ def apply_conductor_smear_gpu(
     lic_percentiles: Tuple[float, float] | None = None,
     conductor_color_settings: dict | None = None,
     conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    interior_masks_gpu: list[torch.Tensor | None] | None = None,
     brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
 ) -> torch.Tensor:
-    """Apply smear effect to texture inside conductor masks on GPU.
+    """Apply smear effect to regions (both surfaces and interiors) on GPU.
+
+    Smear is now a per-region effect stored in conductor_color_settings.
 
     Args:
         rgb_tensor: Current RGB image (H, W, 3) float32 in [0, 1] on GPU
         lic_gray_tensor: Original LIC grayscale (H, W) float32 on GPU
-        conductor_masks: List of conductor masks (CPU arrays)
+        conductor_masks: List of conductor surface masks (CPU arrays)
+        interior_masks: List of interior masks (CPU arrays)
         conductors: List of Conductor objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
         lut_tensor: Color palette LUT on GPU, or None for grayscale
         lic_percentiles: Precomputed (vmin, vmax) for normalization
-        conductor_color_settings: Per-conductor color settings dict (to detect custom colors)
-        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
-        brightness: Brightness adjustment (additive, 0.0 = no change)
-        contrast: Contrast multiplier (1.0 = no change)
-        gamma: Gamma exponent (1.0 = no change)
+        conductor_color_settings: Per-conductor color settings dict (contains smear settings)
+        conductor_masks_gpu: Optional pre-uploaded surface masks on GPU
+        interior_masks_gpu: Optional pre-uploaded interior masks on GPU
+        brightness: Global brightness adjustment
+        contrast: Global contrast multiplier
+        gamma: Gamma exponent
 
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
     """
+    if conductor_color_settings is None:
+        return rgb_tensor
+
     out = rgb_tensor.clone()
-
     render_h, render_w = render_shape
-    canvas_w, canvas_h = canvas_resolution
-    scale_x = render_w / canvas_w
-    scale_y = render_h / canvas_h
 
-    # Precompute percentiles if needed and any conductor has smear
-    if lic_percentiles is None and any(c.smear_enabled for c in conductors):
-        # Use GPU quantile (much faster than CPU percentile!)
+    # Precompute percentiles if needed
+    if lic_percentiles is None and _has_any_smear_enabled(conductor_color_settings, conductors):
         flat = lic_gray_tensor.flatten()
         quantiles = torch.tensor([0.005, 0.995], device=lic_gray_tensor.device, dtype=lic_gray_tensor.dtype)
         vmin_tensor, vmax_tensor = quantile_safe(flat, quantiles)
@@ -95,121 +213,36 @@ def apply_conductor_smear_gpu(
         vmin, vmax = 0.0, 1.0
 
     for idx, conductor in enumerate(conductors):
-        if not conductor.smear_enabled:
+        if conductor.id not in conductor_color_settings:
             continue
 
-        if idx >= len(conductor_masks) or conductor_masks[idx] is None:
-            continue
+        settings = conductor_color_settings[conductor.id]
 
-        # Use pre-uploaded GPU mask if available, otherwise upload from CPU
-        if conductor_masks_gpu is not None and idx < len(conductor_masks_gpu) and conductor_masks_gpu[idx] is not None:
-            # Use pre-uploaded GPU mask (fast path!)
-            full_mask = conductor_masks_gpu[idx]
-        else:
-            # Upload mask to GPU (fallback path)
-            mask_cpu = conductor_masks[idx]
-            full_mask = GPUContext.to_gpu(mask_cpu)
+        # Apply smear to surface if enabled
+        if settings.surface.smear_enabled:
+            if conductor_masks is not None and idx < len(conductor_masks) and conductor_masks[idx] is not None:
+                mask_cpu = conductor_masks[idx]
+                mask_gpu = conductor_masks_gpu[idx] if conductor_masks_gpu and idx < len(conductor_masks_gpu) else None
+                out = _apply_smear_to_region(
+                    out, lic_gray_tensor, mask_cpu, mask_gpu, settings.surface,
+                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma
+                )
 
-        mask_bool = full_mask > 0.5
-
-        if not torch.any(mask_bool):
-            continue
-
-        # Convert fractional sigma to pixels based on render resolution
-        # smear_sigma is stored as fraction of canvas width (e.g., 0.002 = 0.2%)
-        # This makes the effect resolution-independent
-        sigma_px = max(conductor.smear_sigma * render_w, 0.1)
-
-        # OPTIMIZATION: Compute bounding box on CPU to avoid GPU→CPU sync barrier
-        # torch.nonzero() + .item() causes expensive MPS synchronization!
-        pad = int(3 * sigma_px) + 1
-        mask_cpu = conductor_masks[idx]
-        bbox = compute_mask_bbox_cpu(mask_cpu, pad, render_h, render_w)
-        if bbox is None:
-            continue
-
-        y_min_pad, y_max_pad, x_min_pad, x_max_pad = bbox
-
-        # Extract region
-        lic_region = lic_gray_tensor[y_min_pad:y_max_pad, x_min_pad:x_max_pad]
-
-        # Blur ONLY the conductor region (not the entire 7k image!)
-        lic_blur_region = gaussian_blur_gpu(lic_region, sigma_px)
-
-        # Create full-size blur tensor (only populated in conductor region)
-        lic_blur = torch.zeros_like(lic_gray_tensor)
-        lic_blur[y_min_pad:y_max_pad, x_min_pad:x_max_pad] = lic_blur_region
-
-        # Normalize the blurred LIC
-        if vmax > vmin:
-            norm = torch.clamp((lic_blur - vmin) / (vmax - vmin), 0.0, 1.0)
-        else:
-            # Fallback: normalize by tensor's own range
-            tmin = lic_blur.min()
-            tmax = lic_blur.max()
-            if tmax > tmin:
-                norm = (lic_blur - tmin) / (tmax - tmin)
-            else:
-                norm = torch.zeros_like(lic_blur)
-
-        # Resolve per-region brightness/contrast (matches overlay behavior)
-        # Check if this conductor has custom color settings
-        has_custom_settings = (
-            conductor_color_settings is not None
-            and conductor.id in conductor_color_settings
-        )
-
-        # Use per-region brightness/contrast if available, otherwise use global values
-        if has_custom_settings:
-            settings = conductor_color_settings[conductor.id]
-            # Surface settings control smear appearance (smear affects conductor body)
-            region_brightness = settings.surface.brightness if settings.surface.brightness is not None else brightness
-            region_contrast = settings.surface.contrast if settings.surface.contrast is not None else contrast
-        else:
-            region_brightness = brightness
-            region_contrast = contrast
-
-        # Apply brightness/contrast/gamma adjustments (using per-region values!)
-        # This ensures smear colors match region overlay colors when using the same palette
-        adjusted = apply_contrast_gamma_gpu(norm, region_brightness, region_contrast, gamma)
-
-        if has_custom_settings:
-            # Use surface settings for smear (surface is the conductor body)
-            if settings.surface.enabled:
-                if settings.surface.use_palette:
-                    # Custom palette: apply that palette to adjusted LIC
-                    custom_lut = _get_palette_lut(settings.surface.palette)
-                    custom_lut_tensor = GPUContext.to_gpu(custom_lut)
-                    rgb_blur = apply_palette_lut_gpu(adjusted, custom_lut_tensor)
-                else:
-                    # Solid custom color: colorize the adjusted LIC with the custom color
-                    # This preserves the LIC texture while using the custom color
-                    solid_color = settings.surface.solid_color  # (r, g, b) in [0, 1]
-                    color_tensor = torch.tensor(solid_color, dtype=torch.float32, device=adjusted.device)
-                    # Broadcast: (H, W) * (3,) -> (H, W, 3) with color modulated by intensity
-                    rgb_blur = adjusted.unsqueeze(-1) * color_tensor
-            else:
-                # Custom settings exist but surface not enabled - fall back to global
-                if lut_tensor is not None:
-                    rgb_blur = apply_palette_lut_gpu(adjusted, lut_tensor)
-                else:
-                    rgb_blur = grayscale_to_rgb_gpu(adjusted)
-        else:
-            # No custom settings - use global palette/grayscale
-            if lut_tensor is not None:
-                rgb_blur = apply_palette_lut_gpu(adjusted, lut_tensor)
-            else:
-                rgb_blur = grayscale_to_rgb_gpu(adjusted)
-
-        # Apply smear at full strength inside mask (threshold to match LIC blocking)
-        # The LIC blocking uses mask > 0.5 threshold, so smear must cover the same region
-        weight = (full_mask > 0.5).float().unsqueeze(-1)  # Binary mask as float (H, W, 1)
-        out = out * (1.0 - weight) + rgb_blur * weight
-
-        # Clean up large temporary tensors to avoid GPU memory accumulation
-        del full_mask, mask_bool, lic_blur, norm, adjusted, rgb_blur, weight
+        # Apply smear to interior if enabled
+        if settings.interior.smear_enabled:
+            if interior_masks is not None and idx < len(interior_masks) and interior_masks[idx] is not None:
+                mask_cpu = interior_masks[idx]
+                mask_gpu = interior_masks_gpu[idx] if interior_masks_gpu and idx < len(interior_masks_gpu) else None
+                out = _apply_smear_to_region(
+                    out, lic_gray_tensor, mask_cpu, mask_gpu, settings.interior,
+                    render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma
+                )
 
     return torch.clamp(out, 0.0, 1.0)
 
 
-__all__ = ['apply_conductor_smear_gpu']
+# Legacy alias for compatibility
+apply_conductor_smear_gpu = apply_region_smear_gpu
+
+
+__all__ = ['apply_region_smear_gpu', 'apply_conductor_smear_gpu']

@@ -130,6 +130,19 @@ def load_project(filepath: str) -> AppState:
             conductor_id = int(conductor_id_str)
             state.conductor_color_settings[conductor_id] = _dict_to_color_settings(color_settings_dict)
 
+        # Migrate old conductor smear settings to per-region settings
+        # (backward compatibility with projects saved before per-region smear)
+        for conductor in project.conductors:
+            if conductor.id is not None and hasattr(conductor, 'smear_enabled') and conductor.smear_enabled:
+                # Old smear applied to conductor surface mask
+                if conductor.id not in state.conductor_color_settings:
+                    state.conductor_color_settings[conductor.id] = ConductorColorSettings()
+                settings = state.conductor_color_settings[conductor.id]
+                # Only migrate if region doesn't already have smear settings
+                if not settings.surface.smear_enabled:
+                    settings.surface.smear_enabled = True
+                    settings.surface.smear_sigma = getattr(conductor, 'smear_sigma', defaults.DEFAULT_SMEAR_SIGMA)
+
         return state
 
 
@@ -353,6 +366,9 @@ def _region_style_to_dict(style: RegionStyle) -> dict[str, Any]:
         'solid_color': list(style.solid_color),
         'brightness': style.brightness,  # None or float
         'contrast': style.contrast,      # None or float
+        'gamma': style.gamma,            # None or float
+        'smear_enabled': style.smear_enabled,
+        'smear_sigma': style.smear_sigma,
     }
 
 
@@ -365,6 +381,9 @@ def _dict_to_region_style(data: dict[str, Any]) -> RegionStyle:
         solid_color=tuple(data.get('solid_color', [0.5, 0.5, 0.5])),
         brightness=data.get('brightness'),  # None by default (backward compatible)
         contrast=data.get('contrast'),      # None by default (backward compatible)
+        gamma=data.get('gamma'),            # None by default (backward compatible)
+        smear_enabled=data.get('smear_enabled', False),
+        smear_sigma=data.get('smear_sigma', defaults.DEFAULT_SMEAR_SIGMA),
     )
 
 

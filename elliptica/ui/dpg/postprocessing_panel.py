@@ -288,10 +288,10 @@ class PostprocessingPanel:
             with dpg.group(tag="expressions_mode_group", show=False):
                 self._build_expression_editor_ui("expressions_mode_group")
 
-        # Conductor effects section (smear) - only shown when conductor selected
-        with dpg.collapsing_header(label="Conductor Effects", default_open=True,
-                                   tag="conductor_effects_header", parent=parent, show=False):
-            dpg.add_text("Smear")
+        # Region effects section (smear) - shown when any region is selected
+        with dpg.collapsing_header(label="Effects", default_open=True,
+                                   tag="effects_header", parent=parent, show=False):
+            dpg.add_text("Smear", tag="smear_label")
             self.smear_enabled_checkbox_id = dpg.add_checkbox(
                 label="Enable smear",
                 callback=self.on_smear_enabled,
@@ -608,13 +608,15 @@ class PostprocessingPanel:
             dpg.set_value("contrast_slider", c)
             dpg.set_value("gamma_slider", g)
 
-            # Show conductor effects section
-            dpg.configure_item("conductor_effects_header", show=True)
-
-            # Update smear controls
-            dpg.set_value("smear_enabled_checkbox", selected.smear_enabled)
-            dpg.set_value("smear_sigma_slider", selected.smear_sigma)
-            dpg.configure_item("smear_sigma_slider", show=selected.smear_enabled)
+            # Show effects section and update smear controls from RegionStyle
+            dpg.configure_item("effects_header", show=True)
+            if region_style:
+                dpg.set_value("smear_enabled_checkbox", region_style.smear_enabled)
+                dpg.set_value("smear_sigma_slider", region_style.smear_sigma)
+                dpg.configure_item("smear_sigma_slider", show=region_style.smear_enabled)
+            else:
+                dpg.set_value("smear_enabled_checkbox", False)
+                dpg.configure_item("smear_sigma_slider", show=False)
 
         else:
             # Global mode
@@ -640,8 +642,8 @@ class PostprocessingPanel:
             dpg.set_value("contrast_slider", self.app.state.display_settings.contrast)
             dpg.set_value("gamma_slider", self.app.state.display_settings.gamma)
 
-            # Hide conductor effects section
-            dpg.configure_item("conductor_effects_header", show=False)
+            # Hide effects section
+            dpg.configure_item("effects_header", show=False)
 
     def update_region_properties_panel(self) -> None:
         """Update region properties panel based on current selection.
@@ -1026,28 +1028,28 @@ class PostprocessingPanel:
     # ------------------------------------------------------------------
 
     def on_smear_enabled(self, sender=None, app_data=None) -> None:
-        """Toggle interior smear for selected conductor region."""
+        """Toggle smear for selected region."""
         if dpg is None:
             return
 
         with self.app.state_lock:
-            idx = self.app.state.selected_idx
-            if idx >= 0 and idx < len(self.app.state.project.conductors):
-                self.app.state.project.conductors[idx].smear_enabled = bool(app_data)
+            region_style = self._get_current_region_style()
+            if region_style is not None:
+                region_style.smear_enabled = bool(app_data)
 
         self.update_context_ui()
         self.app.display_pipeline.refresh_display()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
-        """Adjust smear blur sigma for selected conductor (debounced for performance)."""
+        """Adjust smear blur sigma for selected region (debounced for performance)."""
         if dpg is None:
             return
 
         # Always update the value immediately (for UI responsiveness)
         with self.app.state_lock:
-            idx = self.app.state.selected_idx
-            if idx >= 0 and idx < len(self.app.state.project.conductors):
-                self.app.state.project.conductors[idx].smear_sigma = float(app_data)
+            region_style = self._get_current_region_style()
+            if region_style is not None:
+                region_style.smear_sigma = float(app_data)
 
         # Mark that we have a pending update (defers expensive render refresh)
         self.smear_pending_value = float(app_data)

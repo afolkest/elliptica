@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 @dataclass
 class RegionStyle:
-    """Color settings for a spatial region."""
+    """Color and effect settings for a spatial region."""
     enabled: bool = False
     use_palette: bool = True  # True = palette colorization, False = solid color
     palette: str = defaults.DEFAULT_COLOR_PALETTE
@@ -31,6 +31,10 @@ class RegionStyle:
     brightness: Optional[float] = None
     contrast: Optional[float] = None
     gamma: Optional[float] = None
+
+    # Smear effect (texture blur within region)
+    smear_enabled: bool = False
+    smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA
 
 
 def resolve_region_postprocess_params(
