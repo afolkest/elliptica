@@ -544,6 +544,7 @@ class EllipticaApp:
                 self.canvas_controller.process_canvas_mouse()
                 self.canvas_controller.process_keyboard_shortcuts()
                 self.render_orchestrator.poll()
+                self.display_pipeline.poll()  # Handle async postprocessing completion
                 self.postprocess_panel.check_clip_debounce()  # Handle debounced clip% updates
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
                 self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates
@@ -553,6 +554,7 @@ class EllipticaApp:
                 dpg.render_dearpygui_frame()
         finally:
             self.render_orchestrator.shutdown(wait=False)
+            self.display_pipeline.shutdown()
             dpg.destroy_context()
 
 
