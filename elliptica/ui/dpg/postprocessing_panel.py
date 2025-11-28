@@ -74,6 +74,15 @@ class PostprocessingPanel:
         # Debouncing for lightness expression updates
         self.lightness_expr_pending_update: bool = False
         self.lightness_expr_last_update_time: float = 0.0
+        # Target for pending lightness expr update: "global", or (conductor_id, region_type) tuple
+        self.lightness_expr_pending_target: str | tuple[int, str] | None = None
+
+        # Cache for custom lightness expressions (preserved when switching to Global mode)
+        # Key: (conductor_id, region_type), Value: expression string
+        self._cached_custom_lightness_exprs: dict[tuple[int, str], str] = {}
+
+        # Cache for global lightness expression (preserved when disabling)
+        self._cached_global_lightness_expr: str | None = None
 
         # Themes for grayed-out appearance
         self.disabled_theme_id: Optional[int] = None
@@ -635,6 +644,12 @@ class PostprocessingPanel:
             has_custom_expr = region_style is not None and region_style.lightness_expr is not None
             dpg.set_value("lightness_expr_mode_radio", "Custom" if has_custom_expr else "Global")
 
+            # Populate cache from existing settings (e.g. loaded from project file)
+            if has_custom_expr and selected is not None and selected.id is not None:
+                cache_key = (selected.id, self.app.state.selected_region_type)
+                if cache_key not in self._cached_custom_lightness_exprs:
+                    self._cached_custom_lightness_exprs[cache_key] = region_style.lightness_expr
+
             # Show input if global expr is enabled OR region has custom expr
             global_expr_enabled = self.app.state.display_settings.lightness_expr is not None
             show_input = global_expr_enabled or has_custom_expr
@@ -716,6 +731,9 @@ class PostprocessingPanel:
             dpg.configure_item("lightness_expr_group", show=global_expr_enabled)
             if global_expr_enabled:
                 dpg.set_value("lightness_expr_input", self.app.state.display_settings.lightness_expr)
+                # Populate cache from existing state (e.g. loaded from project)
+                if self._cached_global_lightness_expr is None:
+                    self._cached_global_lightness_expr = self.app.state.display_settings.lightness_expr
             self._set_input_grayed("lightness_expr_input", False)
 
             # Hide effects section
@@ -845,13 +863,17 @@ class PostprocessingPanel:
         dpg.configure_item("lightness_expr_group", show=is_enabled)
 
         if is_enabled:
-            # Enable with default expression
-            expr = dpg.get_value("lightness_expr_input")
+            # Enable - use cached global expr or default (NOT the input field, which may show region expr)
+            expr = self._cached_global_lightness_expr or "clipnorm(mag, 1, 99)"
             with self.app.state_lock:
                 self.app.state.display_settings.lightness_expr = expr
+            # Update input to show the global expression
+            dpg.set_value("lightness_expr_input", expr)
         else:
-            # Disable
+            # Disable - cache current global expr first
             with self.app.state_lock:
+                if self.app.state.display_settings.lightness_expr:
+                    self._cached_global_lightness_expr = self.app.state.display_settings.lightness_expr
                 self.app.state.display_settings.lightness_expr = None
 
         self.app.display_pipeline.refresh_display()
@@ -860,6 +882,22 @@ class PostprocessingPanel:
         """Handle lightness expression text change (debounced)."""
         if dpg is None:
             return
+
+        # Capture the target NOW (not at debounce time)
+        # This ensures we update the right target even if user clicks away
+        region_style = self._get_current_region_style()
+        has_custom_lightness = region_style is not None and region_style.lightness_expr is not None
+
+        if self._is_conductor_selected() and has_custom_lightness:
+            with self.app.state_lock:
+                selected = self.app.state.get_selected()
+                region_type = self.app.state.selected_region_type
+                if selected and selected.id is not None:
+                    self.lightness_expr_pending_target = (selected.id, region_type)
+                else:
+                    self.lightness_expr_pending_target = "global"
+        else:
+            self.lightness_expr_pending_target = "global"
 
         # Mark pending update and record time
         self.lightness_expr_pending_update = True
@@ -872,15 +910,17 @@ class PostprocessingPanel:
 
         current_time = time.time()
         if current_time - self.lightness_expr_last_update_time >= self.expr_debounce_delay:
-            # Determine whether to apply global or per-region update
-            # Check if region has custom lightness expr (not palette override)
-            region_style = self._get_current_region_style()
-            has_custom_lightness = region_style is not None and region_style.lightness_expr is not None
-            if self._is_conductor_selected() and has_custom_lightness:
-                self._apply_region_lightness_expr_update()
+            # Use the target captured at input time (not current state)
+            target = self.lightness_expr_pending_target
+            if isinstance(target, tuple):
+                # Per-region update
+                conductor_id, region_type = target
+                self._apply_region_lightness_expr_update(conductor_id, region_type)
             else:
+                # Global update
                 self._apply_lightness_expr_update()
             self.lightness_expr_pending_update = False
+            self.lightness_expr_pending_target = None
 
     def _apply_lightness_expr_update(self) -> None:
         """Apply the current lightness expression from the input field."""
@@ -893,6 +933,8 @@ class PostprocessingPanel:
 
         with self.app.state_lock:
             self.app.state.display_settings.lightness_expr = expr
+        # Also update cache so toggling off/on preserves the latest edit
+        self._cached_global_lightness_expr = expr
 
         self.app.display_pipeline.refresh_display()
 
@@ -920,20 +962,32 @@ class PostprocessingPanel:
             settings = self.app.state.conductor_color_settings[selected.id]
             region_type = self.app.state.selected_region_type
             region_style = settings.surface if region_type == "surface" else settings.interior
+            cache_key = (selected.id, region_type)
 
             if is_custom:
-                # Switch to custom - initialize with global expr or default
-                global_expr = self.app.state.display_settings.lightness_expr
-                region_style.lightness_expr = global_expr or "clipnorm(mag, 1, 99)"
+                # Switch to custom - check cache first, then global, then default
+                cached_expr = self._cached_custom_lightness_exprs.get(cache_key)
+                if cached_expr is not None:
+                    region_style.lightness_expr = cached_expr
+                else:
+                    global_expr = self.app.state.display_settings.lightness_expr
+                    region_style.lightness_expr = global_expr or "clipnorm(mag, 1, 99)"
             else:
-                # Switch to global - clear custom expr
+                # Switch to global - cache current expr before clearing
+                if region_style.lightness_expr is not None:
+                    self._cached_custom_lightness_exprs[cache_key] = region_style.lightness_expr
                 region_style.lightness_expr = None
 
         self.update_context_ui()
         self.app.display_pipeline.refresh_display()
 
-    def _apply_region_lightness_expr_update(self) -> None:
-        """Apply the current per-region lightness expression."""
+    def _apply_region_lightness_expr_update(self, conductor_id: int, region_type: str) -> None:
+        """Apply the current per-region lightness expression.
+
+        Args:
+            conductor_id: The conductor ID to update
+            region_type: "surface" or "interior"
+        """
         if dpg is None:
             return
 
@@ -942,22 +996,20 @@ class PostprocessingPanel:
             return
 
         with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected is None or selected.id is None:
-                return
-
             # Ensure settings exist
             from elliptica.app.core import ConductorColorSettings
-            if selected.id not in self.app.state.conductor_color_settings:
-                self.app.state.conductor_color_settings[selected.id] = ConductorColorSettings()
+            if conductor_id not in self.app.state.conductor_color_settings:
+                self.app.state.conductor_color_settings[conductor_id] = ConductorColorSettings()
 
-            settings = self.app.state.conductor_color_settings[selected.id]
-            region_type = self.app.state.selected_region_type
+            settings = self.app.state.conductor_color_settings[conductor_id]
             region_style = settings.surface if region_type == "surface" else settings.interior
 
             # Only update if this region has custom expr enabled
             if region_style.lightness_expr is not None:
                 region_style.lightness_expr = expr
+                # Also update cache so switching Global->Custom restores latest edit
+                cache_key = (conductor_id, region_type)
+                self._cached_custom_lightness_exprs[cache_key] = expr
 
         self.app.display_pipeline.refresh_display()
 

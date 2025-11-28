@@ -298,6 +298,10 @@ def apply_full_postprocess_gpu(
             brightness,
             contrast,
             gamma,
+            ex_tensor,
+            ey_tensor,
+            solution_gpu,
+            lightness_expr,
         )
 
     return torch.clamp(base_rgb, 0.0, 1.0), used_percentiles
