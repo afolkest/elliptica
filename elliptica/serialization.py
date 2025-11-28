@@ -367,6 +367,7 @@ def _region_style_to_dict(style: RegionStyle) -> dict[str, Any]:
         'brightness': style.brightness,  # None or float
         'contrast': style.contrast,      # None or float
         'gamma': style.gamma,            # None or float
+        'lightness_expr': style.lightness_expr,  # None or str
         'smear_enabled': style.smear_enabled,
         'smear_sigma': style.smear_sigma,
     }
@@ -382,6 +383,7 @@ def _dict_to_region_style(data: dict[str, Any]) -> RegionStyle:
         brightness=data.get('brightness'),  # None by default (backward compatible)
         contrast=data.get('contrast'),      # None by default (backward compatible)
         gamma=data.get('gamma'),            # None by default (backward compatible)
+        lightness_expr=data.get('lightness_expr'),  # None by default (backward compatible)
         smear_enabled=data.get('smear_enabled', False),
         smear_sigma=data.get('smear_sigma', defaults.DEFAULT_SMEAR_SIGMA),
     )

@@ -32,6 +32,9 @@ class RegionStyle:
     contrast: Optional[float] = None
     gamma: Optional[float] = None
 
+    # Lightness expression (None = inherit from global, or no expr if global is also None)
+    lightness_expr: Optional[str] = None
+
     # Smear effect (texture blur within region)
     smear_enabled: bool = False
     smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA

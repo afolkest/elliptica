@@ -8,6 +8,46 @@ from elliptica.gpu.pipeline import build_base_rgb_gpu
 from elliptica.render import _get_palette_lut
 
 
+def _apply_lightness_expr_to_rgb(
+    rgb: torch.Tensor,
+    lightness_expr: str,
+    lic_tensor: torch.Tensor,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
+) -> torch.Tensor:
+    """Apply lightness expression to RGB. Extracted to avoid circular import."""
+    from elliptica.colorspace.oklch import srgb_to_oklch
+    from elliptica.colorspace.gamut import gamut_map_to_srgb
+    from elliptica.expr import compile_expression
+
+    target_shape = lic_tensor.shape
+
+    bindings = {'lic': lic_tensor}
+    if ex_tensor is not None and ey_tensor is not None:
+        bindings['ex'] = ex_tensor
+        bindings['ey'] = ey_tensor
+        bindings['mag'] = torch.sqrt(ex_tensor**2 + ey_tensor**2)
+
+    if solution_gpu:
+        for name, tensor in solution_gpu.items():
+            if name not in bindings:
+                if tensor.shape != target_shape:
+                    tensor_4d = tensor.unsqueeze(0).unsqueeze(0)
+                    resized = torch.nn.functional.interpolate(
+                        tensor_4d, size=target_shape, mode='bilinear', align_corners=False
+                    )
+                    tensor = resized.squeeze(0).squeeze(0)
+                bindings[name] = tensor
+
+    expr_fn = compile_expression(lightness_expr)
+    multiplier = expr_fn(bindings)
+
+    L, C, H = srgb_to_oklch(rgb)
+    L_adjusted = L * multiplier
+    return gamut_map_to_srgb(L_adjusted, C, H, method='compress')
+
+
 def blend_region_gpu(
     base: torch.Tensor,
     overlay: torch.Tensor,
@@ -69,6 +109,10 @@ def apply_region_overlays_gpu(
     contrast: float,
     gamma: float,
     normalized_tensor: torch.Tensor | None = None,
+    ex_tensor: torch.Tensor | None = None,
+    ey_tensor: torch.Tensor | None = None,
+    solution_gpu: dict[str, torch.Tensor] | None = None,
+    global_lightness_expr: str | None = None,
 ) -> torch.Tensor:
     """Composite per-region color overrides over base RGB on GPU.
 
@@ -84,6 +128,10 @@ def apply_region_overlays_gpu(
         contrast: Contrast adjustment
         gamma: Gamma correction
         normalized_tensor: Optional pre-normalized tensor (avoids recomputing percentiles)
+        ex_tensor: Electric field X component (for lightness expressions)
+        ey_tensor: Electric field Y component (for lightness expressions)
+        solution_gpu: PDE solution fields (phi, etc.) for lightness expressions
+        global_lightness_expr: Global lightness expression (fallback for regions)
 
     Returns:
         Final composited RGB tensor (H, W, 3) in [0, 1] on GPU
@@ -161,6 +209,13 @@ def apply_region_overlays_gpu(
                     region_gamma = settings.interior.gamma if settings.interior.gamma is not None else gamma
                     cache_key = (settings.interior.palette, region_brightness, region_contrast, region_gamma)
                     region_rgb = palette_cache[cache_key]
+                    # Apply lightness expression (region-specific or global fallback)
+                    region_expr = settings.interior.lightness_expr if settings.interior.lightness_expr is not None else global_lightness_expr
+                    if region_expr is not None:
+                        region_rgb = _apply_lightness_expr_to_rgb(
+                            region_rgb, region_expr, scalar_tensor,
+                            ex_tensor, ey_tensor, solution_gpu
+                        )
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:
                     # Solid color fill
@@ -179,6 +234,13 @@ def apply_region_overlays_gpu(
                     region_gamma = settings.surface.gamma if settings.surface.gamma is not None else gamma
                     cache_key = (settings.surface.palette, region_brightness, region_contrast, region_gamma)
                     region_rgb = palette_cache[cache_key]
+                    # Apply lightness expression (region-specific or global fallback)
+                    region_expr = settings.surface.lightness_expr if settings.surface.lightness_expr is not None else global_lightness_expr
+                    if region_expr is not None:
+                        region_rgb = _apply_lightness_expr_to_rgb(
+                            region_rgb, region_expr, scalar_tensor,
+                            ex_tensor, ey_tensor, solution_gpu
+                        )
                     result = blend_region_gpu(result, region_rgb, mask)
                 else:
                     # Solid color fill

@@ -79,6 +79,7 @@ class PostprocessingPanel:
         self.disabled_theme_id: Optional[int] = None
         self.disabled_slider_theme_id: Optional[int] = None
         self.disabled_button_theme_id: Optional[int] = None
+        self.disabled_input_theme_id: Optional[int] = None
 
     def _ensure_themes(self) -> None:
         """Create disabled/normal themes if not already created."""
@@ -111,6 +112,15 @@ class PostprocessingPanel:
                 dpg.add_theme_color(dpg.mvThemeCol_Text, gray_text, category=dpg.mvThemeCat_Core)
         self.disabled_button_theme_id = disabled_button_theme
 
+        # Disabled theme for input text
+        with dpg.theme() as disabled_input_theme:
+            with dpg.theme_component(dpg.mvInputText, enabled_state=False):
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBg, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgHovered, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_FrameBgActive, gray_bg, category=dpg.mvThemeCat_Core)
+                dpg.add_theme_color(dpg.mvThemeCol_Text, gray_text, category=dpg.mvThemeCat_Core)
+        self.disabled_input_theme_id = disabled_input_theme
+
         # Mark as initialized
         self.disabled_theme_id = disabled_slider_theme
 
@@ -133,6 +143,18 @@ class PostprocessingPanel:
         self._ensure_themes()
         if grayed:
             dpg.bind_item_theme(widget_tag, self.disabled_button_theme_id)
+            dpg.configure_item(widget_tag, enabled=False)
+        else:
+            dpg.bind_item_theme(widget_tag, 0)
+            dpg.configure_item(widget_tag, enabled=True)
+
+    def _set_input_grayed(self, widget_tag: str, grayed: bool) -> None:
+        """Set an input text to visually grayed out or normal."""
+        if dpg is None:
+            return
+        self._ensure_themes()
+        if grayed:
+            dpg.bind_item_theme(widget_tag, self.disabled_input_theme_id)
             dpg.configure_item(widget_tag, enabled=False)
         else:
             dpg.bind_item_theme(widget_tag, 0)
@@ -268,21 +290,42 @@ class PostprocessingPanel:
                 )
 
                 # Lightness expression (palette mode only)
-                dpg.add_spacer(height=10)
-                self.lightness_expr_checkbox_id = dpg.add_checkbox(
-                    label="Lightness expression",
-                    default_value=self.app.state.display_settings.lightness_expr is not None,
-                    callback=self.on_lightness_expr_toggle,
-                    tag="lightness_expr_checkbox",
-                )
+                dpg.add_spacer(height=12)
+                dpg.add_separator()
+                dpg.add_spacer(height=8)
+
+                with dpg.group(horizontal=True):
+                    dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
+                    dpg.add_spacer(width=10)
+                    # Enable checkbox (for global mode)
+                    self.lightness_expr_checkbox_id = dpg.add_checkbox(
+                        label="",
+                        default_value=self.app.state.display_settings.lightness_expr is not None,
+                        callback=self.on_lightness_expr_toggle,
+                        tag="lightness_expr_checkbox",
+                    )
+
+                # Global/Custom toggle (only visible in region mode)
+                with dpg.group(tag="lightness_expr_mode_toggle", show=False):
+                    dpg.add_radio_button(
+                        items=["Global", "Custom"],
+                        default_value="Global",
+                        horizontal=True,
+                        callback=self.on_lightness_expr_mode_change,
+                        tag="lightness_expr_mode_radio",
+                    )
+
                 with dpg.group(tag="lightness_expr_group", show=self.app.state.display_settings.lightness_expr is not None):
                     self.lightness_expr_input_id = dpg.add_input_text(
                         default_value=self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)",
-                        width=-1,
+                        width=200,
                         callback=self.on_lightness_expr_change,
                         on_enter=False,
                         tag="lightness_expr_input",
+                        hint="e.g. clipnorm(mag, 1, 99)",
                     )
+
+                dpg.add_spacer(height=8)
 
             # Expressions mode container (hidden by default)
             with dpg.group(tag="expressions_mode_group", show=False):
@@ -584,6 +627,28 @@ class PostprocessingPanel:
             else:
                 dpg.configure_item("region_palette_button", label="Global")
 
+            # Update lightness expression controls for region mode
+            # Show Global/Custom toggle (independent of palette override)
+            dpg.configure_item("lightness_expr_mode_toggle", show=True)
+            dpg.configure_item("lightness_expr_checkbox", show=False)
+
+            has_custom_expr = region_style is not None and region_style.lightness_expr is not None
+            dpg.set_value("lightness_expr_mode_radio", "Custom" if has_custom_expr else "Global")
+
+            # Show input if global expr is enabled OR region has custom expr
+            global_expr_enabled = self.app.state.display_settings.lightness_expr is not None
+            show_input = global_expr_enabled or has_custom_expr
+            dpg.configure_item("lightness_expr_group", show=show_input)
+
+            if has_custom_expr:
+                dpg.set_value("lightness_expr_input", region_style.lightness_expr)
+                self._set_input_grayed("lightness_expr_input", False)
+            else:
+                # Show global expr (grayed out)
+                global_expr = self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)"
+                dpg.set_value("lightness_expr_input", global_expr)
+                self._set_input_grayed("lightness_expr_input", True)
+
             # Clip% always shows global, grayed in conductor mode
             self._set_slider_grayed("clip_slider", True)
             dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
@@ -641,6 +706,17 @@ class PostprocessingPanel:
             dpg.set_value("brightness_slider", self.app.state.display_settings.brightness)
             dpg.set_value("contrast_slider", self.app.state.display_settings.contrast)
             dpg.set_value("gamma_slider", self.app.state.display_settings.gamma)
+
+            # Lightness expression - global mode (show Enable checkbox, hide toggle)
+            dpg.configure_item("lightness_expr_mode_toggle", show=False)
+            dpg.configure_item("lightness_expr_checkbox", show=True)
+            dpg.configure_item("lightness_expr_checkbox", enabled=True)
+            global_expr_enabled = self.app.state.display_settings.lightness_expr is not None
+            dpg.set_value("lightness_expr_checkbox", global_expr_enabled)
+            dpg.configure_item("lightness_expr_group", show=global_expr_enabled)
+            if global_expr_enabled:
+                dpg.set_value("lightness_expr_input", self.app.state.display_settings.lightness_expr)
+            self._set_input_grayed("lightness_expr_input", False)
 
             # Hide effects section
             dpg.configure_item("effects_header", show=False)
@@ -796,7 +872,14 @@ class PostprocessingPanel:
 
         current_time = time.time()
         if current_time - self.lightness_expr_last_update_time >= self.expr_debounce_delay:
-            self._apply_lightness_expr_update()
+            # Determine whether to apply global or per-region update
+            # Check if region has custom lightness expr (not palette override)
+            region_style = self._get_current_region_style()
+            has_custom_lightness = region_style is not None and region_style.lightness_expr is not None
+            if self._is_conductor_selected() and has_custom_lightness:
+                self._apply_region_lightness_expr_update()
+            else:
+                self._apply_lightness_expr_update()
             self.lightness_expr_pending_update = False
 
     def _apply_lightness_expr_update(self) -> None:
@@ -810,6 +893,71 @@ class PostprocessingPanel:
 
         with self.app.state_lock:
             self.app.state.display_settings.lightness_expr = expr
+
+        self.app.display_pipeline.refresh_display()
+
+    # ------------------------------------------------------------------
+    # Lightness expression mode (Global/Custom) callback
+    # ------------------------------------------------------------------
+
+    def on_lightness_expr_mode_change(self, sender=None, app_data=None) -> None:
+        """Handle Global/Custom radio toggle for per-region lightness expression."""
+        if dpg is None:
+            return
+
+        is_custom = (app_data == "Custom")
+
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected is None or selected.id is None:
+                return
+
+            # Ensure ConductorColorSettings exists for this conductor
+            from elliptica.app.core import ConductorColorSettings
+            if selected.id not in self.app.state.conductor_color_settings:
+                self.app.state.conductor_color_settings[selected.id] = ConductorColorSettings()
+
+            settings = self.app.state.conductor_color_settings[selected.id]
+            region_type = self.app.state.selected_region_type
+            region_style = settings.surface if region_type == "surface" else settings.interior
+
+            if is_custom:
+                # Switch to custom - initialize with global expr or default
+                global_expr = self.app.state.display_settings.lightness_expr
+                region_style.lightness_expr = global_expr or "clipnorm(mag, 1, 99)"
+            else:
+                # Switch to global - clear custom expr
+                region_style.lightness_expr = None
+
+        self.update_context_ui()
+        self.app.display_pipeline.refresh_display()
+
+    def _apply_region_lightness_expr_update(self) -> None:
+        """Apply the current per-region lightness expression."""
+        if dpg is None:
+            return
+
+        expr = dpg.get_value("lightness_expr_input").strip()
+        if not expr:
+            return
+
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected is None or selected.id is None:
+                return
+
+            # Ensure settings exist
+            from elliptica.app.core import ConductorColorSettings
+            if selected.id not in self.app.state.conductor_color_settings:
+                self.app.state.conductor_color_settings[selected.id] = ConductorColorSettings()
+
+            settings = self.app.state.conductor_color_settings[selected.id]
+            region_type = self.app.state.selected_region_type
+            region_style = settings.surface if region_type == "surface" else settings.interior
+
+            # Only update if this region has custom expr enabled
+            if region_style.lightness_expr is not None:
+                region_style.lightness_expr = expr
 
         self.app.display_pipeline.refresh_display()
 

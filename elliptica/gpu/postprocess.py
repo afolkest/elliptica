@@ -272,6 +272,10 @@ def apply_full_postprocess_gpu(
             contrast,
             gamma,
             normalized_tensor=normalized_tensor,  # Reuse normalized tensor
+            ex_tensor=ex_tensor,
+            ey_tensor=ey_tensor,
+            solution_gpu=solution_gpu,
+            global_lightness_expr=lightness_expr,
         )
 
     # Step 3: Apply region smear (if any region has smear enabled)
