@@ -168,7 +168,7 @@ class AppState:
     # Per-conductor color settings (keyed by conductor.id)
     conductor_color_settings: dict[int, ConductorColorSettings] = field(default_factory=dict)
 
-    # Expression-based color configuration (None = use legacy palette mode)
+    # Expression-based color configuration (None = use palette mode)
     # When set, overrides palette/brightness/contrast/gamma with OKLCH expressions
     color_config: Optional["ColorConfig"] = None
 

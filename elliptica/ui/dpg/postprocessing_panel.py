@@ -174,109 +174,103 @@ class PostprocessingPanel:
         # Text color hierarchy
         LABEL_TEXT = (150, 150, 150)  # Readable but slightly dimmed
 
-        # Color mode toggle
-        with dpg.group(horizontal=True, parent=parent):
-            dpg.add_text("Color Mode:", color=LABEL_TEXT)
-            dpg.add_radio_button(
-                items=["Palette", "Expressions"],
-                default_value="Palette",
-                horizontal=True,
-                callback=self.on_color_mode_change,
-                tag="color_mode_radio",
-            )
-
-        dpg.add_spacer(height=10, parent=parent)
-
-        # Palette mode container (shown by default)
-        with dpg.group(tag="palette_mode_group", parent=parent):
-            # === FIXED CONTEXT AREA (always takes same vertical space) ===
-            # Context header - ALWAYS visible, text changes based on mode
-            dpg.add_text("Global Settings", tag="context_header_text", color=(150, 200, 255))
-
-            # Region controls line - ONLY shown when conductor selected
-            with dpg.group(horizontal=True, tag="region_controls_line", show=False):
+        # Colors section (collapsible)
+        with dpg.collapsing_header(label="Colors", default_open=True, parent=parent):
+            # Color mode toggle
+            with dpg.group(horizontal=True):
+                dpg.add_text("Mode:", color=LABEL_TEXT)
                 dpg.add_radio_button(
-                    items=["Surface", "Interior"],
-                    default_value="Surface",
+                    items=["Palette", "Expressions"],
+                    default_value="Palette",
                     horizontal=True,
-                    callback=self.on_region_toggle,
-                    tag="region_toggle_radio",
-                )
-                dpg.add_spacer(width=10)
-                dpg.add_checkbox(
-                    label="Override",
-                    callback=self.on_enable_override,
-                    tag="enable_override_checkbox",
+                    callback=self.on_color_mode_change,
+                    tag="color_mode_radio",
                 )
 
-            # Placeholder spacer - shown in global mode to reserve same vertical space
-            # This prevents sliders from jumping when switching between modes
-            dpg.add_spacer(height=22, tag="region_controls_placeholder", show=True)
-
-            dpg.add_spacer(height=5)
-
-            # === PALETTE AREA ===
-            # Global palette UI (shown in global mode)
-            with dpg.group(tag="global_palette_group"):
-                self._build_global_palette_ui("global_palette_group", palette_colormaps)
-
-            # Region palette UI (shown in conductor mode)
-            with dpg.group(tag="region_palette_group", show=False):
-                self._build_region_palette_ui("region_palette_group", palette_colormaps)
-
-            # === SLIDERS (fixed position, never move) ===
             dpg.add_spacer(height=10)
 
-            # Clip% - always shows global, disabled in conductor mode
-            self.postprocess_clip_slider_id = dpg.add_slider_float(
-                label="Clip % (global)",
-                default_value=self.app.state.display_settings.clip_percent,
-                min_value=0.0,
-                max_value=defaults.MAX_CLIP_PERCENT,
-                format="%.2f%%",
-                callback=self.on_clip_slider,
-                width=200,
-                tag="clip_slider",
-            )
+            # Palette mode container (shown by default)
+            with dpg.group(tag="palette_mode_group"):
+                # Context header - ALWAYS visible, text changes based on mode
+                dpg.add_text("Global Settings", tag="context_header_text", color=(150, 200, 255))
 
-            # Brightness/Contrast/Gamma sliders
-            self.postprocess_brightness_slider_id = dpg.add_slider_float(
-                label="Brightness",
-                default_value=self.app.state.display_settings.brightness,
-                min_value=defaults.MIN_BRIGHTNESS,
-                max_value=defaults.MAX_BRIGHTNESS,
-                format="%.2f",
-                callback=self.on_brightness_slider,
-                width=200,
-                tag="brightness_slider",
-            )
-            self.postprocess_contrast_slider_id = dpg.add_slider_float(
-                label="Contrast",
-                default_value=self.app.state.display_settings.contrast,
-                min_value=defaults.MIN_CONTRAST,
-                max_value=defaults.MAX_CONTRAST,
-                format="%.2f",
-                callback=self.on_contrast_slider,
-                width=200,
-                tag="contrast_slider",
-            )
-            self.postprocess_gamma_slider_id = dpg.add_slider_float(
-                label="Gamma",
-                default_value=self.app.state.display_settings.gamma,
-                min_value=defaults.MIN_GAMMA,
-                max_value=defaults.MAX_GAMMA,
-                format="%.2f",
-                callback=self.on_gamma_slider,
-                width=200,
-                tag="gamma_slider",
-            )
+                # Region controls line - ONLY shown when conductor selected
+                with dpg.group(horizontal=True, tag="region_controls_line", show=False):
+                    dpg.add_radio_button(
+                        items=["Surface", "Interior"],
+                        default_value="Surface",
+                        horizontal=True,
+                        callback=self.on_region_toggle,
+                        tag="region_toggle_radio",
+                    )
+                    dpg.add_spacer(width=10)
+                    dpg.add_checkbox(
+                        label="Color Override",
+                        callback=self.on_enable_override,
+                        tag="enable_override_checkbox",
+                    )
 
-        # Expressions mode container (hidden by default)
-        with dpg.group(tag="expressions_mode_group", parent=parent, show=False):
-            self._build_expression_editor_ui("expressions_mode_group")
+                # Placeholder spacer - shown in global mode to reserve same vertical space
+                dpg.add_spacer(height=22, tag="region_controls_placeholder", show=True)
 
-        dpg.add_spacer(height=10, parent=parent)
-        dpg.add_separator(parent=parent)
+                dpg.add_spacer(height=5)
+
+                # Global palette UI (shown in global mode)
+                with dpg.group(tag="global_palette_group"):
+                    self._build_global_palette_ui("global_palette_group", palette_colormaps)
+
+                # Region palette UI (shown in conductor mode)
+                with dpg.group(tag="region_palette_group", show=False):
+                    self._build_region_palette_ui("region_palette_group", palette_colormaps)
+
+                # Sliders (fixed position)
+                dpg.add_spacer(height=10)
+
+                self.postprocess_clip_slider_id = dpg.add_slider_float(
+                    label="Clip % (global)",
+                    default_value=self.app.state.display_settings.clip_percent,
+                    min_value=0.0,
+                    max_value=defaults.MAX_CLIP_PERCENT,
+                    format="%.2f%%",
+                    callback=self.on_clip_slider,
+                    width=200,
+                    tag="clip_slider",
+                )
+
+                self.postprocess_brightness_slider_id = dpg.add_slider_float(
+                    label="Brightness",
+                    default_value=self.app.state.display_settings.brightness,
+                    min_value=defaults.MIN_BRIGHTNESS,
+                    max_value=defaults.MAX_BRIGHTNESS,
+                    format="%.2f",
+                    callback=self.on_brightness_slider,
+                    width=200,
+                    tag="brightness_slider",
+                )
+                self.postprocess_contrast_slider_id = dpg.add_slider_float(
+                    label="Contrast",
+                    default_value=self.app.state.display_settings.contrast,
+                    min_value=defaults.MIN_CONTRAST,
+                    max_value=defaults.MAX_CONTRAST,
+                    format="%.2f",
+                    callback=self.on_contrast_slider,
+                    width=200,
+                    tag="contrast_slider",
+                )
+                self.postprocess_gamma_slider_id = dpg.add_slider_float(
+                    label="Gamma",
+                    default_value=self.app.state.display_settings.gamma,
+                    min_value=defaults.MIN_GAMMA,
+                    max_value=defaults.MAX_GAMMA,
+                    format="%.2f",
+                    callback=self.on_gamma_slider,
+                    width=200,
+                    tag="gamma_slider",
+                )
+
+            # Expressions mode container (hidden by default)
+            with dpg.group(tag="expressions_mode_group", show=False):
+                self._build_expression_editor_ui("expressions_mode_group")
 
         # Conductor effects section (smear) - only shown when conductor selected
         with dpg.collapsing_header(label="Conductor Effects", default_open=True,

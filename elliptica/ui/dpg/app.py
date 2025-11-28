@@ -245,71 +245,73 @@ class EllipticaApp:
         # Set viewport resize callback
         dpg.set_viewport_resize_callback(self._on_viewport_resize)
 
-        with dpg.window(label="Controls", width=360, height=-1, pos=(10, 10), tag="controls_window"):
-            with dpg.group(tag="edit_controls_group") as edit_group:
-                self.edit_controls_id = edit_group
-                dpg.add_text("Render Controls")
-                self.pde_combo_id = dpg.add_combo(
-                    label="Equation",
-                    items=list(self.pde_label_map.keys()),
-                    default_value=self._label_for_active_pde(),
-                    callback=self.on_pde_changed,
-                    width=250,
-                )
-                dpg.add_spacer(height=6)
-                dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
-                dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
-                dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
-                self.cache_panel.build_view_postprocessing_button(edit_group)
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
-                dpg.add_text("Canvas Size")
-                with dpg.group(horizontal=True):
-                    self.canvas_width_input_id = dpg.add_input_int(
-                        label="Width",
-                        min_value=1,
-                        min_clamped=True,
-                        max_value=32768,
-                        max_clamped=True,
-                        step=0,
-                        width=120,
+        with dpg.window(label="Controls", width=360, height=800, pos=(10, 10), tag="controls_window"):
+            # Scrollable content area - negative height leaves room for footer
+            with dpg.child_window(autosize_x=True, height=-70, border=False, tag="controls_content"):
+                with dpg.group(tag="edit_controls_group") as edit_group:
+                    self.edit_controls_id = edit_group
+                    dpg.add_text("Render Controls")
+                    self.pde_combo_id = dpg.add_combo(
+                        label="Equation",
+                        items=list(self.pde_label_map.keys()),
+                        default_value=self._label_for_active_pde(),
+                        callback=self.on_pde_changed,
+                        width=250,
                     )
-                    self.canvas_height_input_id = dpg.add_input_int(
-                        label="Height",
-                        min_value=1,
-                        min_clamped=True,
-                        max_value=32768,
-                        max_clamped=True,
-                        step=0,
-                        width=120,
-                    )
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size, width=180)
-                    dpg.add_button(label="Fit Display", callback=self._fit_canvas_to_window, width=140)
-                dpg.add_spacer(height=10)
-                dpg.add_separator()
-                self.boundary_controls.build_container(edit_group)
+                    dpg.add_spacer(height=6)
+                    dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
+                    dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
+                    dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
+                    self.cache_panel.build_view_postprocessing_button(edit_group)
+                    dpg.add_spacer(height=10)
+                    dpg.add_separator()
+                    dpg.add_text("Canvas Size")
+                    with dpg.group(horizontal=True):
+                        self.canvas_width_input_id = dpg.add_input_int(
+                            label="Width",
+                            min_value=1,
+                            min_clamped=True,
+                            max_value=32768,
+                            max_clamped=True,
+                            step=0,
+                            width=120,
+                        )
+                        self.canvas_height_input_id = dpg.add_input_int(
+                            label="Height",
+                            min_value=1,
+                            min_clamped=True,
+                            max_value=32768,
+                            max_clamped=True,
+                            step=0,
+                            width=120,
+                        )
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Apply Canvas Size", callback=self._apply_canvas_size, width=180)
+                        dpg.add_button(label="Fit Display", callback=self._fit_canvas_to_window, width=140)
+                    dpg.add_spacer(height=10)
+                    dpg.add_separator()
+                    self.boundary_controls.build_container(edit_group)
 
-            with dpg.group(tag="render_controls_group") as render_group:
-                self.render_controls_id = render_group
-                dpg.add_text("Render View")
-                with dpg.group(horizontal=True):
-                    dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked, width=140)
-                    dpg.add_button(label="Save Image", callback=self.image_export.export_image, width=140)
-                dpg.add_spacer(height=15)
-                dpg.add_separator()
-                dpg.add_spacer(height=10)
+                with dpg.group(tag="render_controls_group") as render_group:
+                    self.render_controls_id = render_group
+                    dpg.add_text("Render View")
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Back to Edit", callback=self._on_back_to_edit_clicked, width=140)
+                        dpg.add_button(label="Save Image", callback=self.image_export.export_image, width=140)
+                    dpg.add_spacer(height=15)
+                    dpg.add_separator()
+                    dpg.add_spacer(height=10)
 
-                # Build postprocessing UI (sliders, color controls, region properties)
-                self.postprocess_panel.build_postprocessing_ui(render_group, self.display_pipeline.texture_manager.palette_colormaps)
+                    # Build postprocessing UI (sliders, color controls, region properties)
+                    self.postprocess_panel.build_postprocessing_ui(render_group, self.display_pipeline.texture_manager.palette_colormaps)
 
-                # Render cache status at bottom (compact, subtle)
-                dpg.add_spacer(height=10)
-                self.cache_panel.build_cache_status_ui(render_group)
-
-            dpg.add_spacer(height=10)
-            dpg.add_text("Status:")
-            dpg.add_text("", tag="status_text")
+            # Footer: fixed at bottom of window (outside child_window)
+            dpg.add_separator()
+            SUBTLE = (90, 90, 90)
+            with dpg.group(horizontal=True):
+                dpg.add_text("Status:", color=SUBTLE)
+                dpg.add_text("", tag="status_text", color=SUBTLE)
+            self.cache_panel.build_cache_status_ui("controls_window")
 
         # Canvas window with initial size (will be resized after viewport is shown)
         # Setting width/height prevents auto-expansion to fit drawlist
