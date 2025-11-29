@@ -326,30 +326,81 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
                     source_local = source_mask_p[y0:y1, x0:x1]
                     roi_bbox = (y0, y1, x0, x1)
 
-    # Optional multi-resolution characteristic solve. We only enable this when
-    # the medium is homogeneous (no lens regions detected), since downsampling
-    # has been observed to destroy caustic structure in variable-n fields.
-    subsample_env = os.environ.get("ELLIPTICA_EIKONAL_AMP_SUBSAMPLE", "1")
-    try:
-        subsample = max(1, int(subsample_env))
-    except ValueError:
-        subsample = 1
+    amplitude_local: np.ndarray | None = None
 
-    if subsample > 1 and not lens_mask.any():
-        amplitude_local = compute_amplitude_characteristic_multires(
-            phi_local,
-            n_local,
-            source_local,
-            downsample=subsample,
-            step_size=0.5,
-        )
-    else:
-        amplitude_local = compute_amplitude_characteristic(
-            phi_local,
-            n_local,
-            source_local,
-            step_size=0.5,
-        )
+    # Optional torch ray tracer remains opt-in via env flag.
+    use_torch_amp = os.environ.get("ELLIPTICA_TORCH_EIKONAL_AMP", "1") != "0"
+    torch_subsample_env = os.environ.get("ELLIPTICA_TORCH_AMP_SUBSAMPLE", "1")
+    try:
+        torch_subsample = max(1, int(torch_subsample_env))
+    except ValueError:
+        torch_subsample = 1
+
+    if use_torch_amp:
+        try:
+            import torch  # Local import to avoid hard dependency during import time
+
+            # Device selection: honor override, else CUDA > CPU (skip MPS by default;
+            # MPS is slow for scatter-heavy splats in this tracer and is disabled).
+            device_env = os.environ.get("ELLIPTICA_TORCH_DEVICE")
+            if device_env:
+                if device_env.lower() == "mps":
+                    device = "cpu"
+                else:
+                    device = device_env
+            elif torch.cuda.is_available():
+                device = "cuda"
+            else:
+                device = "cpu"
+
+            amplitude_local = trace_amplitude_torch(
+                phi_local,
+                n_local,
+                source_local,
+                step_size=0.75,
+                seed_stride=1,
+                jitter=0.2,
+                max_steps=None,
+                device=device,
+                subsample=torch_subsample,
+                target_rays=8000,
+                integrate_transport=False,
+            )
+            msg = f"eikonal amplitude: using torch ray tracer on {device}"
+            if torch_subsample > 1:
+                msg += f" (subsample {torch_subsample}x)"
+            if device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                msg += " (MPS disabled for this solver)"
+            print(msg, flush=True)
+        except Exception:
+            amplitude_local = None
+            print("eikonal amplitude: torch path failed, falling back to deterministic characteristic solve", flush=True)
+
+    if amplitude_local is None:
+        # Optional multi-resolution characteristic solve. We only enable this when
+        # the medium is homogeneous (no lens regions detected), since downsampling
+        # has been observed to destroy caustic structure in variable-n fields.
+        subsample_env = os.environ.get("ELLIPTICA_EIKONAL_AMP_SUBSAMPLE", "1")
+        try:
+            subsample = max(1, int(subsample_env))
+        except ValueError:
+            subsample = 1
+
+        if subsample > 1 and not lens_mask.any():
+            amplitude_local = compute_amplitude_characteristic_multires(
+                phi_local,
+                n_local,
+                source_local,
+                downsample=subsample,
+                step_size=0.5,
+            )
+        else:
+            amplitude_local = compute_amplitude_characteristic(
+                phi_local,
+                n_local,
+                source_local,
+                step_size=0.5,
+            )
 
     if roi_bbox is not None:
         # Embed ROI amplitude into a full-resolution field and use A=1
@@ -360,40 +411,6 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
         amplitude[source_mask_p] = 1.0
     else:
         amplitude = amplitude_local.astype(np.float32, copy=False)
-
-    # Optional torch ray tracer remains opt-in via env flag.
-    use_torch_amp = os.environ.get("ELLIPTICA_TORCH_EIKONAL_AMP", "0") == "1"
-    if use_torch_amp:
-        try:
-            import torch  # Local import to avoid hard dependency during import time
-
-            # Device selection: honor override, else CUDA > CPU (skip MPS by default;
-            # MPS is slow for scatter-heavy splats in this tracer).
-            device_env = os.environ.get("ELLIPTICA_TORCH_DEVICE")
-            if device_env:
-                device = device_env
-            elif torch.cuda.is_available():
-                device = "cuda"
-            else:
-                device = "cpu"
-
-            amplitude_torch = trace_amplitude_torch(
-                phi,
-                n_field_p,
-                source_mask_p,
-                step_size=0.75,
-                seed_stride=1,
-                jitter=0.0,
-                max_steps=None,
-                device=device,
-            )
-            amplitude = amplitude_torch
-            msg = f"eikonal amplitude: using torch ray tracer on {device}"
-            if device_env is None and device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                msg += " (MPS available but skipped for speed; set ELLIPTICA_TORCH_DEVICE=mps to force)"
-            print(msg, flush=True)
-        except Exception:
-            print("eikonal amplitude: torch path failed, using deterministic characteristic solve", flush=True)
 
     # Crop padding back to the original domain
     if pad > 0:

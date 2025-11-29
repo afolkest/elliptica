@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
+import os
 from scipy.ndimage import distance_transform_edt, gaussian_filter, binary_dilation
 
 
@@ -427,6 +428,9 @@ def compute_amplitude_characteristic_torch(
     loop on a torch device (CPU, CUDA, or MPS) for speed.
     """
     device = torch.device(device)
+    if device.type == "mps":
+        # Force CPU; MPS is slow for the scatter-heavy tracer.
+        device = torch.device("cpu")
     h, w = phi.shape
 
     phi64 = phi.astype(np.float64, copy=False)
@@ -929,6 +933,10 @@ def trace_amplitude_torch(
     integrate_transport: bool = False,
     max_steps: int | None = None,
     device: str | torch.device = "cpu",
+    subsample: int = 1,
+    target_rays: int = 4000,
+    blur_size: int = 5,
+    blur_sigma: float | None = None,
 ) -> np.ndarray:
     """
     Trace rays and estimate amplitude via ray density (piecewise-constant n).
@@ -945,15 +953,46 @@ def trace_amplitude_torch(
             geometric spreading; enable to reduce noise when ray counts are low.
         max_steps: Optional cap on steps
         device: 'cpu', 'cuda', or 'mps'
+        subsample: If >1, run the tracer on a coarse grid and upsample A
+            back to the original resolution for speed.
+        target_rays: Thin dense source-ring seeds toward this budget.
+        blur_size: Gaussian blur kernel size (odd). If <=1, disable blur.
+        blur_sigma: Optional sigma for blur. If None, a binomial 5x5 is used
+            when blur_size==5; otherwise sigma≈blur_size/3.
     """
     device = torch.device(device)
-    h, w = phi.shape
+    # Env overrides for tuning without code changes.
+    step_size = float(os.environ.get("ELLIPTICA_TORCH_AMP_STEP", step_size))
+    jitter = float(os.environ.get("ELLIPTICA_TORCH_AMP_JITTER", jitter))
+    integrate_transport = os.environ.get("ELLIPTICA_TORCH_AMP_TRANSPORT", "0") == "1" if "ELLIPTICA_TORCH_AMP_TRANSPORT" in os.environ else integrate_transport
+    target_rays = int(os.environ.get("ELLIPTICA_TORCH_AMP_TARGET_RAYS", target_rays))
+    blur_size = int(os.environ.get("ELLIPTICA_TORCH_AMP_BLUR_SIZE", blur_size))
+    if "ELLIPTICA_TORCH_AMP_BLUR_SIGMA" in os.environ:
+        blur_sigma = float(os.environ["ELLIPTICA_TORCH_AMP_BLUR_SIGMA"])
+    subsample = max(1, int(subsample))
+
+    # Optional coarse grid to reduce work.
+    h_full, w_full = phi.shape
+    if subsample > 1:
+        hc = max(1, int(np.ceil(h_full / subsample)))
+        wc = max(1, int(np.ceil(w_full / subsample)))
+        phi_work = _resample_to_shape(phi, hc, wc)
+        n_work = _resample_to_shape(n_field, hc, wc)
+        src_f = _resample_to_shape(source_mask.astype(np.float64), hc, wc)
+        src_work = src_f > 0.5
+        step_size = float(step_size) / float(subsample)
+    else:
+        phi_work = phi
+        n_work = n_field
+        src_work = source_mask
+
+    h, w = phi_work.shape
     if max_steps is None:
         max_steps = int(1.25 * max(h, w) / step_size)
 
-    phi_t = _to_torch(phi, device)
-    n_t = _to_torch(n_field, device)
-    src_t = torch.from_numpy(source_mask.astype(np.float32)).to(device)
+    phi_t = _to_torch(phi_work, device)
+    n_t = _to_torch(n_work, device)
+    src_t = torch.from_numpy(src_work.astype(np.float32)).to(device)
 
     # Light smoothing of phi to stabilize curvature estimates
     kernel3 = torch.tensor([[1., 2., 1.],
@@ -974,14 +1013,14 @@ def trace_amplitude_torch(
     transport_field = div_s + dir_grad_ln_n
 
     # Seed rays on a thin band outside the source
-    dist_out = distance_transform_edt((~source_mask).astype(np.uint8)).astype(np.float32)
+    dist_out = distance_transform_edt((~src_work).astype(np.uint8)).astype(np.float32)
     band_mask = (dist_out > 0.5) & (dist_out < 2.5)
     band_y, band_x = np.nonzero(band_mask)
     if band_y.size == 0:
         yy, xx = np.mgrid[0:h:seed_stride, 0:w:seed_stride]
         band_y, band_x = yy.ravel(), xx.ravel()
     # Thin dense rings to keep ray count reasonable on large grids
-    target_rays = 4000
+    target_rays = max(1, int(target_rays))
     if band_y.size > target_rays:
         stride = int(np.ceil(np.sqrt(band_y.size / target_rays)))
         band_y = band_y[::stride]
@@ -1117,11 +1156,28 @@ def trace_amplitude_torch(
 
     # Smooth density and derive amplitude
     acc_w_4d = acc_w.unsqueeze(0).unsqueeze(0)
-    # Moderate Gaussian smoothing to reduce grid anisotropy in density estimate
-    g1d = torch.tensor([1., 4., 6., 4., 1.], device=device, dtype=torch.float32)
-    g1d = g1d / g1d.sum()
-    g2d = torch.outer(g1d, g1d)
-    acc_blur = F.conv2d(acc_w_4d, g2d.view(1, 1, 5, 5), padding=2).squeeze(0).squeeze(0)
+    if blur_size <= 1:
+        acc_blur = acc_w
+    elif blur_size == 5 and blur_sigma is None:
+        # Fast binomial 5x5 (default)
+        g1d = torch.tensor([1., 4., 6., 4., 1.], device=device, dtype=torch.float32)
+        g1d = g1d / g1d.sum()
+        g2d = torch.outer(g1d, g1d)
+        acc_blur = F.conv2d(acc_w_4d, g2d.view(1, 1, 5, 5), padding=2).squeeze(0).squeeze(0)
+    else:
+        # Generic Gaussian blur
+        k = int(max(3, blur_size | 1))  # force odd, min 3
+        if blur_sigma is None:
+            sigma = k / 3.0
+        else:
+            sigma = float(blur_sigma)
+        ax = torch.arange(k, device=device, dtype=torch.float32) - (k // 2)
+        g1d = torch.exp(-0.5 * (ax / sigma) ** 2)
+        g1d = g1d / g1d.sum()
+        g2d = torch.outer(g1d, g1d)
+        pad = k // 2
+        acc_blur = F.conv2d(acc_w_4d, g2d.view(1, 1, k, k), padding=pad).squeeze(0).squeeze(0)
+
     density = torch.where(acc_blur > 1e-8, acc_blur, acc_w)
     A = torch.sqrt(torch.clamp(density, min=1e-8))
 
@@ -1133,4 +1189,18 @@ def trace_amplitude_torch(
         A = A / norm
     A = torch.clamp(A, 0.0, 10.0)
     A[src_t > 0.5] = 1.0
-    return A.detach().cpu().numpy().astype(np.float32)
+    A_np = A.detach().cpu().numpy().astype(np.float32)
+
+    if subsample <= 1:
+        return A_np
+
+    # Upsample to the original grid and re-normalize near the original source.
+    A_full = _resample_to_shape(A_np, h_full, w_full)
+    dist_out_full = distance_transform_edt((~source_mask).astype(np.uint8)).astype(np.float64)
+    src_band_full = dist_out_full <= 2.5
+    if src_band_full.any():
+        norm = float(A_full[src_band_full].max())
+        if norm > 1e-6:
+            A_full = A_full / norm
+    A_full[source_mask] = 1.0
+    return A_full.astype(np.float32, copy=False)
