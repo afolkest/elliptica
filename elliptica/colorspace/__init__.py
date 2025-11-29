@@ -58,6 +58,7 @@ from .presets import (
     list_presets,
     AVAILABLE_VARIABLES,
     AVAILABLE_FUNCTIONS,
+    PDE_SPECIFIC_VARIABLES,
 )
 
 __all__ = [
@@ -76,6 +77,7 @@ __all__ = [
     'list_presets',
     'AVAILABLE_VARIABLES',
     'AVAILABLE_FUNCTIONS',
+    'PDE_SPECIFIC_VARIABLES',
     # OKLCH conversions
     'oklch_to_oklab',
     'oklab_to_oklch',

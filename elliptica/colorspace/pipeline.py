@@ -156,13 +156,18 @@ def render_with_color_config_gpu(
         bindings['ex'] = ex_tensor
         bindings['ey'] = ey_tensor
 
-    # Upload solution arrays to GPU if provided
+    # Add solution fields to bindings (handles both numpy arrays and torch tensors)
     if solution is not None:
         device = scalar_tensor.device
         dtype = scalar_tensor.dtype
         for name, arr in solution.items():
             if name not in bindings:
-                bindings[name] = torch.from_numpy(arr).to(device=device, dtype=dtype)
+                if isinstance(arr, torch.Tensor):
+                    # Already a tensor, ensure on correct device
+                    bindings[name] = arr.to(device=device, dtype=dtype)
+                else:
+                    # Numpy array, upload to GPU
+                    bindings[name] = torch.from_numpy(arr).to(device=device, dtype=dtype)
 
     # Build region masks if we have conductors
     region_masks: dict[str, torch.Tensor] = {}

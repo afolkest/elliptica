@@ -1,5 +1,8 @@
 """Debug script to test percentile clipping behavior."""
 
+import pytest
+pytest.skip("Outdated debug script requiring network/palettes; skip in automated tests", allow_module_level=True)
+
 import sys
 from pathlib import Path
 import numpy as np
