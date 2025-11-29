@@ -4,6 +4,9 @@ from typing import Tuple
 
 import numpy as np
 
+# Fallback interface mask used when none is provided (Numba requires concrete type).
+patch_mask_placeholder = np.zeros((1, 1), dtype=np.bool_)
+
 try:
     from numba import njit
 except Exception:  # pragma: no cover - numba is optional at runtime
@@ -11,6 +14,14 @@ except Exception:  # pragma: no cover - numba is optional at runtime
         (lambda f: f) if (not args or callable(args[0])) else (lambda f: f)
     )
 
+
+@njit(cache=True)
+def _minmod(a: float, b: float) -> float:
+    if a * b <= 0.0:
+        return 0.0
+    if abs(a) < abs(b):
+        return a
+    return b
 
 @njit(cache=True)
 def weno3_1d_minus(u: np.ndarray, i: int, j: int, axis: int, h: float) -> float:
@@ -118,6 +129,9 @@ def lf_update_scalar(
     j: int,
     ix_src: int,
     iz_src: int,
+    alpha_cap: float,
+    interface_mask: np.ndarray,
+    use_interface_minmod: bool,
 ) -> float:
     """
     Third-order WENO + Lax–Friedrichs update for factored eikonal τ=τ0*u.
@@ -130,15 +144,28 @@ def lf_update_scalar(
     if i == ix_src and j == iz_src:
         return 1.0
 
-    # WENO directional derivatives of u
-    ux_minus = weno3_1d_minus(u, i, j, 0, h)
-    ux_plus = weno3_1d_plus(u, i, j, 0, h)
-    uz_minus = weno3_1d_minus(u, i, j, 1, h)
-    uz_plus = weno3_1d_plus(u, i, j, 1, h)
-
-    # Symmetric combination for Hamiltonian evaluation
-    ux_hat = 0.5 * (ux_minus + ux_plus)
-    uz_hat = 0.5 * (uz_minus + uz_plus)
+    # Derivatives: optionally switch to minmod near interfaces for stability.
+    if use_interface_minmod and interface_mask[i, j]:
+        # First-order minmod upwindish slopes
+        im1 = max(i - 1, 0)
+        ip1 = min(i + 1, u.shape[0] - 1)
+        jm1 = max(j - 1, 0)
+        jp1 = min(j + 1, u.shape[1] - 1)
+        dux_f = (u[ip1, j] - u[i, j]) / h
+        dux_b = (u[i, j] - u[im1, j]) / h
+        duz_f = (u[i, jp1] - u[i, j]) / h
+        duz_b = (u[i, j] - u[i, jm1]) / h
+        ux_hat = _minmod(dux_f, dux_b)
+        uz_hat = _minmod(duz_f, duz_b)
+        ux_minus = ux_plus = ux_hat
+        uz_minus = uz_plus = uz_hat
+    else:
+        ux_minus = weno3_1d_minus(u, i, j, 0, h)
+        ux_plus = weno3_1d_plus(u, i, j, 0, h)
+        uz_minus = weno3_1d_minus(u, i, j, 1, h)
+        uz_plus = weno3_1d_plus(u, i, j, 1, h)
+        ux_hat = 0.5 * (ux_minus + ux_plus)
+        uz_hat = 0.5 * (uz_minus + uz_plus)
 
     # τ0 gradients (central)
     im1 = max(i - 1, 0)
@@ -169,6 +196,10 @@ def lf_update_scalar(
 
     alpha_x = 0.5 * abs(Hp_x) + abs(Hu)
     alpha_z = 0.5 * abs(Hp_z) + abs(Hu)
+    if alpha_x > alpha_cap:
+        alpha_x = alpha_cap
+    if alpha_z > alpha_cap:
+        alpha_z = alpha_cap
     # Avoid degenerate denominator
     denom_alpha = alpha_x / h + alpha_z / h + 1e-12
 
@@ -210,6 +241,9 @@ def sweep_factored_eikonal(
     gauss_seidel: bool = True,
     u_min: float = 1e-6,
     u_max: float = 1e6,
+    alpha_cap: float = 1e3,
+    interface_mask: np.ndarray = patch_mask_placeholder,
+    use_interface_minmod: bool = False,
 ) -> None:
     """
     Perform one Gauss–Seidel sweep over the grid in a given order.
@@ -241,12 +275,22 @@ def sweep_factored_eikonal(
 
     for ii in irange:
         for jj in jrange:
-            # Skip physical boundary; treat as outflow to reduce spurious decay.
-            if ii == 0 or jj == 0 or ii == nx - 1 or jj == nz - 1:
-                continue
             if fixed_mask is not None and fixed_mask[ii, jj]:
                 continue
-            u[ii, jj] = lf_update_scalar(u_old, s, tau0, s0, h, ii, jj, ix_src, iz_src)
+            u[ii, jj] = lf_update_scalar(
+                u_old,
+                s,
+                tau0,
+                s0,
+                h,
+                ii,
+                jj,
+                ix_src,
+                iz_src,
+                alpha_cap,
+                interface_mask if interface_mask is not None else patch_mask_placeholder,
+                use_interface_minmod,
+            )
             if u[ii, jj] < u_min:
                 u[ii, jj] = u_min
             if u[ii, jj] > u_max:

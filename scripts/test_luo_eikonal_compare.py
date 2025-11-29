@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from typing import Tuple
+import os
 
 import numpy as np
 import skfmm
@@ -43,6 +44,7 @@ def run_case(
     n_field: np.ndarray,
     src_idx: Tuple[int, int],
     h: float = 1.0,
+    gauss_seidel: bool = False,
 ) -> None:
     """Build φ with FMM and τ with the factored solver; report errors."""
     src_mask = np.zeros_like(n_field, dtype=bool)
@@ -60,7 +62,7 @@ def run_case(
         h=h,
         source_idx=src_idx,
         v_ref=1.0 / s_field[src_idx],
-        gauss_seidel=False,
+        gauss_seidel=gauss_seidel,
     )
     t_tau = time.time() - t1
 
@@ -75,6 +77,7 @@ def run_case(
     print(
         f"{name}: shape={n_field.shape}, src={src_idx}, "
         f"t_phi={t_phi:.3f}s t_tau={t_tau:.3f}s "
+        f"GS={gauss_seidel} "
         f"phi[min,max]=({phi.min():.3g},{phi.max():.3g}) "
         f"tau[min,max]=({tau.min():.3g},{tau.max():.3g}) "
         f"u[min,max]=({u_min:.3g},{u_max:.3g}) "
@@ -86,11 +89,12 @@ def main() -> None:
     size = 201
     center = (size // 2, size // 2)
     offset = (size // 3, size // 4)
+    gs = os.environ.get("LuoGS", "0") == "1"
 
     # Homogeneous n=1
     n_hom = np.ones((size, size), dtype=np.float64)
-    run_case("homog-center", n_hom, center)
-    run_case("homog-offset", n_hom, offset)
+    run_case("homog-center", n_hom, center, gauss_seidel=gs)
+    run_case("homog-offset", n_hom, offset, gauss_seidel=gs)
 
     # Simple lens: n=1.5 disk on the right
     lens_center = (size // 2, 3 * size // 4)
@@ -99,8 +103,14 @@ def main() -> None:
     n_lens = np.ones((size, size), dtype=np.float64)
     n_lens[lens_mask] = 1.5
 
-    run_case("lens-center", n_lens, center)
-    run_case("lens-offset", n_lens, offset)
+    run_case("lens-center", n_lens, center, gauss_seidel=gs)
+    run_case("lens-offset", n_lens, offset, gauss_seidel=gs)
+
+    # Slab interface: left n=1, right n=1.5
+    slab = np.ones((size, size), dtype=np.float64)
+    slab[:, size // 2 :] = 1.5
+    run_case("slab-center", slab, center, gauss_seidel=gs)
+    run_case("slab-offset", slab, offset, gauss_seidel=gs)
 
 
 if __name__ == "__main__":
