@@ -17,7 +17,7 @@ import skfmm
 import torch
 from scipy.ndimage import distance_transform_edt
 
-from elliptica.pde.eikonal_amp import compute_amplitude_characteristic_torch
+from elliptica.pde.eikonal_amp import trace_amplitude_torch
 
 
 def build_test_problem(size: int = 512, radius: int = 12):
@@ -48,11 +48,12 @@ def profile_device(device: str, size: int, step_size: float) -> None:
             return
 
     t0 = time.time()
-    A = compute_amplitude_characteristic_torch(
+    A = trace_amplitude_torch(
         phi,
         n_field,
         src,
         step_size=step_size,
+        subsample=1,
         device=device,
     )
     dt = time.time() - t0
@@ -88,4 +89,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
