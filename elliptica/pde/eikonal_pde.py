@@ -6,11 +6,13 @@ Solves |∇φ|² = n(x,y)² for wavefront propagation using Fast Marching Method
 
 import numpy as np
 from typing import Any
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, distance_transform_edt, gaussian_filter
 import skfmm
+import os
 
 from .base import PDEDefinition, BCField
 from ..mask_utils import blur_mask
+from .eikonal_amp import trace_amplitude_torch
 
 # Object type constants
 SOURCE = 0
@@ -19,6 +21,104 @@ LENS = 1
 # Edge BC types
 EDGE_OPEN = 0      # Not a source, waves propagate through
 EDGE_SOURCE = 1    # Plane wave source from this edge
+
+
+def _compute_divergence_of_unit_gradient(phi: np.ndarray) -> np.ndarray:
+    """Return ∇·v where v = ∇φ / |∇φ|."""
+    gy, gx = np.gradient(phi)
+    mag = np.hypot(gx, gy)
+    mag = np.maximum(mag, 1e-6)
+    vx = gx / mag
+    vy = gy / mag
+    div = np.gradient(vx, axis=1) + np.gradient(vy, axis=0)
+    return div.astype(np.float64)
+
+
+def compute_amplitude(phi: np.ndarray, n_field: np.ndarray, source_mask: np.ndarray) -> np.ndarray:
+    """
+    Solve the transport equation for amplitude: 2∇φ·∇A + A∇²φ = 0
+
+    This gives intensity variations along rays - caustics appear as bright
+    regions where rays converge (∇²φ < 0).
+
+    Args:
+        phi: Travel time / phase field from eikonal solve
+        source_mask: Boolean mask of source pixels (A=1 there)
+
+    Returns:
+        Amplitude field A(x,y)
+    """
+    h, w = phi.shape
+    phi64 = phi.astype(np.float64, copy=False)
+    n64 = np.maximum(n_field.astype(np.float64, copy=False), 1e-6)
+
+    # Smooth phi for more isotropic curvature estimates (FMM is first-order)
+    phi_smooth = gaussian_filter(phi64, sigma=0.5, mode="nearest")
+
+    # Direction field and curvature from smoothed phi
+    gy, gx = np.gradient(phi_smooth)
+    mag = np.hypot(gx, gy)
+    mag = np.maximum(mag, 1e-6)
+    sx = gx / mag
+    sy = gy / mag
+    div_s = np.gradient(sx, axis=1) + np.gradient(sy, axis=0)
+
+    # Refractive index gradient contribution: s·∇(ln n)
+    ln_n = np.log(n64)
+    ln_n_y, ln_n_x = np.gradient(ln_n)
+    dir_grad_ln_n = ln_n_x * sx + ln_n_y * sy
+
+    # Combined term from ∇·(n s) = s·∇n + n∇·s -> (dir_grad_ln_n + div_s) * n
+    # Transport along rays: d ln A / ds = -0.5 * (dir_grad_ln_n + div_s)
+    transport_term = dir_grad_ln_n + div_s
+
+    logA = np.full((h, w), np.inf, dtype=np.float64)
+    logA[source_mask] = 0.0
+    processed = source_mask.astype(bool, copy=True)
+
+    order = np.argsort(phi64.ravel()).astype(np.int64)
+    order_shape_w = w
+
+    for idx in order:
+        i = idx // order_shape_w
+        j = idx % order_shape_w
+        if processed[i, j]:
+            continue
+
+        best_phi = np.inf
+        best_logA = 0.0
+
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                if di == 0 and dj == 0:
+                    continue
+                ni = i + di
+                nj = j + dj
+                if ni < 0 or nj < 0 or ni >= h or nj >= w:
+                    continue
+                if not processed[ni, nj]:
+                    continue
+
+                phi_nb = phi64[ni, nj]
+                if phi_nb < best_phi:
+                    dphi = phi64[i, j] - phi_nb
+                    n_avg = max(0.5 * (n64[i, j] + n64[ni, nj]), 1e-6)
+                    ds = dphi / n_avg if dphi > 0 else 0.0
+                    tau = 0.5 * (transport_term[i, j] + transport_term[ni, nj])
+                    best_logA = logA[ni, nj] - tau * ds
+                    best_phi = phi_nb
+
+        if best_phi < np.inf:
+            logA[i, j] = best_logA
+        else:
+            logA[i, j] = 0.0
+
+        processed[i, j] = True
+
+    logA = np.clip(logA, -30.0, 30.0)
+    A = np.exp(logA)
+
+    return A.astype(np.float32, copy=False)
 
 
 def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
@@ -45,10 +145,6 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
     # Initialize refractive index field (n=1 is free space)
     n_field = np.ones((grid_h, grid_w), dtype=np.float64)
 
-    # phi_init for FMM: negative inside sources, positive outside
-    # FMM propagates from the zero level set
-    phi_init = np.ones((grid_h, grid_w), dtype=np.float64)
-
     # Track source regions for LIC masking (sources block, lenses don't)
     source_mask = np.zeros((grid_h, grid_w), dtype=bool)
 
@@ -64,6 +160,9 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
         grid_scale_y = 1.0
 
     margin_x, margin_y = project.margin if hasattr(project, 'margin') else (0, 0)
+
+    # No padding by default (UI already handles margins).
+    pad = 0
 
     for obj in boundary_objects:
         # Get position with margin adjustment
@@ -105,8 +204,7 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
 
         if obj_type == SOURCE:
             # Source: mark as negative in phi_init (wavefront origin)
-            phi_init[y0:y1, x0:x1] = np.where(mask_bool, -1.0, phi_init[y0:y1, x0:x1])
-            # Track for LIC masking
+            # Track as source region
             source_mask[y0:y1, x0:x1] |= mask_bool
             has_source = True
         else:
@@ -129,36 +227,107 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
         return bc.get(edge_name, EDGE_OPEN) == EDGE_SOURCE
 
     if edge_is_source('left'):
-        phi_init[:, 0] = -1.0
+        source_mask[:, 0] = True
         has_source = True
     if edge_is_source('right'):
-        phi_init[:, -1] = -1.0
+        source_mask[:, -1] = True
         has_source = True
     if edge_is_source('top'):
-        phi_init[0, :] = -1.0
+        source_mask[0, :] = True
         has_source = True
     if edge_is_source('bottom'):
-        phi_init[-1, :] = -1.0
+        source_mask[-1, :] = True
         has_source = True
 
     # Fallback: if still no sources, use left edge
     if not has_source:
-        phi_init[:, 0] = -1.0
+        source_mask[:, 0] = True
+
+    # Pad fields to reduce boundary bias (more free space for rays to exit)
+    if pad > 0:
+        n_field_p = np.pad(n_field, pad, mode="edge")
+        source_mask_p = np.pad(source_mask, pad, constant_values=False)
+    else:
+        n_field_p = n_field
+        source_mask_p = source_mask
+
+    # Build signed-distance phi_init (zero at source boundary) for stable FMM
+    outside_dist = distance_transform_edt(~source_mask_p)
+    inside_dist = distance_transform_edt(source_mask_p)
+    phi_init = outside_dist.astype(np.float64)
+    phi_init[source_mask_p] = -inside_dist[source_mask_p]
 
     # Speed = 1/n (FMM uses speed, light slows in high-n media)
-    speed = 1.0 / n_field
+    speed = 1.0 / n_field_p
 
-    # Solve eikonal with FMM
-    phi = skfmm.travel_time(phi_init, speed)
+    # Solve eikonal with FMM (use second-order scheme for better isotropy)
+    phi = skfmm.travel_time(phi_init, speed, order=2)
 
     # Handle any masked/invalid values
     if hasattr(phi, 'mask'):
         phi = np.where(phi.mask, 0.0, phi.data)
 
+    # Enforce phi=0 inside sources for symmetry/stability of gradients
+    phi = phi.astype(np.float64, copy=False)
+    phi[source_mask_p] = 0.0
+
+    # Solve transport equation for amplitude (caustics, intensity variations)
+    amplitude = None
+    used_torch_amp = False
+
+    # Torch-based ray tracer (piecewise-constant n) default when available.
+    # Set ELLIPTICA_TORCH_EIKONAL_AMP=0 to fall back to the CPU transport solve.
+    use_torch_amp = os.environ.get("ELLIPTICA_TORCH_EIKONAL_AMP", "1") != "0"
+    if use_torch_amp:
+        try:
+            import torch  # Local import to avoid hard dependency during import time
+
+            # Device selection: honor override, else CUDA > CPU (skip MPS by default;
+            # MPS is slow for scatter-heavy splats in this tracer).
+            device_env = os.environ.get("ELLIPTICA_TORCH_DEVICE")
+            if device_env:
+                device = device_env
+            elif torch.cuda.is_available():
+                device = "cuda"
+            else:
+                device = "cpu"
+
+            amplitude_torch = trace_amplitude_torch(
+                phi,
+                n_field_p,
+                source_mask_p,
+                step_size=0.75,
+                seed_stride=1,
+                jitter=0.0,
+                max_steps=None,
+                device=device,
+            )
+            amplitude = amplitude_torch
+            used_torch_amp = True
+        except Exception:
+            amplitude = None
+
+    # Fallback to legacy transport solve if torch path unavailable/failed
+    if amplitude is None:
+        print("eikonal amplitude: torch path unavailable, falling back to legacy CPU transport solve", flush=True)
+        amplitude = compute_amplitude(phi, n_field_p, source_mask_p)
+    elif used_torch_amp:
+        msg = f"eikonal amplitude: using torch ray tracer on {device}"
+        if device_env is None and device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            msg += " (MPS available but skipped for speed; set ELLIPTICA_TORCH_DEVICE=mps to force)"
+        print(msg, flush=True)
+
+    # Crop padding back to the original domain
+    if pad > 0:
+        sl = np.s_[pad:-pad, pad:-pad]
+        phi = phi[sl]
+        amplitude = amplitude[sl]
+
     # Sources block LIC (solid emitters), lenses don't (transparent)
     return {
         "phi": phi.astype(np.float32),
         "n_field": n_field.astype(np.float32),
+        "amplitude": amplitude,
         "dirichlet_mask": source_mask,
     }
 

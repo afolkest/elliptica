@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import pytest
+pytest.skip("Legacy LIC pipeline comparison depends on vegtamr; skip", allow_module_level=True)
+
 import sys
 import numpy as np
 from pathlib import Path

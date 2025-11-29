@@ -75,12 +75,28 @@ def list_presets() -> list[str]:
 
 
 # Reference information for UI
+# Core variables (always available after render)
 AVAILABLE_VARIABLES = [
     ("lic", "LIC texture intensity"),
     ("mag", "Field magnitude √(ex² + ey²)"),
     ("ex", "Field X component"),
     ("ey", "Field Y component"),
 ]
+
+# PDE-specific variables (availability depends on active PDE)
+PDE_SPECIFIC_VARIABLES = {
+    "eikonal": [
+        ("phi", "Travel time / wavefront phase"),
+        ("amplitude", "Ray intensity (caustics appear as high values)"),
+        ("n_field", "Refractive index field"),
+    ],
+    "poisson": [
+        ("phi", "Electric potential"),
+    ],
+    "biharmonic": [
+        ("phi", "Stream function"),
+    ],
+}
 
 # Functions are grouped by type:
 # - Global: uses statistics from entire image (percentiles, min/max)

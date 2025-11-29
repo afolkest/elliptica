@@ -488,7 +488,7 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        from elliptica.colorspace import list_presets, get_preset, AVAILABLE_VARIABLES, AVAILABLE_FUNCTIONS
+        from elliptica.colorspace import list_presets, get_preset, AVAILABLE_VARIABLES, AVAILABLE_FUNCTIONS, PDE_SPECIFIC_VARIABLES
 
         preset_names = list_presets()
 
@@ -566,6 +566,11 @@ class PostprocessingPanel:
                 dpg.add_text(f"  {var_name}", color=(200, 200, 200))
                 dpg.add_text(f"    {var_desc}", color=(150, 150, 150), wrap=260)
 
+            # PDE-specific variables (dynamic based on active PDE)
+            dpg.add_spacer(height=4)
+            with dpg.group(tag="pde_specific_vars_group"):
+                self._update_pde_specific_vars_display()
+
             dpg.add_spacer(height=8)
             dpg.add_text("Functions:", color=(150, 200, 255))
             for func_sig, func_desc in AVAILABLE_FUNCTIONS:
@@ -575,6 +580,30 @@ class PostprocessingPanel:
         # Load first preset
         if preset_names:
             self._load_preset(preset_names[0])
+
+    def _update_pde_specific_vars_display(self) -> None:
+        """Update the PDE-specific variables display based on active PDE."""
+        if dpg is None:
+            return
+
+        # Early exit if the group doesn't exist yet (expression editor not built)
+        if not dpg.does_item_exist("pde_specific_vars_group"):
+            return
+
+        from elliptica.colorspace import PDE_SPECIFIC_VARIABLES
+
+        # Clear existing content
+        dpg.delete_item("pde_specific_vars_group", children_only=True)
+
+        # Get active PDE type
+        pde_type = self.app.state.project.pde_type if self.app.state.project else "poisson"
+        pde_vars = PDE_SPECIFIC_VARIABLES.get(pde_type, [])
+
+        if pde_vars:
+            dpg.add_text(f"  ({pde_type}):", color=(150, 180, 150), parent="pde_specific_vars_group")
+            for var_name, var_desc in pde_vars:
+                dpg.add_text(f"    {var_name}", color=(180, 200, 180), parent="pde_specific_vars_group")
+                dpg.add_text(f"      {var_desc}", color=(140, 150, 140), wrap=250, parent="pde_specific_vars_group")
 
     def _load_preset(self, preset_name: str) -> None:
         """Load a preset into the expression inputs."""

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from elliptica.types import Project, BoundaryObject
 from elliptica.pde.register import register_all_pdes, list_pde_names
 from elliptica.pde import PDERegistry
-from elliptica.field_pde import compute_field_pde, compute_field_legacy
+from elliptica.field_pde import compute_field_pde
 
 
 def create_test_project() -> Project:
@@ -90,6 +90,8 @@ def test_compute_field():
     """Test field computation with PDE abstraction."""
     print("\nTesting Field Computation...")
 
+    # Ensure registry is populated for standalone runs
+    register_all_pdes()
     project = create_test_project()
 
     # Test new compute_field_pde
@@ -109,15 +111,6 @@ def test_compute_field():
     field_mag = np.sqrt(ex**2 + ey**2)
     assert field_mag.max() > 0, "Field should be non-zero"
 
-    # Test legacy wrapper
-    ex_legacy, ey_legacy = compute_field_legacy(project)
-    # Use allclose instead of exact equality due to floating point differences
-    # The tiny differences (< 1e-7) are due to numerical precision
-    np.testing.assert_allclose(ex, ex_legacy, rtol=1e-4, atol=1e-7,
-                               err_msg="Legacy wrapper should return same field")
-    np.testing.assert_allclose(ey, ey_legacy, rtol=1e-4, atol=1e-7,
-                               err_msg="Legacy wrapper should return same field")
-
     print("  ✓ Field computation working")
 
 
@@ -134,7 +127,7 @@ def test_project_attributes():
     # Test compatibility accessors
     assert project.boundary_objects == project.conductors, "boundary_objects should alias conductors"
     assert project.shape == project.canvas_resolution, "shape should return canvas_resolution"
-    assert project.poisson_scale == 1.0, "poisson_scale should be 1.0"
+    assert project.solve_scale == 1.0, "solve_scale should be 1.0"
 
     bc = project.boundary_conditions
     assert isinstance(bc, dict), "boundary_conditions should be dict"

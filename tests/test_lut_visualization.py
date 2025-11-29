@@ -1,5 +1,8 @@
 """Visualize what the LUT actually looks like."""
 
+import pytest
+pytest.skip("Visualization/debug script requiring network/GUI; skip in automated tests", allow_module_level=True)
+
 import sys
 from pathlib import Path
 import numpy as np

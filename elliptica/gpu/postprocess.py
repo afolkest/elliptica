@@ -198,6 +198,7 @@ def apply_full_postprocess_gpu(
             conductor_masks_gpu=conductor_masks_gpu,
             interior_masks_gpu=interior_masks_gpu,
             conductors=conductors,
+            solution=solution_gpu,  # Pass GPU tensors directly
         )
 
         # Note: Smear is not supported in ColorConfig mode (uses palette-specific logic)

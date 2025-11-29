@@ -213,6 +213,7 @@ class EllipticaApp:
             self.state.clear_render_cache()
 
         self.boundary_controls.rebuild_controls()
+        self.postprocess_panel._update_pde_specific_vars_display()
         if self.pde_combo_id is not None:
             dpg.set_value(self.pde_combo_id, label)
         if dpg.does_item_exist("status_text"):
