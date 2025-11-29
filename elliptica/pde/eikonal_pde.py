@@ -12,7 +12,11 @@ import os
 
 from .base import PDEDefinition, BCField
 from ..mask_utils import blur_mask
-from .eikonal_amp import trace_amplitude_torch
+from .eikonal_amp import (
+    trace_amplitude_torch,
+    compute_amplitude_characteristic,
+    compute_amplitude_characteristic_multires,
+)
 
 # Object type constants
 SOURCE = 0
@@ -271,13 +275,94 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
     phi = phi.astype(np.float64, copy=False)
     phi[source_mask_p] = 0.0
 
-    # Solve transport equation for amplitude (caustics, intensity variations)
-    amplitude = None
-    used_torch_amp = False
+    # Solve transport equation for amplitude (caustics, intensity variations).
+    # Defaults:
+    #   - deterministic characteristic transport solve on the full grid;
+    # Optional:
+    #   - run characteristic on a restricted ROI around sources / lenses;
+    #   - in homogeneous media only, run characteristic on a coarser grid and
+    #     upsample the result back (multi-resolution).
 
-    # Torch-based ray tracer (piecewise-constant n) default when available.
-    # Set ELLIPTICA_TORCH_EIKONAL_AMP=0 to fall back to the CPU transport solve.
-    use_torch_amp = os.environ.get("ELLIPTICA_TORCH_EIKONAL_AMP", "1") != "0"
+    # Estimate background refractive index and lens regions.
+    non_src = ~source_mask_p
+    if non_src.any():
+        n_bg = float(np.median(n_field_p[non_src]))
+    else:
+        n_bg = float(np.median(n_field_p))
+    lens_mask = np.abs(n_field_p - n_bg) > 1e-4
+
+    # Optional ROI: restrict the characteristic solve to a bounding box
+    # around sources and lenses, with a configurable pixel margin.
+    roi_env = os.environ.get("ELLIPTICA_EIKONAL_AMP_ROI", "0") == "1"
+    roi_margin_env = os.environ.get("ELLIPTICA_EIKONAL_AMP_ROI_MARGIN", "64")
+    try:
+        roi_margin = max(0, int(roi_margin_env))
+    except ValueError:
+        roi_margin = 0
+
+    phi_local = phi
+    n_local = n_field_p
+    source_local = source_mask_p
+    roi_bbox = None
+
+    if roi_env:
+        roi_core = source_mask_p | lens_mask
+        if roi_core.any():
+            if roi_margin > 0:
+                dist_roi = distance_transform_edt(~roi_core)
+                roi_mask = dist_roi <= roi_margin
+            else:
+                roi_mask = roi_core
+
+            rows = np.where(roi_mask.any(axis=1))[0]
+            cols = np.where(roi_mask.any(axis=0))[0]
+            if rows.size > 0 and cols.size > 0:
+                y0, y1 = int(rows[0]), int(rows[-1]) + 1
+                x0, x1 = int(cols[0]), int(cols[-1]) + 1
+                # Only crop if ROI is strictly smaller than the full grid.
+                if y0 > 0 or x0 > 0 or y1 < phi.shape[0] or x1 < phi.shape[1]:
+                    phi_local = phi[y0:y1, x0:x1]
+                    n_local = n_field_p[y0:y1, x0:x1]
+                    source_local = source_mask_p[y0:y1, x0:x1]
+                    roi_bbox = (y0, y1, x0, x1)
+
+    # Optional multi-resolution characteristic solve. We only enable this when
+    # the medium is homogeneous (no lens regions detected), since downsampling
+    # has been observed to destroy caustic structure in variable-n fields.
+    subsample_env = os.environ.get("ELLIPTICA_EIKONAL_AMP_SUBSAMPLE", "1")
+    try:
+        subsample = max(1, int(subsample_env))
+    except ValueError:
+        subsample = 1
+
+    if subsample > 1 and not lens_mask.any():
+        amplitude_local = compute_amplitude_characteristic_multires(
+            phi_local,
+            n_local,
+            source_local,
+            downsample=subsample,
+            step_size=0.5,
+        )
+    else:
+        amplitude_local = compute_amplitude_characteristic(
+            phi_local,
+            n_local,
+            source_local,
+            step_size=0.5,
+        )
+
+    if roi_bbox is not None:
+        # Embed ROI amplitude into a full-resolution field and use A=1
+        # outside the ROI as a cheap far-field approximation.
+        amplitude = np.ones_like(phi, dtype=np.float32)
+        y0, y1, x0, x1 = roi_bbox
+        amplitude[y0:y1, x0:x1] = amplitude_local.astype(np.float32, copy=False)
+        amplitude[source_mask_p] = 1.0
+    else:
+        amplitude = amplitude_local.astype(np.float32, copy=False)
+
+    # Optional torch ray tracer remains opt-in via env flag.
+    use_torch_amp = os.environ.get("ELLIPTICA_TORCH_EIKONAL_AMP", "0") == "1"
     if use_torch_amp:
         try:
             import torch  # Local import to avoid hard dependency during import time
@@ -303,19 +388,12 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
                 device=device,
             )
             amplitude = amplitude_torch
-            used_torch_amp = True
+            msg = f"eikonal amplitude: using torch ray tracer on {device}"
+            if device_env is None and device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                msg += " (MPS available but skipped for speed; set ELLIPTICA_TORCH_DEVICE=mps to force)"
+            print(msg, flush=True)
         except Exception:
-            amplitude = None
-
-    # Fallback to legacy transport solve if torch path unavailable/failed
-    if amplitude is None:
-        print("eikonal amplitude: torch path unavailable, falling back to legacy CPU transport solve", flush=True)
-        amplitude = compute_amplitude(phi, n_field_p, source_mask_p)
-    elif used_torch_amp:
-        msg = f"eikonal amplitude: using torch ray tracer on {device}"
-        if device_env is None and device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-            msg += " (MPS available but skipped for speed; set ELLIPTICA_TORCH_DEVICE=mps to force)"
-        print(msg, flush=True)
+            print("eikonal amplitude: torch path failed, using deterministic characteristic solve", flush=True)
 
     # Crop padding back to the original domain
     if pad > 0:
