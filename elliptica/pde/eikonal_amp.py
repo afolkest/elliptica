@@ -11,9 +11,31 @@ from __future__ import annotations
 import numpy as np
 import torch
 import torch.nn.functional as F
-import os
 from scipy.ndimage import distance_transform_edt
 
+# Global defaults for the torch tracer; tweak here for quick experimentation.
+# - DEFAULT_TORCH_STEP: Backtrace step in pixels. Smaller -> more steps, smoother
+#   advection, but slower. Typical 0.5–0.9. Too small just burns cycles.
+DEFAULT_TORCH_STEP = 0.75
+# - DEFAULT_TORCH_JITTER: Sub-pixel jitter on seed positions to break grid bias.
+#   0.0–0.5 is reasonable. Higher = more isotropy, but noisier.
+DEFAULT_TORCH_JITTER = 0.5
+# - DEFAULT_TORCH_SUBSAMPLE: Downsample factor for the tracer grid. 1 = full res.
+#   >1 speeds up but loses fidelity. Keep 1 unless you need a speed hack.
+DEFAULT_TORCH_SUBSAMPLE = 1
+# - DEFAULT_TORCH_TARGET_RAYS: Budget to thin dense seed bands. Higher = more rays,
+#   better density estimates, slower. Typical 4k–16k depending on scene size.
+DEFAULT_TORCH_TARGET_RAYS = 16000
+# - DEFAULT_TORCH_BLUR_SIZE / SIGMA: Smoothing of splatted density. 5 with binomial
+#   weights is a mild blur. Set to 1 to disable blur (sharper, noisier). Larger
+#   blurs soften caustics. SIGMA=None uses binomial for size=5; otherwise Gaussian
+#   with sigma≈size/3 by default.
+DEFAULT_TORCH_BLUR_SIZE = 5
+DEFAULT_TORCH_BLUR_SIGMA: float | None = None
+# - DEFAULT_TORCH_INTEGRATE_TRANSPORT: If True, integrates the transport term
+#   along rays in addition to density. Off by default; turning on can reduce noise
+#   when ray counts are low at the cost of extra math per step.
+DEFAULT_TORCH_INTEGRATE_TRANSPORT = False
 
 def _bilinear_sample_np(grid: np.ndarray, y: np.ndarray, x: np.ndarray) -> np.ndarray:
     """Bilinear sample a 2D numpy grid at floating-point coords."""
@@ -50,13 +72,6 @@ def _resample_to_shape(grid: np.ndarray, out_h: int, out_w: int) -> np.ndarray:
     Y, X = np.meshgrid(y, x, indexing="ij")
     grid64 = grid.astype(np.float64, copy=False)
     return _bilinear_sample_np(grid64, Y, X)
-
-
-
-
-
-
-
 
 
 def _to_torch(arr: np.ndarray, device: torch.device) -> torch.Tensor:
@@ -124,16 +139,16 @@ def trace_amplitude_torch(
     phi: np.ndarray,
     n_field: np.ndarray,
     source_mask: np.ndarray,
-    step_size: float = 0.75,
+    step_size: float = DEFAULT_TORCH_STEP,
     seed_stride: int = 1,
-    jitter: float = 0.0,
-    integrate_transport: bool = False,
+    jitter: float = DEFAULT_TORCH_JITTER,
+    integrate_transport: bool = DEFAULT_TORCH_INTEGRATE_TRANSPORT,
     max_steps: int | None = None,
     device: str | torch.device = "cpu",
-    subsample: int = 1,
-    target_rays: int = 4000,
-    blur_size: int = 5,
-    blur_sigma: float | None = None,
+    subsample: int = DEFAULT_TORCH_SUBSAMPLE,
+    target_rays: int = DEFAULT_TORCH_TARGET_RAYS,
+    blur_size: int = DEFAULT_TORCH_BLUR_SIZE,
+    blur_sigma: float | None = DEFAULT_TORCH_BLUR_SIGMA,
 ) -> np.ndarray:
     """
     Trace rays and estimate amplitude via ray density (piecewise-constant n).
@@ -158,14 +173,6 @@ def trace_amplitude_torch(
             when blur_size==5; otherwise sigma≈blur_size/3.
     """
     device = torch.device(device)
-    # Env overrides for tuning without code changes.
-    step_size = float(os.environ.get("ELLIPTICA_TORCH_AMP_STEP", step_size))
-    jitter = float(os.environ.get("ELLIPTICA_TORCH_AMP_JITTER", jitter))
-    integrate_transport = os.environ.get("ELLIPTICA_TORCH_AMP_TRANSPORT", "0") == "1" if "ELLIPTICA_TORCH_AMP_TRANSPORT" in os.environ else integrate_transport
-    target_rays = int(os.environ.get("ELLIPTICA_TORCH_AMP_TARGET_RAYS", target_rays))
-    blur_size = int(os.environ.get("ELLIPTICA_TORCH_AMP_BLUR_SIZE", blur_size))
-    if "ELLIPTICA_TORCH_AMP_BLUR_SIGMA" in os.environ:
-        blur_sigma = float(os.environ["ELLIPTICA_TORCH_AMP_BLUR_SIGMA"])
     subsample = max(1, int(subsample))
 
     # Optional coarse grid to reduce work.

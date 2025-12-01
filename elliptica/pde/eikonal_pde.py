@@ -14,6 +14,11 @@ from .base import PDEDefinition, BCField
 from ..mask_utils import blur_mask
 from .eikonal_amp import (
     trace_amplitude_torch,
+    DEFAULT_TORCH_STEP,
+    DEFAULT_TORCH_JITTER,
+    DEFAULT_TORCH_SUBSAMPLE,
+    DEFAULT_TORCH_TARGET_RAYS,
+    DEFAULT_TORCH_INTEGRATE_TRANSPORT,
 )
 
 # Object type constants
@@ -325,12 +330,6 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
                     roi_bbox = (y0, y1, x0, x1)
 
     # Torch ray tracer is the only supported amplitude path.
-    torch_subsample_env = os.environ.get("ELLIPTICA_TORCH_AMP_SUBSAMPLE", "1")
-    try:
-        torch_subsample = max(1, int(torch_subsample_env))
-    except ValueError:
-        torch_subsample = 1
-
     try:
         import torch  # Local import to avoid hard dependency during import time
     except Exception as exc:
@@ -351,18 +350,16 @@ def solve_eikonal(project: Any) -> dict[str, np.ndarray]:
         phi_local,
         n_local,
         source_local,
-        step_size=0.75,
+        step_size=DEFAULT_TORCH_STEP,
         seed_stride=1,
-        jitter=0.2,
+        jitter=DEFAULT_TORCH_JITTER,
         max_steps=None,
         device=device,
-        subsample=torch_subsample,
-        target_rays=8000,
-        integrate_transport=False,
+        subsample=DEFAULT_TORCH_SUBSAMPLE,
+        target_rays=DEFAULT_TORCH_TARGET_RAYS,
+        integrate_transport=DEFAULT_TORCH_INTEGRATE_TRANSPORT,
     )
     msg = f"eikonal amplitude: using torch ray tracer on {device}"
-    if torch_subsample > 1:
-        msg += f" (subsample {torch_subsample}x)"
     if device == "cpu" and hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         msg += " (MPS disabled for this solver)"
     print(msg, flush=True)
