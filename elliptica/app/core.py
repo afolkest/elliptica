@@ -146,6 +146,8 @@ class RenderCache:
         self.ex_gpu = ex_gpu  # Electric field X component on GPU
         self.ey_gpu = ey_gpu  # Electric field Y component on GPU
         self.solution_gpu: Optional[dict[str, torch.Tensor]] = None  # PDE solution fields on GPU (phi, etc.)
+        self.solution_gpu_lic_shape: Optional[tuple[int, int]] = None  # Shape solution_gpu was resized to
+        self.solution_gpu_resized: Optional[dict[str, torch.Tensor]] = None  # Solution fields resized to LIC resolution
 
         self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
         self.lic_percentiles_clip_percent: float | None = 0.5 if lic_percentiles is not None else None  # Clip% used for cached percentiles

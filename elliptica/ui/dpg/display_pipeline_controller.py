@@ -113,7 +113,31 @@ class DisplayPipelineController:
             interior_masks_gpu = cache.interior_masks_gpu
             ex_tensor = cache.ex_gpu
             ey_tensor = cache.ey_gpu
-            solution_gpu = cache.solution_gpu
+
+            # Get or compute resized solution tensors (cached to avoid non-determinism)
+            solution_gpu = None
+            if cache.solution_gpu and scalar_tensor is not None:
+                target_shape = scalar_tensor.shape
+                # Check if we have cached resized tensors at the right shape
+                if (cache.solution_gpu_resized is not None and
+                    cache.solution_gpu_lic_shape == target_shape):
+                    solution_gpu = cache.solution_gpu_resized
+                else:
+                    # Resize and cache
+                    import torch
+                    resized = {}
+                    for name, tensor in cache.solution_gpu.items():
+                        if tensor.shape == target_shape:
+                            resized[name] = tensor
+                        else:
+                            tensor_4d = tensor.unsqueeze(0).unsqueeze(0)
+                            r = torch.nn.functional.interpolate(
+                                tensor_4d, size=target_shape, mode='bilinear', align_corners=False
+                            )
+                            resized[name] = r.squeeze(0).squeeze(0)
+                    cache.solution_gpu_resized = resized
+                    cache.solution_gpu_lic_shape = target_shape
+                    solution_gpu = resized
 
         def job():
             """Background postprocessing job."""
@@ -189,8 +213,13 @@ class DisplayPipelineController:
 
         elif result[0] == 'expr_error':
             # Show expression error but keep previous display
+            print(f"⚠️  Expression error: {result[1]}")
             if dpg is not None and dpg.does_item_exist("expr_error_text"):
                 dpg.set_value("expr_error_text", f"Error: {result[1]}")
+
+        elif result[0] == 'error':
+            # Log general postprocess errors
+            print(f"⚠️  Postprocess error: {result[1]}")
 
         # If another refresh was requested while we were computing, start a new job
         if self._pending_invalidate:

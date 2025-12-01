@@ -513,6 +513,16 @@ def save_render_cache(
         if cache.result.ey is not None:
             _save_signed_float_array(zf, cache.result.ey, 'field_ey.png')
 
+        # Save solution fields (phi, etc.) - signed floats
+        if cache.result.solution:
+            solution_keys = list(cache.result.solution.keys())
+            metadata['solution_fields'] = solution_keys
+            # Re-save metadata with solution_fields list
+            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+            for name, array in cache.result.solution.items():
+                if isinstance(array, np.ndarray) and array.ndim == 2:
+                    _save_signed_float_array(zf, array, f'solution_{name}.png')
+
 
 def load_render_cache(
     filepath: str,
@@ -551,6 +561,16 @@ def load_render_cache(
             if 'field_ey.png' in zf.namelist():
                 ey = _load_signed_float_array(zf, 'field_ey.png')
 
+            # Load solution fields (phi, etc.) if present
+            solution = None
+            solution_fields = metadata.get('solution_fields', [])
+            if solution_fields:
+                solution = {}
+                for name in solution_fields:
+                    filename = f'solution_{name}.png'
+                    if filename in zf.namelist():
+                        solution[name] = _load_signed_float_array(zf, filename)
+
             # Reconstruct RenderResult
             result = RenderResult(
                 array=lic,
@@ -561,6 +581,7 @@ def load_render_cache(
                 offset_y=metadata['offset_y'],
                 ex=ex,
                 ey=ey,
+                solution=solution,
             )
 
             # Create cache with fingerprint

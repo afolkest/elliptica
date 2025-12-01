@@ -1,5 +1,9 @@
+======= bugs ========
+- saving givngs no warning on overwrite 
+
+======= features ===========
 - undo/redo 
-- progress barrs
+- progress bars
 - exports
 - make sure shrinking items in render menu is not posibble (deselect)
 - add lock feature
