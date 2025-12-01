@@ -18,15 +18,39 @@ except ImportError:
     dpg = None
 
 
+MIN_HIT_TARGET = 10  # Minimum clickable area in pixels
+
+
 def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
-    """Test whether canvas coordinate lands inside conductor mask."""
+    """Test whether canvas coordinate lands inside conductor hit area.
+
+    For small conductors, expands bounding box to MIN_HIT_TARGET for easier selection.
+    For larger conductors, uses pixel-perfect mask testing.
+    """
     cx, cy = conductor.position
+    mask = conductor.mask
+    h, w = mask.shape
+
+    # Calculate expanded bounds for small conductors
+    expand_x = max(0, (MIN_HIT_TARGET - w) / 2)
+    expand_y = max(0, (MIN_HIT_TARGET - h) / 2)
+
+    # Check expanded bounding box first
+    if x < cx - expand_x or x >= cx + w + expand_x:
+        return False
+    if y < cy - expand_y or y >= cy + h + expand_y:
+        return False
+
+    # For small conductors, bounding box hit is enough
+    if w <= MIN_HIT_TARGET or h <= MIN_HIT_TARGET:
+        return True
+
+    # For larger conductors, do pixel-perfect test
     local_x = int(round(x - cx))
     local_y = int(round(y - cy))
-    mask = conductor.mask
     if local_x < 0 or local_y < 0:
         return False
-    if local_y >= mask.shape[0] or local_x >= mask.shape[1]:
+    if local_y >= h or local_x >= w:
         return False
     return mask[local_y, local_x] > 0.5
 

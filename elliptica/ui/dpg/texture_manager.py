@@ -176,6 +176,29 @@ class TextureManager:
                     if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
                         lic_percentiles = cache.lic_percentiles
 
+                # Get or compute resized solution tensors (cached to avoid non-determinism)
+                solution_gpu = None
+                if cache.solution_gpu and cache.result_gpu is not None:
+                    import torch
+                    target_shape = cache.result_gpu.shape
+                    if (cache.solution_gpu_resized is not None and
+                        cache.solution_gpu_lic_shape == target_shape):
+                        solution_gpu = cache.solution_gpu_resized
+                    else:
+                        resized = {}
+                        for name, tensor in cache.solution_gpu.items():
+                            if tensor.shape == target_shape:
+                                resized[name] = tensor
+                            else:
+                                tensor_4d = tensor.unsqueeze(0).unsqueeze(0)
+                                r = torch.nn.functional.interpolate(
+                                    tensor_4d, size=target_shape, mode='bilinear', align_corners=False
+                                )
+                                resized[name] = r.squeeze(0).squeeze(0)
+                        cache.solution_gpu_resized = resized
+                        cache.solution_gpu_lic_shape = target_shape
+                        solution_gpu = resized
+
                 try:
                     final_rgb, used_percentiles = apply_full_postprocess_hybrid(
                         scalar_array=cache.result.array,  # Full resolution!
@@ -200,7 +223,7 @@ class TextureManager:
                         ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
                         ey_tensor=cache.ey_gpu,
                         lightness_expr=self.app.state.display_settings.lightness_expr,
-                        solution_gpu=cache.solution_gpu,  # PDE solution fields (phi, etc.)
+                        solution_gpu=solution_gpu,  # PDE solution fields resized to LIC resolution
                     )
 
                     # Update cache so future refreshes reuse the correct clip percent bounds.

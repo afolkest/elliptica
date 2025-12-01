@@ -167,6 +167,7 @@ class FileIOController:
                 canvas_w, canvas_h = self.app.state.project.canvas_resolution
             dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
 
+        self.app._update_canvas_inputs()  # Update canvas size display text
         self.app._update_canvas_scale()  # Recalculate scale for potentially new canvas size
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()

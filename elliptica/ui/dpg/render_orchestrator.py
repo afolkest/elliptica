@@ -119,6 +119,8 @@ class RenderOrchestrator:
                     # Upload PDE solution fields to GPU (phi, etc.)
                     if result.solution:
                         cache.solution_gpu = {}
+                        cache.solution_gpu_resized = None  # Clear resized cache
+                        cache.solution_gpu_lic_shape = None
                         for name, array in result.solution.items():
                             if isinstance(array, np.ndarray) and array.ndim == 2:
                                 cache.solution_gpu[name] = GPUContext.to_gpu(array)
