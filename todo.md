@@ -5,7 +5,7 @@
 - add lock feature
 - add drawing featur
 - add zoom feature
-
+- add per-PDE render options
 
 - blue noise? 
 - if you delete characters in save menu it will also delete conductors......
