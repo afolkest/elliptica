@@ -179,9 +179,8 @@ class ShapeDialogController:
         # Update UI
         self.app.canvas_renderer.mark_dirty()
         self.app._update_control_visibility()
-        self.app.conductor_controls.rebuild_conductor_controls()
-        self.app.conductor_controls.update_conductor_slider_labels()
         self.app.boundary_controls.rebuild_controls()
+        self.app.boundary_controls.update_slider_labels()
 
         dpg.set_value("status_text", f"Inserted {spec.name}")
         dpg.hide_item(self.dialog_id)
