@@ -445,6 +445,8 @@ def compute_project_fingerprint(project: Project) -> str:
         f"canvas:{project.canvas_resolution[0]}x{project.canvas_resolution[1]}",
         f"streamlen:{project.streamlength_factor}",
         f"bounds:{project.boundary_top},{project.boundary_bottom},{project.boundary_left},{project.boundary_right}",
+        f"pde_type:{getattr(project, 'pde_type', 'poisson')}",
+        f"pde_bc:{getattr(project, 'pde_bc', {})}",
     ]
 
     # Per-conductor state (order matters!)

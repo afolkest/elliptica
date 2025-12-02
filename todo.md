@@ -5,9 +5,10 @@
 - undo/redo 
 - progress bars
 - exports
+- drag and move many conductors 
 - make sure shrinking items in render menu is not posibble (deselect)
-- add lock feature
-- add drawing featur
+- add lock conductor feature (lol how long until we have layers)
+- add drawing feature
 - add zoom feature
 - add per-PDE render options
 
