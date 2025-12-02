@@ -786,6 +786,9 @@ class PostprocessingPanel:
 
         This is called when selection changes. Delegates to update_context_ui.
         """
+        # Cancel any pending debounced updates - context is changing
+        self.lightness_expr_pending_update = False
+        self.lightness_expr_pending_target = None
         self.update_context_ui()
 
     # ------------------------------------------------------------------
@@ -1000,6 +1003,10 @@ class PostprocessingPanel:
         """Handle Global/Custom radio toggle for per-region lightness expression."""
         if dpg is None:
             return
+
+        # Cancel any pending debounced updates - mode is changing
+        self.lightness_expr_pending_update = False
+        self.lightness_expr_pending_target = None
 
         is_custom = (app_data == "Custom")
 
