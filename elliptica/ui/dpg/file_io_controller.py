@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 
 from elliptica.app import actions
 from elliptica.mask_utils import load_conductor_masks
+from elliptica.pde import PDERegistry
 from elliptica.serialization import load_project, save_project, load_render_cache, save_render_cache
 from elliptica.types import Conductor
 
@@ -182,6 +183,9 @@ class FileIOController:
         """Create a new project, resetting to default state with a demo conductor."""
         if dpg is None:
             return
+
+        # Reset PDERegistry to default (poisson)
+        PDERegistry.set_active("poisson")
 
         with self.app.state_lock:
             # Reset to default state
@@ -373,6 +377,9 @@ class FileIOController:
                 if loaded_cache is not None:
                     break
 
+            # Sync PDERegistry to loaded project's PDE type
+            PDERegistry.set_active(new_state.project.pde_type)
+
             with self.app.state_lock:
                 # Replace current state with loaded state
                 self.app.state.project = new_state.project
@@ -491,6 +498,13 @@ class FileIOController:
                 dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
             if dpg.does_item_exist("saturation_slider"):
                 dpg.set_value("saturation_slider", self.app.state.display_settings.saturation)
+
+            # PDE type combo
+            if self.app.pde_combo_id is not None:
+                pde_type = self.app.state.project.pde_type
+                active_pde = PDERegistry.get(pde_type)
+                if active_pde:
+                    dpg.set_value(self.app.pde_combo_id, active_pde.label)
 
         # Sync global palette UI text (outside lock - no state modification)
         self.sync_palette_ui()
