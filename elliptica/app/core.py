@@ -94,6 +94,7 @@ class DisplaySettings:
     color_enabled: bool = defaults.DEFAULT_COLOR_ENABLED
     palette: str = defaults.DEFAULT_COLOR_PALETTE
     lightness_expr: str | None = None
+    saturation: float = 1.0  # Post-colorization chroma multiplier (1.0 = no change)
 
     def to_color_params(self):
         """Convert to pure ColorParams for backend functions."""

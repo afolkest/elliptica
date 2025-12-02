@@ -87,6 +87,7 @@ class DisplayPipelineController:
                 'color_enabled': self.app.state.display_settings.color_enabled,
                 'palette': self.app.state.display_settings.palette,
                 'lightness_expr': self.app.state.display_settings.lightness_expr,
+                'saturation': self.app.state.display_settings.saturation,
                 'canvas_resolution': self.app.state.project.canvas_resolution,
             }
 
@@ -169,6 +170,7 @@ class DisplayPipelineController:
                     ey_tensor=ey_tensor,
                     lightness_expr=settings_snapshot['lightness_expr'],
                     solution_gpu=solution_gpu,
+                    saturation=settings_snapshot['saturation'],
                 )
                 return ('success', final_rgb, used_percentiles, settings_snapshot['clip_percent'])
             except ExprError as e:

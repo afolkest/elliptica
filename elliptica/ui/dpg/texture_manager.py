@@ -224,6 +224,7 @@ class TextureManager:
                         ey_tensor=cache.ey_gpu,
                         lightness_expr=self.app.state.display_settings.lightness_expr,
                         solution_gpu=solution_gpu,  # PDE solution fields resized to LIC resolution
+                        saturation=self.app.state.display_settings.saturation,
                     )
 
                     # Update cache so future refreshes reuse the correct clip percent bounds.

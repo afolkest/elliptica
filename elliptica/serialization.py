@@ -324,6 +324,7 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
         'color_enabled': settings.color_enabled,
         'palette': settings.palette,
         'lightness_expr': settings.lightness_expr,
+        'saturation': settings.saturation,
     }
 
 
@@ -338,6 +339,7 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
         color_enabled=data.get('color_enabled', defaults.DEFAULT_COLOR_ENABLED),
         palette=data.get('palette', defaults.DEFAULT_COLOR_PALETTE),
         lightness_expr=data.get('lightness_expr'),
+        saturation=data.get('saturation', 1.0),
     )
 
 

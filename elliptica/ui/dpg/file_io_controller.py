@@ -489,6 +489,8 @@ class FileIOController:
                 dpg.set_value(panel.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
             if panel.postprocess_gamma_slider_id is not None:
                 dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
+            if dpg.does_item_exist("saturation_slider"):
+                dpg.set_value("saturation_slider", self.app.state.display_settings.saturation)
 
         # Sync global palette UI text (outside lock - no state modification)
         self.sync_palette_ui()

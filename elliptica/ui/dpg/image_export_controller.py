@@ -468,6 +468,7 @@ class ImageExportController:
                 color_config=color_config,
                 lightness_expr=settings.lightness_expr,
                 solution_gpu=solution_gpu,
+                saturation=settings.saturation,
             )
 
             # Handle supersampling if enabled
@@ -757,6 +758,7 @@ class ImageExportController:
             color_config=color_config,  # Expression-based coloring (if set)
             lightness_expr=settings.lightness_expr,
             solution_gpu=solution_gpu,
+            saturation=settings.saturation,
         )
 
         return final_rgb
