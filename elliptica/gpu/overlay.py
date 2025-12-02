@@ -201,7 +201,9 @@ def apply_region_overlays_gpu(
         if idx < len(interior_masks) and interior_masks[idx] is not None:
             mask_soft = interior_masks[idx]
             if torch.any(mask_soft > 0):
-                mask = (mask_soft > 0.5).float()
+                # Use soft mask for alpha blending (no threshold) to avoid gaps
+                # between smoothed conductor edges and hard interior edges
+                mask = mask_soft
 
                 # Check if this region has a custom lightness expression
                 has_custom_expr = settings.interior.lightness_expr is not None
@@ -237,7 +239,8 @@ def apply_region_overlays_gpu(
         if idx < len(conductor_masks) and conductor_masks[idx] is not None:
             mask_soft = conductor_masks[idx]
             if torch.any(mask_soft > 0):
-                mask = (mask_soft > 0.5).float()
+                # Use soft mask for alpha blending - creates smooth antialiased edges
+                mask = mask_soft
 
                 # Check if this region has a custom lightness expression
                 has_custom_expr = settings.surface.lightness_expr is not None
