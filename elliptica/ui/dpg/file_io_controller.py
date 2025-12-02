@@ -144,14 +144,7 @@ class FileIOController:
 
         with self.app.state_lock:
             project = self.app.state.project
-            if len(project.conductors) == 0:
-                canvas_w, canvas_h = project.canvas_resolution
-                new_w = max(canvas_w, mask_w)
-                new_h = max(canvas_h, mask_h)
-                if (new_w, new_h) != project.canvas_resolution:
-                    actions.set_canvas_resolution(self.app.state, new_w, new_h)
-
-            canvas_w, canvas_h = self.app.state.project.canvas_resolution
+            canvas_w, canvas_h = project.canvas_resolution
             # Offset each new conductor by 30px down-right from center so they're all visible
             num_conductors = len(project.conductors)
             offset = num_conductors * 30.0
