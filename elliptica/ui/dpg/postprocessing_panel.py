@@ -334,6 +334,19 @@ class PostprocessingPanel:
                         hint="e.g. clipnorm(mag, 1, 99)",
                     )
 
+                # Saturation slider (post-colorization chroma multiplier)
+                dpg.add_slider_float(
+                    label="Saturation",
+                    default_value=self.app.state.display_settings.saturation,
+                    min_value=0.0,
+                    max_value=2.0,
+                    format="%.2f",
+                    callback=self.on_saturation_change,
+                    tag="saturation_slider",
+                    width=200,
+                    clamped=True,
+                )
+
                 dpg.add_spacer(height=8)
 
             # Expressions mode container (hidden by default)
@@ -874,6 +887,17 @@ class PostprocessingPanel:
             with self.app.state_lock:
                 self.app.state.display_settings.gamma = value
                 self.app.state.invalidate_base_rgb()
+
+        self.app.display_pipeline.refresh_display()
+
+    def on_saturation_change(self, sender=None, app_data=None) -> None:
+        """Handle saturation slider change (post-colorization chroma multiplier)."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+        with self.app.state_lock:
+            self.app.state.display_settings.saturation = value
 
         self.app.display_pipeline.refresh_display()
 

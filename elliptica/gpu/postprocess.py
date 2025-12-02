@@ -77,6 +77,33 @@ def apply_lightness_expr_gpu(
     return gamut_map_to_srgb(L_adjusted, C, H, method='compress')
 
 
+def apply_saturation_gpu(
+    rgb: torch.Tensor,
+    saturation: float,
+) -> torch.Tensor:
+    """Apply saturation (chroma multiplier) to RGB colors.
+
+    Converts RGB → OKLch, multiplies C by saturation, converts back to RGB.
+
+    Args:
+        rgb: RGB tensor (H, W, 3) in [0, 1]
+        saturation: Chroma multiplier (1.0 = no change, 0.0 = grayscale, 2.0 = double)
+
+    Returns:
+        RGB tensor (H, W, 3) in [0, 1]
+    """
+    if abs(saturation - 1.0) < 0.001:
+        return rgb  # No change needed
+
+    from elliptica.colorspace.oklch import srgb_to_oklch, oklch_to_srgb
+
+    L, C, H = srgb_to_oklch(rgb)
+    C_adjusted = C * saturation
+    # Use clip instead of compress for speed - colors are already near-gamut
+    result = oklch_to_srgb(L, C_adjusted, H)
+    return torch.clamp(result, 0.0, 1.0)
+
+
 def apply_full_postprocess_gpu(
     scalar_tensor: torch.Tensor,
     conductor_masks_cpu: list[np.ndarray] | None,
@@ -99,6 +126,7 @@ def apply_full_postprocess_gpu(
     ey_tensor: torch.Tensor | None = None,
     lightness_expr: str | None = None,
     solution_gpu: dict[str, torch.Tensor] | None = None,
+    saturation: float = 1.0,
 ) -> tuple[torch.Tensor, Tuple[float, float]]:
     """Apply full postprocessing pipeline on GPU.
 
@@ -106,6 +134,7 @@ def apply_full_postprocess_gpu(
     1. Base RGB colorization (GPU) - via palette LUT or ColorConfig expressions
     2. Region overlays (GPU) - via conductor_color_settings or ColorConfig regions
     3. Conductor smear (GPU) - optional, palette mode only
+    4. Saturation adjustment (GPU) - chroma multiplier in OKLch
 
     Everything stays on GPU until the final result.
 
@@ -309,6 +338,10 @@ def apply_full_postprocess_gpu(
             lightness_expr,
         )
 
+    # Step 4: Apply saturation adjustment (palette mode only)
+    if saturation != 1.0:
+        base_rgb = apply_saturation_gpu(base_rgb, saturation)
+
     return torch.clamp(base_rgb, 0.0, 1.0), used_percentiles
 
 
@@ -336,6 +369,7 @@ def apply_full_postprocess_hybrid(
     ey_tensor: torch.Tensor | None = None,
     lightness_expr: str | None = None,
     solution_gpu: dict[str, torch.Tensor] | None = None,
+    saturation: float = 1.0,
 ) -> np.ndarray:
     """Hybrid postprocessing pipeline with automatic GPU/CPU fallback.
 
@@ -395,6 +429,7 @@ def apply_full_postprocess_hybrid(
                 ey_tensor,
                 lightness_expr,
                 solution_gpu,
+                saturation,
             )
 
             # Convert to uint8 and download
@@ -444,6 +479,7 @@ def apply_full_postprocess_hybrid(
                 ey_cpu,
                 lightness_expr,
                 solution_cpu,
+                saturation,
             )
 
             # Convert to uint8 and return (already on CPU)
@@ -474,6 +510,7 @@ def apply_full_postprocess_hybrid(
             ey_tensor=ey_tensor,
             lightness_expr=lightness_expr,
             solution_gpu=solution_gpu,
+            saturation=saturation,
         )
 
         # Convert to uint8 and return
