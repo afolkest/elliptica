@@ -228,7 +228,7 @@ class RenderOrchestrator:
             self.app.canvas_controller.drag_active = False
             with self.app.state_lock:
                 self.app.state.view_mode = "render"
-                self.app.state.selected_idx = -1  # Clear selection when entering render mode
+                self.app.state.clear_selection()  # Clear selection when entering render mode
             self.app._update_control_visibility()
             self.app.postprocess_panel.update_context_ui()  # Update UI for no selection
             self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode

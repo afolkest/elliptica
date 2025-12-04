@@ -92,13 +92,19 @@ class CanvasController:
         self.mouse_down_last: bool = False
         self.mouse_wheel_delta: float = 0.0
 
+        # Box selection state
+        self.box_select_active: bool = False
+        self.box_select_start: Tuple[float, float] = (0.0, 0.0)
+        self.box_select_end: Tuple[float, float] = (0.0, 0.0)
+
         # Keyboard state
         self.backspace_down_last: bool = False
         self.ctrl_c_down_last: bool = False
         self.ctrl_v_down_last: bool = False
+        self.shift_down: bool = False
 
-        # Selection state (region type now in app.state.selected_region_type)
-        self.clipboard_conductor: Optional[Conductor] = None
+        # Clipboard (list for multi-select copy)
+        self.clipboard_conductors: list[Conductor] = []
 
     def on_mouse_wheel(self, sender, app_data) -> None:
         """Capture mouse wheel delta from DPG handler."""
@@ -139,6 +145,23 @@ class CanvasController:
                     return idx
         return -1
 
+    def find_conductors_in_box(self, x1: float, y1: float, x2: float, y2: float) -> set[int]:
+        """Find all conductors whose bounding boxes intersect with selection box."""
+        # Normalize box coordinates
+        min_x, max_x = min(x1, x2), max(x1, x2)
+        min_y, max_y = min(y1, y2), max(y1, y2)
+
+        result = set()
+        with self.app.state_lock:
+            conductors = self.app.state.project.conductors
+            for idx, conductor in enumerate(conductors):
+                cx, cy = conductor.position
+                h, w = conductor.mask.shape
+                # Check bounding box intersection
+                if not (cx + w < min_x or cx > max_x or cy + h < min_y or cy > max_y):
+                    result.add(idx)
+        return result
+
     def detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
         """Detect which conductor region is at canvas point.
 
@@ -177,24 +200,32 @@ class CanvasController:
 
         return -1, None
 
-    def scale_conductor(self, idx: int, factor: float) -> bool:
-        """Scale conductor by factor. Returns True if successful."""
+    def scale_selected_conductors(self, factor: float) -> bool:
+        """Scale all selected conductors by factor. Returns True if any scaled."""
         if dpg is None:
             return False
         factor = max(float(factor), 0.05)
+        any_changed = False
         with self.app.state_lock:
-            self.app.state.set_selected(idx)
-            changed = actions.scale_conductor(self.app.state, idx, factor)
-            if changed:
-                self.app.display_pipeline.texture_manager.clear_conductor_texture(idx)
-        if not changed:
+            indices = list(self.app.state.selected_indices)
+            for idx in indices:
+                changed = actions.scale_conductor(self.app.state, idx, factor)
+                if changed:
+                    self.app.display_pipeline.texture_manager.clear_conductor_texture(idx)
+                    any_changed = True
+
+        if not any_changed:
             dpg.set_value("status_text", "Scaling limit reached.")
             return False
 
         self.app.canvas_renderer.mark_dirty()
         self.app.boundary_controls.update_slider_labels()
         self.app.postprocess_panel.update_region_properties_panel()
-        dpg.set_value("status_text", f"Scaled C{idx + 1} by {factor:.2f}×")
+        count = len(indices)
+        if count == 1:
+            dpg.set_value("status_text", f"Scaled C{indices[0] + 1} by {factor:.2f}×")
+        else:
+            dpg.set_value("status_text", f"Scaled {count} objects by {factor:.2f}×")
         return True
 
     def is_file_dialog_showing(self) -> bool:
@@ -250,6 +281,10 @@ class CanvasController:
         pressed = mouse_down and not self.mouse_down_last
         released = (not mouse_down) and self.mouse_down_last
 
+        # Track shift key for multi-select
+        from elliptica.ui.dpg.app import SHIFT_KEY
+        self.shift_down = SHIFT_KEY is not None and dpg.is_key_down(SHIFT_KEY)
+
         with self.app.state_lock:
             mode = self.app.state.view_mode
 
@@ -260,21 +295,19 @@ class CanvasController:
         # Mouse wheel scaling in edit mode
         if mode == "edit" and over_canvas and abs(wheel_delta) > 1e-5:
             with self.app.state_lock:
-                selected_idx = self.app.state.selected_idx
-            # Only scale if a conductor is selected
-            if selected_idx >= 0:
+                has_selection = len(self.app.state.selected_indices) > 0
+            if has_selection:
                 scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
                 scale_factor = max(0.05, min(scale_factor, 20.0))
-                if self.scale_conductor(selected_idx, scale_factor):
+                if self.scale_selected_conductors(scale_factor):
                     x, y = self.get_canvas_mouse_pos()
                     self.drag_last_pos = (x, y)
 
-        # Render mode: click to select region for colorization
+        # Render mode: click to select region for colorization (single-select only)
         if mode != "edit":
             if pressed and self.is_mouse_over_canvas():
                 x, y = self.get_canvas_mouse_pos()
                 with self.app.state_lock:
-                    # Use region detection in render mode for colorization
                     hit_idx, hit_region = self.detect_region_at_point(x, y)
                     self.app.state.set_selected(hit_idx)
                     if hit_region is not None:
@@ -282,54 +315,93 @@ class CanvasController:
                 self.app.canvas_renderer.invalidate_selection_contour()
                 self.app.boundary_controls.update_header_labels()
                 self.app.postprocess_panel.update_region_properties_panel()
-                self.app.canvas_renderer.mark_dirty()  # Redraw to update selection outline
+                self.app.canvas_renderer.mark_dirty()
             self.mouse_down_last = mouse_down
             return
 
-        # Edit mode: click to select and drag to move
+        # Edit mode: click/shift-click to select, drag to move, box select from empty space
         if pressed and self.is_mouse_over_canvas():
             x, y = self.get_canvas_mouse_pos()
-            with self.app.state_lock:
-                project = self.app.state.project
-                hit_idx = -1
-                for idx in reversed(range(len(project.conductors))):
-                    if _point_in_conductor(project.conductors[idx], x, y):
-                        hit_idx = idx
-                        break
+            hit_idx = self.find_hit_conductor(x, y)
 
-                self.app.state.set_selected(hit_idx)
-                # Reset to surface when selecting in edit mode
-                self.app.state.selected_region_type = "surface"
+            with self.app.state_lock:
                 if hit_idx >= 0:
+                    # Clicked on a conductor
+                    if self.shift_down:
+                        # Shift-click: toggle selection
+                        self.app.state.toggle_selected(hit_idx)
+                    else:
+                        # Normal click: if clicking on already-selected, keep selection for drag
+                        # Otherwise, replace selection with clicked conductor
+                        if hit_idx not in self.app.state.selected_indices:
+                            self.app.state.set_selected(hit_idx)
+                    self.app.state.selected_region_type = "surface"
                     self.drag_active = True
                     self.drag_last_pos = (x, y)
                 else:
+                    # Clicked on empty space
+                    if not self.shift_down:
+                        # Clear selection and start box select
+                        self.app.state.clear_selection()
+                    # Start box selection
+                    self.box_select_active = True
+                    self.box_select_start = (x, y)
+                    self.box_select_end = (x, y)
                     self.drag_active = False
+
             self.app.boundary_controls.update_header_labels()
             self.app.postprocess_panel.update_region_properties_panel()
             self.app.canvas_renderer.mark_dirty()
 
-        # Drag conductor
-        if self.drag_active and mouse_down:
+        # Update box selection or drag
+        if mouse_down and over_canvas:
             x, y = self.get_canvas_mouse_pos()
-            dx = x - self.drag_last_pos[0]
-            dy = y - self.drag_last_pos[1]
-            if abs(dx) > 0.1 or abs(dy) > 0.1:
-                with self.app.state_lock:
-                    idx = self.app.state.selected_idx
-                    if 0 <= idx < len(self.app.state.project.conductors):
-                        actions.move_conductor(self.app.state, idx, dx, dy)
-                self.drag_last_pos = (x, y)
+
+            if self.box_select_active:
+                # Update box selection rectangle
+                self.box_select_end = (x, y)
                 self.app.canvas_renderer.mark_dirty()
 
-        if self.drag_active and released:
+            elif self.drag_active:
+                # Drag all selected conductors
+                dx = x - self.drag_last_pos[0]
+                dy = y - self.drag_last_pos[1]
+                if abs(dx) > 0.1 or abs(dy) > 0.1:
+                    with self.app.state_lock:
+                        for idx in self.app.state.selected_indices:
+                            if 0 <= idx < len(self.app.state.project.conductors):
+                                actions.move_conductor(self.app.state, idx, dx, dy)
+                    self.drag_last_pos = (x, y)
+                    self.app.canvas_renderer.mark_dirty()
+
+        # Handle release
+        if released:
+            if self.box_select_active:
+                # Finish box selection
+                x, y = self.get_canvas_mouse_pos()
+                self.box_select_end = (x, y)
+                hits = self.find_conductors_in_box(
+                    self.box_select_start[0], self.box_select_start[1],
+                    self.box_select_end[0], self.box_select_end[1]
+                )
+                with self.app.state_lock:
+                    if self.shift_down:
+                        # Add to existing selection
+                        self.app.state.selected_indices.update(hits)
+                    else:
+                        # Replace selection
+                        self.app.state.selected_indices = hits
+                self.box_select_active = False
+                self.app.boundary_controls.update_header_labels()
+                self.app.postprocess_panel.update_region_properties_panel()
+                self.app.canvas_renderer.mark_dirty()
+
             self.drag_active = False
 
         self.mouse_down_last = mouse_down
 
     def process_keyboard_shortcuts(self) -> None:
         """Process keyboard shortcuts (delete, copy, paste)."""
-        # Import key constants
         from elliptica.ui.dpg.app import BACKSPACE_KEY, CTRL_KEY, C_KEY, V_KEY
 
         if dpg is None or BACKSPACE_KEY is None:
@@ -343,7 +415,6 @@ class CanvasController:
             return
 
         # Only process shortcuts when mouse is over canvas (not over UI controls)
-        # This prevents keyboard shortcuts from firing while typing in input fields
         over_canvas = self.is_mouse_over_canvas()
         if not over_canvas:
             self.backspace_down_last = False
@@ -351,24 +422,27 @@ class CanvasController:
             self.ctrl_v_down_last = False
             return
 
-        # Backspace to delete
+        # Backspace to delete all selected
         backspace_down = dpg.is_key_down(BACKSPACE_KEY)
         if backspace_down and not self.backspace_down_last:
             with self.app.state_lock:
                 mode = self.app.state.view_mode
-                idx = self.app.state.selected_idx
-                conductor_count = len(self.app.state.project.conductors)
-                can_delete = (mode == "edit" and 0 <= idx < conductor_count)
+                indices_to_delete = sorted(self.app.state.selected_indices, reverse=True)
+                can_delete = mode == "edit" and len(indices_to_delete) > 0
             if can_delete:
                 with self.app.state_lock:
-                    actions.remove_conductor(self.app.state, idx)
+                    # Delete in reverse order to maintain valid indices
+                    for idx in indices_to_delete:
+                        actions.remove_conductor(self.app.state, idx)
                     self.app.display_pipeline.texture_manager.clear_all_conductor_textures()
                 self.app.canvas_renderer.mark_dirty()
                 self.app.boundary_controls.rebuild_controls()
-                dpg.set_value("status_text", "Conductor deleted")
+                count = len(indices_to_delete)
+                msg = "Conductor deleted" if count == 1 else f"{count} conductors deleted"
+                dpg.set_value("status_text", msg)
         self.backspace_down_last = backspace_down
 
-        # Ctrl+C to copy
+        # Ctrl+C to copy all selected
         if CTRL_KEY and C_KEY:
             ctrl_down = dpg.is_key_down(CTRL_KEY)
             c_down = dpg.is_key_down(C_KEY)
@@ -376,16 +450,20 @@ class CanvasController:
             if ctrl_c_down and not self.ctrl_c_down_last:
                 with self.app.state_lock:
                     mode = self.app.state.view_mode
-                    idx = self.app.state.selected_idx
-                    conductor_count = len(self.app.state.project.conductors)
-                    can_copy = (mode == "edit" and 0 <= idx < conductor_count)
+                    selected = list(self.app.state.selected_indices)
+                    can_copy = mode == "edit" and len(selected) > 0
                 if can_copy:
                     with self.app.state_lock:
-                        self.clipboard_conductor = _clone_conductor(self.app.state.project.conductors[idx])
-                    dpg.set_value("status_text", f"Copied C{idx + 1}")
+                        self.clipboard_conductors = [
+                            _clone_conductor(self.app.state.project.conductors[idx])
+                            for idx in sorted(selected)
+                        ]
+                    count = len(self.clipboard_conductors)
+                    msg = f"Copied C{selected[0] + 1}" if count == 1 else f"Copied {count} objects"
+                    dpg.set_value("status_text", msg)
             self.ctrl_c_down_last = ctrl_c_down
 
-        # Ctrl+V to paste
+        # Ctrl+V to paste all copied (maintaining relative positions)
         if CTRL_KEY and V_KEY:
             ctrl_down = dpg.is_key_down(CTRL_KEY)
             v_down = dpg.is_key_down(V_KEY)
@@ -393,19 +471,23 @@ class CanvasController:
             if ctrl_v_down and not self.ctrl_v_down_last:
                 with self.app.state_lock:
                     mode = self.app.state.view_mode
-                    can_paste = (mode == "edit" and self.clipboard_conductor is not None)
+                    can_paste = mode == "edit" and len(self.clipboard_conductors) > 0
                 if can_paste:
                     with self.app.state_lock:
-                        # Clone the clipboard conductor and offset it
-                        pasted = _clone_conductor(self.clipboard_conductor)
-                        # Offset by 30px down-right so it's visible
-                        px, py = pasted.position
-                        pasted.position = (px + 30.0, py + 30.0)
-                        actions.add_conductor(self.app.state, pasted)
-                        new_idx = len(self.app.state.project.conductors) - 1
-                        self.app.state.set_selected(new_idx)
+                        new_indices = set()
+                        for conductor in self.clipboard_conductors:
+                            pasted = _clone_conductor(conductor)
+                            # Offset by 30px down-right
+                            px, py = pasted.position
+                            pasted.position = (px + 30.0, py + 30.0)
+                            actions.add_conductor(self.app.state, pasted)
+                            new_indices.add(len(self.app.state.project.conductors) - 1)
+                        # Select all pasted conductors
+                        self.app.state.selected_indices = new_indices
                     self.app.canvas_renderer.mark_dirty()
                     self.app.boundary_controls.rebuild_controls()
                     self.app.boundary_controls.update_slider_labels()
-                    dpg.set_value("status_text", f"Pasted as C{new_idx + 1}")
+                    count = len(new_indices)
+                    msg = f"Pasted {count} object{'s' if count > 1 else ''}"
+                    dpg.set_value("status_text", msg)
             self.ctrl_v_down_last = ctrl_v_down

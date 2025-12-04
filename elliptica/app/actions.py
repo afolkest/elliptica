@@ -30,7 +30,7 @@ def add_conductor(state: AppState, conductor: Conductor) -> None:
             conductor.interior_mask = interior
 
     state.project.conductors.append(conductor)
-    state.selected_idx = len(state.project.conductors) - 1
+    state.set_selected(len(state.project.conductors) - 1)
 
     # Initialize color settings
     state.conductor_color_settings[conductor.id] = ConductorColorSettings()
@@ -49,8 +49,17 @@ def remove_conductor(state: AppState, idx: int) -> None:
             state.conductor_color_settings.pop(conductor.id, None)
 
         del state.project.conductors[idx]
-        if state.selected_idx >= len(state.project.conductors):
-            state.selected_idx = len(state.project.conductors) - 1
+
+        # Update selection: remove deleted index, shift higher indices down
+        new_selection = set()
+        for sel_idx in state.selected_indices:
+            if sel_idx < idx:
+                new_selection.add(sel_idx)
+            elif sel_idx > idx:
+                new_selection.add(sel_idx - 1)
+            # sel_idx == idx is dropped (deleted)
+        state.selected_indices = new_selection
+
         state.field_dirty = True
         state.render_dirty = True
 

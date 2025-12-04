@@ -43,6 +43,7 @@ RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RES
 
 BACKSPACE_KEY = None
 CTRL_KEY = None
+SHIFT_KEY = None
 C_KEY = None
 V_KEY = None
 if dpg is not None:
@@ -52,6 +53,9 @@ if dpg is not None:
     CTRL_KEY = getattr(dpg, "mvKey_Control", None)
     if CTRL_KEY is None:
         CTRL_KEY = getattr(dpg, "mvKey_LControl", None)
+    SHIFT_KEY = getattr(dpg, "mvKey_Shift", None)
+    if SHIFT_KEY is None:
+        SHIFT_KEY = getattr(dpg, "mvKey_LShift", None)
     C_KEY = getattr(dpg, "mvKey_C", None)
     V_KEY = getattr(dpg, "mvKey_V", None)
 

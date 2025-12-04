@@ -43,6 +43,7 @@ def save_project(state: AppState, filepath: str) -> None:
         filepath = filepath.with_suffix('.elliptica')
 
     # Build metadata dictionary
+    print(f"DEBUG save_project: pde_type={state.project.pde_type!r}")
     metadata = {
         'schema_version': SCHEMA_VERSION,
         'created_at': datetime.now().isoformat(),
