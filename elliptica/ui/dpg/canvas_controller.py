@@ -146,7 +146,7 @@ class CanvasController:
         return -1
 
     def find_conductors_in_box(self, x1: float, y1: float, x2: float, y2: float) -> set[int]:
-        """Find all conductors whose bounding boxes intersect with selection box."""
+        """Find all conductors with actual mask pixels inside selection box."""
         # Normalize box coordinates
         min_x, max_x = min(x1, x2), max(x1, x2)
         min_y, max_y = min(y1, y2), max(y1, y2)
@@ -156,10 +156,24 @@ class CanvasController:
             conductors = self.app.state.project.conductors
             for idx, conductor in enumerate(conductors):
                 cx, cy = conductor.position
-                h, w = conductor.mask.shape
-                # Check bounding box intersection
-                if not (cx + w < min_x or cx > max_x or cy + h < min_y or cy > max_y):
-                    result.add(idx)
+                mask = conductor.mask
+                h, w = mask.shape
+
+                # Quick bounding box rejection
+                if cx + w < min_x or cx > max_x or cy + h < min_y or cy > max_y:
+                    continue
+
+                # Calculate overlap region in mask-local coordinates
+                local_min_x = max(0, int(min_x - cx))
+                local_max_x = min(w, int(max_x - cx) + 1)
+                local_min_y = max(0, int(min_y - cy))
+                local_max_y = min(h, int(max_y - cy) + 1)
+
+                # Check if any mask pixels in overlap region are set
+                if local_max_x > local_min_x and local_max_y > local_min_y:
+                    region = mask[local_min_y:local_max_y, local_min_x:local_max_x]
+                    if region.max() > 0.5:
+                        result.add(idx)
         return result
 
     def detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
