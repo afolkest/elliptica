@@ -190,7 +190,7 @@ class FileIOController:
             self.app.state.render_settings = new_state.render_settings
             self.app.state.display_settings = new_state.display_settings
             self.app.state.conductor_color_settings = new_state.conductor_color_settings
-            self.app.state.selected_idx = -1
+            self.app.state.clear_selection()
             self.app.state.view_mode = "edit"
             self.app.state.field_dirty = True
             self.app.state.render_dirty = True
@@ -371,7 +371,9 @@ class FileIOController:
                     break
 
             # Sync PDERegistry to loaded project's PDE type
+            print(f"DEBUG: Loading project with pde_type={new_state.project.pde_type!r}")
             PDERegistry.set_active(new_state.project.pde_type)
+            print(f"DEBUG: PDERegistry active is now {PDERegistry.get_active_name()!r}")
 
             with self.app.state_lock:
                 # Replace current state with loaded state
@@ -379,7 +381,7 @@ class FileIOController:
                 self.app.state.render_settings = new_state.render_settings
                 self.app.state.display_settings = new_state.display_settings
                 self.app.state.conductor_color_settings = new_state.conductor_color_settings
-                self.app.state.selected_idx = -1
+                self.app.state.clear_selection()
                 self.app.state.view_mode = "edit"
                 self.app.state.field_dirty = True
                 self.app.state.render_dirty = True

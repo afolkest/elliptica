@@ -69,7 +69,7 @@ class BoundaryControlsPanel:
 
         with self.app.state_lock:
             conductors = list(self.app.state.project.conductors)
-            selected_idx = self.app.state.selected_idx
+            selected_indices = set(self.app.state.selected_indices)
 
         # Get active PDE definition to know what sliders to build
         pde = PDERegistry.get_active()
@@ -88,7 +88,7 @@ class BoundaryControlsPanel:
 
         for idx, conductor in enumerate(conductors):
             label = f"Object {idx + 1}"
-            if idx == selected_idx:
+            if idx in selected_indices:
                 label += " (selected)"
 
             # Add boundary type to label if bc_type field exists
@@ -161,7 +161,7 @@ class BoundaryControlsPanel:
 
         with self.app.state_lock:
             conductors = list(self.app.state.project.conductors)
-            selected_idx = self.app.state.selected_idx
+            selected_indices = set(self.app.state.selected_indices)
 
         bc_type_field = self.field_defs.get("bc_type")
 
@@ -171,7 +171,7 @@ class BoundaryControlsPanel:
 
             conductor = conductors[idx]
             label = f"Object {idx + 1}"
-            if idx == selected_idx:
+            if idx in selected_indices:
                 label += " (selected)"
 
             # Add boundary type to label if bc_type field exists
@@ -349,7 +349,6 @@ class BoundaryControlsPanel:
 
         with self.app.state_lock:
             conductors = list(self.app.state.project.conductors)
-            selected_idx = self.app.state.selected_idx
 
         for idx, param_map in list(self.slider_ids.items()):
             if idx >= len(conductors):

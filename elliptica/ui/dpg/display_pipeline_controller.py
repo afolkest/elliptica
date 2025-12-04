@@ -42,7 +42,8 @@ class DisplayPipelineController:
         # Async postprocessing state
         self.executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
         self.postprocess_future: Optional[Future] = None
-        self._pending_invalidate: bool = False
+        self._pending_refresh: bool = False  # True if refresh needed when current job finishes
+        self._pending_invalidate: bool = False  # True if pending refresh needs cache invalidation
 
     def refresh_display(self, invalidate_cache: bool = False) -> None:
         """Refresh the display with current postprocessing settings.
@@ -55,6 +56,7 @@ class DisplayPipelineController:
         # If a postprocess job is already running, mark that we need another refresh
         # (settings may have changed while computing)
         if self.postprocess_future is not None and not self.postprocess_future.done():
+            self._pending_refresh = True
             self._pending_invalidate = self._pending_invalidate or invalidate_cache
             return
 
@@ -224,9 +226,11 @@ class DisplayPipelineController:
             print(f"⚠️  Postprocess error: {result[1]}")
 
         # If another refresh was requested while we were computing, start a new job
-        if self._pending_invalidate:
+        if self._pending_refresh:
+            invalidate = self._pending_invalidate
+            self._pending_refresh = False
             self._pending_invalidate = False
-            self.refresh_display(invalidate_cache=True)
+            self.refresh_display(invalidate_cache=invalidate)
 
     def invalidate_and_refresh(self) -> None:
         """Invalidate display cache and refresh (for settings that affect base colorization)."""

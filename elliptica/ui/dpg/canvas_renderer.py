@@ -169,6 +169,17 @@ class CanvasRenderer:
                 dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
             i += period
 
+    def _get_conductor_contours(self, conductor, offset_x: float, offset_y: float) -> list[np.ndarray]:
+        """Extract contours from conductor mask and offset to canvas position."""
+        contours = self._extract_contours(conductor.mask)
+        result = []
+        for contour in contours:
+            offset_contour = contour.copy()
+            offset_contour[:, 0] += offset_x
+            offset_contour[:, 1] += offset_y
+            result.append(offset_contour)
+        return result
+
     def draw(self) -> None:
         """Redraw the canvas with current state.
 
@@ -181,12 +192,18 @@ class CanvasRenderer:
 
         with self.app.state_lock:
             project = self.app.state.project
-            selected_idx = self.app.state.selected_idx
+            selected_indices = set(self.app.state.selected_indices)
+            selected_idx = self.app.state.get_single_selected_idx()  # For render mode
             selected_region_type = self.app.state.selected_region_type
             canvas_w, canvas_h = project.canvas_resolution
             conductors = list(project.conductors)
             render_cache = self.app.state.render_cache
             view_mode = self.app.state.view_mode
+
+        # Get box selection state from controller
+        box_select_active = self.app.canvas_controller.box_select_active
+        box_start = self.app.canvas_controller.box_select_start
+        box_end = self.app.canvas_controller.box_select_end
 
         # Clear the layer (transform persists on layer)
         dpg.delete_item(self.app.canvas_layer_id, children_only=True)
@@ -236,7 +253,7 @@ class CanvasRenderer:
                     parent=self.app.canvas_layer_id,
                 )
 
-            # Draw selection outline for selected region in render mode
+            # Draw selection outline for selected region in render mode (single select only)
             if selected_idx >= 0:
                 contours = self._get_selection_contours(selected_idx, selected_region_type, render_cache, canvas_w, canvas_h)
                 if contours:
@@ -257,11 +274,25 @@ class CanvasRenderer:
                     uv_max=(1.0, 1.0),
                     parent=self.app.canvas_layer_id,
                 )
-                if idx == selected_idx:
-                    dpg.draw_rectangle(
-                        (x0, y0),
-                        (x0 + width, y0 + height),
-                        color=(255, 255, 100, 200),
-                        thickness=2.0,
-                        parent=self.app.canvas_layer_id,
-                    )
+                # Draw contour outline for selected conductors
+                if idx in selected_indices:
+                    contours = self._get_conductor_contours(conductor, x0, y0)
+                    for contour in contours:
+                        self._draw_dashed_contour(
+                            contour, self.app.canvas_layer_id,
+                            color=(255, 255, 100, 220),  # Yellow selection color
+                            thickness=2.0
+                        )
+
+            # Draw box selection rectangle
+            if box_select_active:
+                x1, y1 = box_start
+                x2, y2 = box_end
+                dpg.draw_rectangle(
+                    (min(x1, x2), min(y1, y2)),
+                    (max(x1, x2), max(y1, y2)),
+                    color=(100, 150, 255, 200),
+                    fill=(100, 150, 255, 40),
+                    thickness=1.5,
+                    parent=self.app.canvas_layer_id,
+                )

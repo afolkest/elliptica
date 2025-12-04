@@ -650,7 +650,7 @@ class PostprocessingPanel:
             # Conductor mode
             with self.app.state_lock:
                 selected = self.app.state.get_selected()
-                conductor_idx = self.app.state.selected_idx
+                conductor_idx = self.app.state.get_single_selected_idx()
 
             # Update context header text (always visible, just change text)
             region_type = self.app.state.selected_region_type

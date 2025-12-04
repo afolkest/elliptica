@@ -167,7 +167,7 @@ class AppState:
     display_settings: DisplaySettings = field(default_factory=DisplaySettings)
 
     # Interaction state
-    selected_idx: int = -1  # Conductor index (-1 = none)
+    selected_indices: set[int] = field(default_factory=set)  # Selected conductor indices
     selected_region_type: str = "surface"  # "surface" or "interior"
     view_mode: str = "edit"  # "edit" or "render"
 
@@ -186,17 +186,39 @@ class AppState:
     color_config: Optional["ColorConfig"] = None
 
     def set_selected(self, idx: int) -> None:
-        """Select conductor at index or clear selection."""
+        """Replace selection with single conductor at index, or clear if invalid."""
+        self.selected_indices.clear()
         if 0 <= idx < len(self.project.conductors):
-            self.selected_idx = idx
+            self.selected_indices.add(idx)
+
+    def toggle_selected(self, idx: int) -> None:
+        """Toggle conductor in/out of selection (for shift-click)."""
+        if not (0 <= idx < len(self.project.conductors)):
+            return
+        if idx in self.selected_indices:
+            self.selected_indices.discard(idx)
         else:
-            self.selected_idx = -1
+            self.selected_indices.add(idx)
+
+    def clear_selection(self) -> None:
+        """Clear all selection."""
+        self.selected_indices.clear()
 
     def get_selected(self) -> Optional[Conductor]:
-        """Return currently selected conductor, if any."""
-        if 0 <= self.selected_idx < len(self.project.conductors):
-            return self.project.conductors[self.selected_idx]
+        """Return selected conductor only if exactly one is selected."""
+        if len(self.selected_indices) == 1:
+            idx = next(iter(self.selected_indices))
+            if 0 <= idx < len(self.project.conductors):
+                return self.project.conductors[idx]
         return None
+
+    def get_single_selected_idx(self) -> int:
+        """Return selected index if exactly one selected, else -1."""
+        if len(self.selected_indices) == 1:
+            idx = next(iter(self.selected_indices))
+            if 0 <= idx < len(self.project.conductors):
+                return idx
+        return -1
 
     def clear_render_cache(self) -> None:
         """Invalidate cached render output and free GPU memory."""
