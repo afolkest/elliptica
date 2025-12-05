@@ -434,18 +434,24 @@ class ImageExportController:
                     result.offset_y,
                 )
 
-            # Upload solution to GPU if available
+            # Upload solution and field components to GPU if available
             solution_gpu = None
-            if result.solution:
-                try:
-                    from elliptica.gpu import GPUContext
-                    if GPUContext.is_available():
+            ex_tensor = None
+            ey_tensor = None
+            try:
+                from elliptica.gpu import GPUContext
+                if GPUContext.is_available():
+                    if result.solution:
                         solution_gpu = {}
                         for name, array in result.solution.items():
                             if isinstance(array, np.ndarray) and array.ndim == 2:
                                 solution_gpu[name] = GPUContext.to_gpu(array)
-                except Exception:
-                    pass
+                    if result.ex is not None:
+                        ex_tensor = GPUContext.to_gpu(result.ex)
+                    if result.ey is not None:
+                        ey_tensor = GPUContext.to_gpu(result.ey)
+            except Exception:
+                pass
 
             # Apply postprocessing
             canvas_w, canvas_h = project.canvas_resolution
@@ -468,6 +474,8 @@ class ImageExportController:
                 color_config=color_config,
                 lightness_expr=settings.lightness_expr,
                 solution_gpu=solution_gpu,
+                ex_tensor=ex_tensor,
+                ey_tensor=ey_tensor,
                 saturation=settings.saturation,
             )
 
