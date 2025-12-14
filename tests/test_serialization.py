@@ -232,92 +232,38 @@ def test_roundtrip_conductor_color_settings():
         assert cs.interior.solid_color == (0.1, 0.5, 0.9)
 
 
-def test_backward_compatibility_missing_fields():
-    """Test that missing fields in loaded data use defaults."""
-    # This simulates loading an old file with new code that has added fields
-    # We'll manually create a minimal metadata JSON and verify defaults are applied
-
+def test_v1_files_rejected_with_migration_message():
+    """Test that v1 files are rejected with a helpful error pointing to migration."""
     import json
     import zipfile
-
-    mask = (np.random.rand(40, 40) > 0.5).astype(np.float32)
+    import pytest
+    from elliptica.serialization import ProjectLoadError
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = Path(tmpdir) / "old_format.flowcol"
+        filepath = Path(tmpdir) / "old_format.elliptica"
 
-        # Create minimal metadata (simulating old schema)
+        # Create v1 metadata
         metadata = {
             'schema_version': '1.0',
             'created_at': '2025-01-01T00:00:00',
-            'project': {
-                'canvas_resolution': [640, 480],
-                'streamlength_factor': 2.0,
-                'next_conductor_id': 1,
-                # Missing boundary conditions (should default to 0)
-            },
-            'render_settings': {
-                'multiplier': 1.0,
-                # Missing other fields (should use defaults)
-            },
-            'display_settings': {
-                'gamma': 1.0,
-                # Missing other fields (should use defaults)
-            },
-            'conductors': [
-                {
-                    'voltage': 0.5,
-                    'position': [0.0, 0.0],
-                    'id': 0,
-                    # Missing new fields like smear_enabled (should default to False)
-                    'masks': {
-                        'mask': {
-                            'file': 'conductor_0_mask.png',
-                            'shape': [40, 40],
-                            'encoding': 'uint16_png',
-                        },
-                        'interior_mask': None,
-                        'original_mask': None,
-                        'original_interior_mask': None,
-                    }
-                }
-            ],
+            'project': {'canvas_resolution': [640, 480]},
+            'render_settings': {},
+            'display_settings': {},
+            'conductors': [],
             'conductor_color_settings': {},
         }
 
-        # Create ZIP manually
         with zipfile.ZipFile(filepath, 'w') as zf:
             zf.writestr('metadata.json', json.dumps(metadata))
 
-            # Save mask
-            from PIL import Image
-            from io import BytesIO
-            mask_uint16 = (mask * 65535).astype(np.uint16)
-            img = Image.fromarray(mask_uint16)
-            buf = BytesIO()
-            img.save(buf, format='PNG')
-            zf.writestr('conductor_0_mask.png', buf.getvalue())
+        # Should raise ProjectLoadError with migration instructions
+        with pytest.raises(ProjectLoadError) as exc_info:
+            load_project(str(filepath))
 
-        # Load and verify defaults are applied
-        loaded_state = load_project(str(filepath))
-
-        # Project defaults
-        assert loaded_state.project.boundary_top == 0
-        assert loaded_state.project.boundary_bottom == 0
-        assert loaded_state.project.boundary_left == 0
-        assert loaded_state.project.boundary_right == 0
-
-        # Render settings defaults
-        assert loaded_state.render_settings.supersample == defaults.SUPERSAMPLE_CHOICES[0]
-        assert loaded_state.render_settings.num_passes == defaults.DEFAULT_RENDER_PASSES
-
-        # Display settings defaults
-        assert loaded_state.display_settings.contrast == defaults.DEFAULT_CONTRAST
-
-        # Conductor defaults
-        c = loaded_state.project.conductors[0]
-        assert c.smear_enabled is False
-        assert c.edge_smooth_sigma == 1.5  # New default value
-        assert c.scale_factor == 1.0
+        error_msg = str(exc_info.value)
+        assert '1.0' in error_msg
+        assert '2.0' in error_msg
+        assert 'elliptica.migrate' in error_msg
 
 
 def test_file_extension_handling():
@@ -430,3 +376,173 @@ def test_render_cache_fingerprint_detection():
 
     # Should match original
     assert fp1 == fp3
+
+
+def test_migration_v1_to_v2():
+    """Test that v1 files are correctly migrated to v2."""
+    import json
+    import zipfile
+    from io import BytesIO
+    from PIL import Image
+    from elliptica.migrate import migrate_v1_to_v2
+
+    mask = np.random.rand(40, 40).astype(np.float32)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.elliptica"
+
+        # Create v1 format file
+        v1_metadata = {
+            'schema_version': '1.0',
+            'created_at': '2025-01-01T00:00:00',
+            'project': {
+                'canvas_resolution': [640, 480],
+                'streamlength_factor': 2.5,
+                'next_conductor_id': 1,
+                'boundary_top': 1,
+                'boundary_bottom': 0,
+                'boundary_left': 0,
+                'boundary_right': 1,
+                'pde_type': 'poisson',
+                'pde_bc': {},
+            },
+            'render_settings': {
+                'multiplier': 2.0,
+                'supersample': 1.0,
+                'num_passes': 3,
+                'margin': 0.1,
+                'noise_seed': 42,
+                'noise_sigma': 0.5,
+                'use_mask': True,
+                'edge_gain_strength': 0.5,
+                'edge_gain_power': 1.0,
+                'solve_scale': 0.5,
+            },
+            'display_settings': {
+                'downsample_sigma': 0.5,
+                'clip_percent': 0.01,
+                'brightness': 1.0,
+                'contrast': 1.2,
+                'gamma': 0.9,
+                'color_enabled': True,
+                'palette': 'Viridis',
+                'lightness_expr': None,
+                'saturation': 0.8,
+            },
+            'conductors': [
+                {
+                    'voltage': 0.7,
+                    'position': [100.0, 200.0],
+                    'scale_factor': 1.5,
+                    'edge_smooth_sigma': 2.0,
+                    'smear_enabled': True,
+                    'smear_sigma': 0.003,
+                    'id': 0,
+                    'masks': {
+                        'mask': {
+                            'file': 'conductor_0_mask.png',
+                            'shape': [40, 40],
+                            'encoding': 'uint16_png',
+                        },
+                        'interior_mask': None,
+                        'original_mask': None,
+                        'original_interior_mask': None,
+                    }
+                }
+            ],
+            'conductor_color_settings': {},
+        }
+
+        # Create v1 ZIP
+        with zipfile.ZipFile(filepath, 'w') as zf:
+            zf.writestr('metadata.json', json.dumps(v1_metadata))
+
+            # Save mask
+            mask_uint16 = (mask * 65535).astype(np.uint16)
+            img = Image.fromarray(mask_uint16)
+            buf = BytesIO()
+            img.save(buf, format='PNG')
+            zf.writestr('conductor_0_mask.png', buf.getvalue())
+
+        # Run migration
+        result = migrate_v1_to_v2(filepath)
+        assert result is True
+
+        # Check backup was created
+        backup_path = filepath.with_suffix('.elliptica.v1.bak')
+        assert backup_path.exists()
+
+        # Load migrated file and verify
+        loaded_state = load_project(str(filepath))
+
+        # Check project
+        assert loaded_state.project.canvas_resolution == (640, 480)
+        assert loaded_state.project.streamlength_factor == 2.5
+        assert loaded_state.project.next_conductor_id == 1
+        assert loaded_state.project.boundary_top == 1
+        assert loaded_state.project.pde_type == 'poisson'
+
+        # Check render settings
+        assert loaded_state.render_settings.multiplier == 2.0
+        assert loaded_state.render_settings.solve_scale == 0.5
+
+        # Check display settings
+        assert loaded_state.display_settings.palette == 'Viridis'
+        assert loaded_state.display_settings.saturation == 0.8
+
+        # Check boundary object
+        assert len(loaded_state.project.conductors) == 1
+        b = loaded_state.project.conductors[0]
+        assert b.voltage == 0.7
+        assert b.position == (100.0, 200.0)
+        assert b.scale_factor == 1.5
+        assert b.smear_enabled is True
+        assert b.id == 0
+
+        # Check mask file was renamed in ZIP
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            names = zf.namelist()
+            assert 'boundary_0_mask.png' in names
+            assert 'conductor_0_mask.png' not in names
+
+
+def test_migration_renames_flowcol_to_elliptica():
+    """Test that .flowcol files are renamed to .elliptica during migration."""
+    import json
+    import zipfile
+    from elliptica.migrate import migrate_v1_to_v2
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        filepath = Path(tmpdir) / "test.flowcol"
+
+        # Create minimal v1 file
+        v1_metadata = {
+            'schema_version': '1.0',
+            'project': {'canvas_resolution': [100, 100]},
+            'render_settings': {},
+            'display_settings': {},
+            'conductors': [],
+            'conductor_color_settings': {},
+        }
+
+        with zipfile.ZipFile(filepath, 'w') as zf:
+            zf.writestr('metadata.json', json.dumps(v1_metadata))
+
+        # Run migration
+        result = migrate_v1_to_v2(filepath)
+        assert result is True
+
+        # Old .flowcol should be gone
+        assert not filepath.exists()
+
+        # New .elliptica should exist
+        new_path = filepath.with_suffix('.elliptica')
+        assert new_path.exists()
+
+        # Backup should have original extension
+        backup_path = Path(tmpdir) / "test.flowcol.v1.bak"
+        assert backup_path.exists()
+
+        # New file should be loadable
+        loaded = load_project(str(new_path))
+        assert loaded.project.canvas_resolution == (100, 100)
