@@ -40,11 +40,18 @@ class OklchPaletteCreator:
 
         # Layout
         self.gradient_width = 600
-        self.gradient_height = 60
+        self.gradient_height = 80
         self.gradient_bar_top = 10
         self.gradient_bar_bottom = 50
-        self.gradient_bar_padding = 20
-        self.handle_radius = 8
+        self.gradient_bar_padding = 30
+
+        # Handle styling - circles at bottom edge of gradient
+        self.handle_radius = 10  # visual radius
+        self.handle_hit_radius = 18  # larger hit area for easier clicking
+        self.handle_center_y = self.gradient_bar_bottom  # centered on bottom edge
+
+        # Drag state
+        self.drag_start_pos = None  # stop position when drag started
 
         # OKLCH picker dimensions
         self.slice_width = 360
@@ -94,8 +101,8 @@ class OklchPaletteCreator:
     def _init_default_gradient(self):
         """Initialize with a simple two-stop gradient."""
         self.stops = [
-            {"id": 0, "pos": 0.0, "L": 0.20, "C": 0.0, "H": 0.0},
-            {"id": 1, "pos": 1.0, "L": 0.95, "C": 0.0, "H": 0.0},
+            {"id": 0, "pos": 0.0, "L": 0.25, "C": 0.10, "H": 260.0},
+            {"id": 1, "pos": 1.0, "L": 0.90, "C": 0.08, "H": 80.0},
         ]
         self._next_stop_id = 2
         self.selected_stop_id = 0
@@ -157,6 +164,7 @@ class OklchPaletteCreator:
         """Interpolate gradient at position t (0-1).
 
         Uses linear interpolation in OKLCH space with hue wraparound.
+        Extrapolates with constant color outside stop range.
         """
         if not self.stops:
             return (0.5, 0.0, 0.0)
@@ -167,16 +175,23 @@ class OklchPaletteCreator:
 
         t = np.clip(t, 0.0, 1.0)
 
+        # Before first stop: use first stop's color
+        if t <= self.stops[0]["pos"]:
+            s = self.stops[0]
+            return (s["L"], s["C"], s["H"])
+
+        # After last stop: use last stop's color
+        if t >= self.stops[-1]["pos"]:
+            s = self.stops[-1]
+            return (s["L"], s["C"], s["H"])
+
         # Find surrounding stops
         for i in range(len(self.stops) - 1):
             s0 = self.stops[i]
             s1 = self.stops[i + 1]
             if s0["pos"] <= t <= s1["pos"]:
                 # Interpolate between s0 and s1
-                if s1["pos"] == s0["pos"]:
-                    frac = 0.0
-                else:
-                    frac = (t - s0["pos"]) / (s1["pos"] - s0["pos"])
+                frac = (t - s0["pos"]) / (s1["pos"] - s0["pos"])
 
                 L = s0["L"] + frac * (s1["L"] - s0["L"])
                 C = s0["C"] + frac * (s1["C"] - s0["C"])
@@ -192,7 +207,7 @@ class OklchPaletteCreator:
 
                 return (L, C, H)
 
-        # Fallback to last stop
+        # Should never reach here, but fallback to last stop
         s = self.stops[-1]
         return (s["L"], s["C"], s["H"])
 
@@ -228,11 +243,16 @@ class OklchPaletteCreator:
         return rgba
 
     def _generate_ch_slice(self, L: float) -> np.ndarray:
-        """Generate C x H slice at fixed L."""
+        """Generate C x H slice at fixed L.
+
+        Uses 'clip' gamut mapping for speed - fine for preview since we
+        gray out-of-gamut areas anyway.
+        """
         L_arr = np.full_like(self._C_mesh, L)
         max_c = max_chroma_fast(L_arr, self._H_mesh)
 
-        rgb = gamut_map_to_srgb(L_arr, self._C_mesh, self._H_mesh, method='compress')
+        # Use 'clip' for speed - we're showing out-of-gamut as gray anyway
+        rgb = gamut_map_to_srgb(L_arr, self._C_mesh, self._H_mesh, method='clip')
 
         rgba = np.ones((self.slice_height, self.slice_width, 4), dtype=np.float32)
         rgba[..., :3] = np.clip(rgb, 0.0, 1.0)
@@ -258,7 +278,7 @@ class OklchPaletteCreator:
         max_c = max_chroma_fast(L_arr, H_arr)
         in_gamut = C_arr <= max_c
 
-        rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='compress')
+        rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='clip')
         rgb = np.clip(rgb, 0.0, 1.0)
         rgb[~in_gamut] = [0.2, 0.2, 0.2]
 
@@ -372,34 +392,69 @@ class OklchPaletteCreator:
         dpg.draw_rectangle(
             (bar_left, self.gradient_bar_top),
             (bar_right, self.gradient_bar_bottom),
-            color=(200, 200, 200, 255),
+            color=(100, 100, 100, 255),
             thickness=1,
             parent=self.gradient_drawlist_id,
         )
 
-        # Draw handles
-        handle_base = self.gradient_bar_bottom + 4
-        handle_height = 14
+        # Draw handles as circles at the bottom edge of the gradient bar
+        # Draw in two passes: non-selected first, then selected on top
+        for is_selected_pass in [False, True]:
+            for stop in self.stops:
+                is_selected = stop["id"] == self.selected_stop_id
+                if is_selected != is_selected_pass:
+                    continue
 
-        for stop in self.stops:
-            x = self._stop_to_x(stop["pos"])
-            r, g, b = self._oklch_to_rgb255(stop["L"], stop["C"], stop["H"])
-            fill = (r, g, b, 255)
-            outline = (255, 230, 120, 255) if stop["id"] == self.selected_stop_id else (30, 30, 30, 255)
+                x = self._stop_to_x(stop["pos"])
+                y = self.handle_center_y
+                r, g, b = self._oklch_to_rgb255(stop["L"], stop["C"], stop["H"])
 
-            # Triangle handle pointing up
-            points = [
-                (x, handle_base),
-                (x - self.handle_radius, handle_base + handle_height),
-                (x + self.handle_radius, handle_base + handle_height),
-            ]
-            dpg.draw_triangle(
-                points[0], points[1], points[2],
-                color=outline,
-                fill=fill,
-                thickness=2,
-                parent=self.gradient_drawlist_id,
-            )
+                # Position indicator line (subtle vertical line up into gradient)
+                line_color = (255, 255, 255, 100) if is_selected else (255, 255, 255, 40)
+                dpg.draw_line(
+                    (x, self.gradient_bar_top + 2),
+                    (x, self.gradient_bar_bottom - 2),
+                    color=line_color,
+                    thickness=1,
+                    parent=self.gradient_drawlist_id,
+                )
+
+                # Outer glow for selected stop
+                if is_selected:
+                    dpg.draw_circle(
+                        (x, y),
+                        self.handle_radius + 4,
+                        color=(255, 200, 80, 180),
+                        thickness=3,
+                        parent=self.gradient_drawlist_id,
+                    )
+
+                # White outer ring (always visible for contrast)
+                dpg.draw_circle(
+                    (x, y),
+                    self.handle_radius + 1,
+                    color=(255, 255, 255, 255),
+                    fill=(255, 255, 255, 255),
+                    parent=self.gradient_drawlist_id,
+                )
+
+                # Dark ring for definition
+                dpg.draw_circle(
+                    (x, y),
+                    self.handle_radius,
+                    color=(40, 40, 40, 255),
+                    thickness=1,
+                    parent=self.gradient_drawlist_id,
+                )
+
+                # Color fill
+                dpg.draw_circle(
+                    (x, y),
+                    self.handle_radius - 1,
+                    color=(r, g, b, 255),
+                    fill=(r, g, b, 255),
+                    parent=self.gradient_drawlist_id,
+                )
 
     def _update_slice_crosshair(self):
         """Draw crosshair on C x H slice."""
@@ -506,37 +561,79 @@ class OklchPaletteCreator:
     # ---------------------------------------------------------------
 
     def _hit_test_handle(self, local_x: float, local_y: float) -> Optional[int]:
-        """Test if click hits a handle, return stop index."""
-        handle_base = self.gradient_bar_bottom + 4
-        handle_top = handle_base
-        handle_bottom = handle_base + 16
+        """Test if click hits a handle, return stop index.
+
+        Uses larger hit radius for easier clicking. Returns closest handle
+        if multiple are within range (handles overlapping stops).
+        """
+        best_idx = None
+        best_dist = float('inf')
 
         for idx, stop in enumerate(self.stops):
             x = self._stop_to_x(stop["pos"])
-            if abs(local_x - x) <= self.handle_radius * 1.2 and handle_top <= local_y <= handle_bottom:
-                return idx
-        return None
+            y = self.handle_center_y
 
-    def _gradient_local_coords(self, mouse_x: float, mouse_y: float) -> Optional[tuple[float, float]]:
-        """Get local coordinates within gradient drawlist."""
+            # Distance from click to handle center
+            dist = ((local_x - x) ** 2 + (local_y - y) ** 2) ** 0.5
+
+            if dist <= self.handle_hit_radius and dist < best_dist:
+                best_dist = dist
+                best_idx = idx
+
+        return best_idx
+
+    def _gradient_local_coords(self, mouse_x: float, mouse_y: float, clamp: bool = False) -> Optional[tuple[float, float]]:
+        """Get local coordinates within gradient drawlist.
+
+        Args:
+            mouse_x, mouse_y: Global mouse position
+            clamp: If True, clamp to bounds instead of returning None when outside
+
+        Returns:
+            Local (x, y) coordinates, or None if outside bounds and clamp=False
+        """
         if not dpg.does_item_exist(self.gradient_drawlist_id):
             return None
         rect_min = dpg.get_item_rect_min(self.gradient_drawlist_id)
         rect_max = dpg.get_item_rect_max(self.gradient_drawlist_id)
         if rect_min is None or rect_max is None:
             return None
-        if not (rect_min[0] <= mouse_x <= rect_max[0] and rect_min[1] <= mouse_y <= rect_max[1]):
-            return None
-        return mouse_x - rect_min[0], mouse_y - rect_min[1]
+
+        local_x = mouse_x - rect_min[0]
+        local_y = mouse_y - rect_min[1]
+
+        if clamp:
+            # Clamp to bounds (for dragging)
+            local_x = max(0, min(local_x, rect_max[0] - rect_min[0]))
+            local_y = max(0, min(local_y, rect_max[1] - rect_min[1]))
+            return local_x, local_y
+        else:
+            # Strict bounds check (for initial click)
+            if not (rect_min[0] <= mouse_x <= rect_max[0] and rect_min[1] <= mouse_y <= rect_max[1]):
+                return None
+            return local_x, local_y
 
     def _on_gradient_mouse_down(self, sender, app_data):
         """Handle mouse down on gradient bar."""
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-        coords = self._gradient_local_coords(mouse_x, mouse_y)
-        if coords is None:
+
+        # First check if we're anywhere near the gradient area (with padding for handles)
+        if not dpg.does_item_exist(self.gradient_drawlist_id):
+            return
+        rect_min = dpg.get_item_rect_min(self.gradient_drawlist_id)
+        rect_max = dpg.get_item_rect_max(self.gradient_drawlist_id)
+        if rect_min is None or rect_max is None:
             return
 
-        local_x, local_y = coords
+        # Expand bounds to include handle area below the bar
+        expanded_bottom = rect_max[1] + self.handle_radius
+        if not (rect_min[0] <= mouse_x <= rect_max[0] and rect_min[1] <= mouse_y <= expanded_bottom):
+            return
+
+        local_x = mouse_x - rect_min[0]
+        local_y = mouse_y - rect_min[1]
+
+        # Check handles first (they have priority)
         handle_idx = self._hit_test_handle(local_x, local_y)
 
         if handle_idx is not None:
@@ -544,12 +641,6 @@ class OklchPaletteCreator:
             self.selected_stop_id = self.stops[handle_idx]["id"]
             self.is_dragging = True
             self._refresh_all()
-        elif self.gradient_bar_top <= local_y <= self.gradient_bar_bottom:
-            # Add new stop
-            pos = self._x_to_pos(local_x)
-            L, C, H = self._interpolate_oklch(pos)
-            self._add_stop(pos, L, C, H)
-            self.is_dragging = True
 
     def _on_gradient_mouse_drag(self, sender, app_data):
         """Handle drag on gradient bar."""
@@ -557,7 +648,8 @@ class OklchPaletteCreator:
             return
 
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-        coords = self._gradient_local_coords(mouse_x, mouse_y)
+        # Use clamp=True so dragging continues even when mouse leaves the area
+        coords = self._gradient_local_coords(mouse_x, mouse_y, clamp=True)
         if coords is None:
             return
 
@@ -566,13 +658,14 @@ class OklchPaletteCreator:
 
         idx = self._get_stop_index(self.selected_stop_id)
         if idx is not None:
-            # Clamp to neighbors
-            min_pos = self.stops[idx - 1]["pos"] + 0.001 if idx > 0 else 0.0
-            max_pos = self.stops[idx + 1]["pos"] - 0.001 if idx < len(self.stops) - 1 else 1.0
+            # Clamp to neighbors (with small gap to prevent exact overlap)
+            min_pos = self.stops[idx - 1]["pos"] + 0.005 if idx > 0 else 0.0
+            max_pos = self.stops[idx + 1]["pos"] - 0.005 if idx < len(self.stops) - 1 else 1.0
             self.stops[idx]["pos"] = float(np.clip(new_pos, min_pos, max_pos))
 
             self._update_gradient_texture()
             self._update_gradient_drawlist()
+            self._sync_ui_from_stop()  # Update position display in real-time
 
     def _on_gradient_mouse_release(self, sender, app_data):
         """Handle mouse release."""
@@ -582,20 +675,38 @@ class OklchPaletteCreator:
             self._refresh_all()
 
     def _on_gradient_double_click(self, sender, app_data):
-        """Handle double-click to delete stop."""
+        """Handle double-click: delete stop if on handle, add stop if on bar."""
         if self.is_dragging:
             return
 
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
-        coords = self._gradient_local_coords(mouse_x, mouse_y)
-        if coords is None:
+
+        # Check if near gradient area
+        if not dpg.does_item_exist(self.gradient_drawlist_id):
+            return
+        rect_min = dpg.get_item_rect_min(self.gradient_drawlist_id)
+        rect_max = dpg.get_item_rect_max(self.gradient_drawlist_id)
+        if rect_min is None or rect_max is None:
             return
 
-        local_x, local_y = coords
+        expanded_bottom = rect_max[1] + self.handle_radius
+        if not (rect_min[0] <= mouse_x <= rect_max[0] and rect_min[1] <= mouse_y <= expanded_bottom):
+            return
+
+        local_x = mouse_x - rect_min[0]
+        local_y = mouse_y - rect_min[1]
+
         handle_idx = self._hit_test_handle(local_x, local_y)
-        if handle_idx is not None and len(self.stops) > 2:
-            stop_id = self.stops[handle_idx]["id"]
-            self._remove_stop(stop_id)
+        if handle_idx is not None:
+            # Double-click on handle: delete stop (if more than 2)
+            if len(self.stops) > 2:
+                stop_id = self.stops[handle_idx]["id"]
+                self._remove_stop(stop_id)
+        elif self.gradient_bar_top <= local_y <= self.gradient_bar_bottom + self.handle_radius:
+            # Double-click on bar: add new stop
+            pos = self._x_to_pos(local_x)
+            L, C, H = self._interpolate_oklch(pos)
+            self._add_stop(pos, L, C, H)
 
     def _on_slice_click(self, sender, app_data):
         """Handle click on C x H slice."""
@@ -876,7 +987,7 @@ class OklchPaletteCreator:
         # Main window
         with dpg.window(label="OKLCH Palette Creator", tag="main_window"):
             dpg.add_text("OKLCH Palette Creator", color=(150, 200, 255))
-            dpg.add_text("Click gradient bar to add stops, drag to move, double-click to delete",
+            dpg.add_text("Double-click bar to add stop, drag handles to move, double-click handle to delete",
                         color=(150, 150, 150))
             dpg.add_separator()
             dpg.add_spacer(height=10)
