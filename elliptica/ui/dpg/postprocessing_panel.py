@@ -786,9 +786,11 @@ class PostprocessingPanel:
 
         This is called when selection changes. Delegates to update_context_ui.
         """
-        # Cancel any pending debounced updates - context is changing
+        # Cancel ALL pending debounced updates - context is changing
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
+        self.smear_pending_value = None
+        self.clip_pending_value = None
         self.update_context_ui()
 
     # ------------------------------------------------------------------
