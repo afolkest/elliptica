@@ -431,7 +431,7 @@ def compute_project_fingerprint(project: Project) -> str:
     # Per-boundary state (order matters!)
     for i, b in enumerate(project.boundary_objects):
         # Scalar properties
-        parts.append(f"b{i}:v={b.voltage}")
+        parts.append(f"b{i}:v={b.params.get('voltage', 0.0)}")
         parts.append(f"b{i}:pos={b.position[0]:.2f},{b.position[1]:.2f}")
         parts.append(f"b{i}:scale={b.scale_factor}")
         parts.append(f"b{i}:edge_smooth={b.edge_smooth_sigma}")

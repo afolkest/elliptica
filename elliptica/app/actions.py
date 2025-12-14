@@ -73,7 +73,7 @@ def move_boundary(state: AppState, idx: int, dx: float, dy: float) -> None:
 def set_boundary_voltage(state: AppState, idx: int, voltage: float) -> None:
     """Assign voltage to boundary object."""
     if 0 <= idx < len(state.project.boundary_objects):
-        state.project.boundary_objects[idx].voltage = voltage
+        state.project.boundary_objects[idx].params["voltage"] = voltage
         state.field_dirty = True
         state.render_dirty = True
 

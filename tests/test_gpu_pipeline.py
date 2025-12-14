@@ -39,7 +39,7 @@ def test_hybrid_cpu_fallback():
     boundary = BoundaryObject(
         id=0,
         mask=mask,
-        voltage=1.0,
+        params={"voltage": 1.0},
         position=(40.0, 40.0),
         smear_enabled=False,
     )

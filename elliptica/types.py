@@ -2,65 +2,58 @@
 
 from dataclasses import dataclass, field
 import numpy as np
-from typing import Optional
 from elliptica import defaults
 from elliptica.poisson import DIRICHLET
 
 
-@dataclass
 class BoundaryObject:
-    """Generic boundary object for any PDE."""
-    mask: np.ndarray
-    params: dict[str, float] = field(default_factory=dict)  # Generic parameters
-    position: tuple[float, float] = (0.0, 0.0)
-    interior_mask: Optional[np.ndarray] = None
-    original_mask: Optional[np.ndarray] = None
-    original_interior_mask: Optional[np.ndarray] = None
-    scale_factor: float = 1.0  # Current scale relative to original
-    edge_smooth_sigma: float = 0.0  # Edge anti-aliasing blur in pixels (0-5px range)
-    smear_enabled: bool = False  # Enable texture smearing inside boundary
-    id: Optional[int] = None  # Assigned when added to project
+    """Generic boundary object for any PDE.
 
-    def __init__(self, mask: np.ndarray, voltage: float = 0.0, params: Optional[dict[str, float]] = None, **kwargs):
+    Attributes:
+        mask: Binary mask defining the boundary region
+        params: PDE-specific parameters (e.g. {"voltage": 1.0} for Poisson)
+        position: (x, y) position on canvas
+        interior_mask: Auto-detected interior region (for ring shapes etc.)
+        original_mask: Original mask before scaling
+        original_interior_mask: Original interior before scaling
+        scale_factor: Current scale relative to original
+        edge_smooth_sigma: Edge anti-aliasing blur in pixels (0-5px)
+        smear_enabled: Enable texture smearing inside boundary
+        smear_sigma: Smear strength (fraction of canvas)
+        id: Unique ID assigned when added to project
+    """
+
+    def __init__(
+        self,
+        mask: np.ndarray,
+        params: dict[str, float] | None = None,
+        position: tuple[float, float] = (0.0, 0.0),
+        interior_mask: np.ndarray | None = None,
+        original_mask: np.ndarray | None = None,
+        original_interior_mask: np.ndarray | None = None,
+        scale_factor: float = 1.0,
+        edge_smooth_sigma: float = 0.0,
+        smear_enabled: bool = False,
+        smear_sigma: float = defaults.DEFAULT_SMEAR_SIGMA,
+        id: int | None = None,
+    ):
         self.mask = mask
         self.params = params if params is not None else {}
-        if "voltage" not in self.params:
-            self.params["voltage"] = voltage
-        
-        # Handle other fields
-        for k, v in kwargs.items():
-            setattr(self, k, v)
-            
-        # Set defaults for missing fields (simulating dataclass behavior)
-        if not hasattr(self, 'position'): self.position = (0.0, 0.0)
-        if not hasattr(self, 'interior_mask'): self.interior_mask = None
-        if not hasattr(self, 'original_mask'): self.original_mask = None
-        if not hasattr(self, 'original_interior_mask'): self.original_interior_mask = None
-        if not hasattr(self, 'scale_factor'): self.scale_factor = 1.0
-        if not hasattr(self, 'edge_smooth_sigma'): self.edge_smooth_sigma = 0.0
-        if not hasattr(self, 'smear_enabled'): self.smear_enabled = False
-        if not hasattr(self, 'smear_sigma'): self.smear_sigma = defaults.DEFAULT_SMEAR_SIGMA
-        if not hasattr(self, 'id'): self.id = None
+        self.position = position
+        self.interior_mask = interior_mask
+        self.original_mask = original_mask
+        self.original_interior_mask = original_interior_mask
+        self.scale_factor = scale_factor
+        self.edge_smooth_sigma = edge_smooth_sigma
+        self.smear_enabled = smear_enabled
+        self.smear_sigma = smear_sigma
+        self.id = id
 
-    # Backwards compatibility for 'voltage'
-    @property
-    def voltage(self) -> float:
-        return self.params.get("voltage", 0.0)
-
-    @voltage.setter
-    def voltage(self, v: float) -> None:
-        self.params["voltage"] = v
-
-    # Generic 'value' is an alias for 'voltage' for future PDE compatibility
-    @property
-    def value(self) -> float:
-        """Generic boundary value (alias for voltage)."""
-        return self.voltage
-
-    @value.setter
-    def value(self, v: float) -> None:
-        """Set generic boundary value."""
-        self.voltage = v
+    def __repr__(self) -> str:
+        return (
+            f"BoundaryObject(id={self.id}, params={self.params}, "
+            f"position={self.position}, mask={self.mask.shape})"
+        )
 
 
 def clone_boundary_object(boundary: BoundaryObject, preserve_id: bool = True) -> BoundaryObject:

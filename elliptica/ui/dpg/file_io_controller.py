@@ -153,7 +153,7 @@ class FileIOController:
             num_boundaries = len(project.boundary_objects)
             offset = num_boundaries * 30.0
             pos = ((canvas_w - mask_w) / 2.0 + offset, (canvas_h - mask_h) / 2.0 + offset)
-            boundary = BoundaryObject(mask=mask, voltage=0.5, position=pos, interior_mask=interior)
+            boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, position=pos, interior_mask=interior)
             actions.add_boundary(self.app.state, boundary)
             self.app.state.view_mode = "edit"
 
