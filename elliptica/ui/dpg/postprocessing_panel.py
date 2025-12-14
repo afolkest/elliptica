@@ -175,27 +175,58 @@ class PostprocessingPanel:
             selected = self.app.state.get_selected()
             return selected is not None and selected.id is not None
 
+    def _get_current_region_style_unlocked(self):
+        """Get RegionStyle for current selection. Caller MUST hold state_lock."""
+        selected = self.app.state.get_selected()
+        if selected is None or selected.id is None:
+            return None
+        settings = self.app.state.conductor_color_settings.get(selected.id)
+        if settings is None:
+            return None
+        if self.app.state.selected_region_type == "surface":
+            return settings.surface
+        else:
+            return settings.interior
+
     def _get_current_region_style(self):
-        """Get the RegionStyle for the currently selected context, or None if global."""
+        """Get the RegionStyle for the currently selected context, or None if global.
+
+        Returns a snapshot of key values, NOT a mutable reference.
+        For mutable access, use _get_current_region_style_unlocked() while holding lock.
+        """
         with self.app.state_lock:
-            selected = self.app.state.get_selected()
-            if selected is None or selected.id is None:
-                return None
-            settings = self.app.state.conductor_color_settings.get(selected.id)
-            if settings is None:
-                return None
-            if self.app.state.selected_region_type == "surface":
-                return settings.surface
-            else:
-                return settings.interior
+            return self._get_current_region_style_unlocked()
 
     def _has_override_enabled(self) -> bool:
         """Check if the current region has override enabled (palette + sliders)."""
-        region_style = self._get_current_region_style()
-        if region_style is None:
-            return False
-        # Override is enabled when region.enabled is True (controls both palette and sliders)
-        return region_style.enabled
+        with self.app.state_lock:
+            region_style = self._get_current_region_style_unlocked()
+            if region_style is None:
+                return False
+            return region_style.enabled
+
+    def _get_slider_context(self) -> tuple[bool, int | None, str]:
+        """Get all context needed for B/C/G slider callbacks in one lock acquisition.
+
+        Returns:
+            (has_override, conductor_id, region_type)
+            - has_override: True if conductor selected AND region.enabled is True
+            - conductor_id: Selected conductor's ID, or None
+            - region_type: "surface" or "interior"
+        """
+        with self.app.state_lock:
+            selected = self.app.state.get_selected()
+            if selected is None or selected.id is None:
+                return (False, None, "surface")
+
+            settings = self.app.state.conductor_color_settings.get(selected.id)
+            region_type = self.app.state.selected_region_type
+
+            if settings is None:
+                return (False, selected.id, region_type)
+
+            region_style = settings.surface if region_type == "surface" else settings.interior
+            return (region_style.enabled, selected.id, region_type)
 
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
@@ -835,17 +866,12 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
+        has_override, conductor_id, region_type = self._get_slider_context()
 
-        if self._is_conductor_selected() and self._has_override_enabled():
-            # Per-region brightness
-            with self.app.state_lock:
-                selected = self.app.state.get_selected()
-                region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    actions.set_region_brightness(self.app.state, selected.id, region_type, value)
-        else:
-            # Global brightness
-            with self.app.state_lock:
+        with self.app.state_lock:
+            if has_override and conductor_id is not None:
+                actions.set_region_brightness(self.app.state, conductor_id, region_type, value)
+            else:
                 self.app.state.display_settings.brightness = value
                 self.app.state.invalidate_base_rgb()
 
@@ -857,17 +883,12 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
+        has_override, conductor_id, region_type = self._get_slider_context()
 
-        if self._is_conductor_selected() and self._has_override_enabled():
-            # Per-region contrast
-            with self.app.state_lock:
-                selected = self.app.state.get_selected()
-                region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    actions.set_region_contrast(self.app.state, selected.id, region_type, value)
-        else:
-            # Global contrast
-            with self.app.state_lock:
+        with self.app.state_lock:
+            if has_override and conductor_id is not None:
+                actions.set_region_contrast(self.app.state, conductor_id, region_type, value)
+            else:
                 self.app.state.display_settings.contrast = value
                 self.app.state.invalidate_base_rgb()
 
@@ -879,17 +900,12 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
+        has_override, conductor_id, region_type = self._get_slider_context()
 
-        if self._is_conductor_selected() and self._has_override_enabled():
-            # Per-region gamma
-            with self.app.state_lock:
-                selected = self.app.state.get_selected()
-                region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    actions.set_region_gamma(self.app.state, selected.id, region_type, value)
-        else:
-            # Global gamma
-            with self.app.state_lock:
+        with self.app.state_lock:
+            if has_override and conductor_id is not None:
+                actions.set_region_gamma(self.app.state, conductor_id, region_type, value)
+            else:
                 self.app.state.display_settings.gamma = value
                 self.app.state.invalidate_base_rgb()
 
@@ -1295,7 +1311,7 @@ class PostprocessingPanel:
             return
 
         with self.app.state_lock:
-            region_style = self._get_current_region_style()
+            region_style = self._get_current_region_style_unlocked()
             if region_style is not None:
                 region_style.smear_enabled = bool(app_data)
 
@@ -1309,7 +1325,7 @@ class PostprocessingPanel:
 
         # Always update the value immediately (for UI responsiveness)
         with self.app.state_lock:
-            region_style = self._get_current_region_style()
+            region_style = self._get_current_region_style_unlocked()
             if region_style is not None:
                 region_style.smear_sigma = float(app_data)
 
