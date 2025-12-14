@@ -40,6 +40,10 @@ class FileIOController:
         # Track current project path for auto-save
         self.current_project_path: Optional[str] = None
 
+        # Overwrite confirmation
+        self._pending_save_project_path: Optional[Path] = None
+        self._overwrite_confirm_id: Optional[int] = None
+
     # ------------------------------------------------------------------
     # Conductor import
     # ------------------------------------------------------------------
@@ -232,7 +236,6 @@ class FileIOController:
         with dpg.file_dialog(
             directory_selector=False,
             show=False,
-            modal=True,
             default_path=default_path,
             callback=self.on_save_project_file_selected,
             cancel_callback=self.on_save_project_cancelled,
@@ -324,6 +327,22 @@ class FileIOController:
         if path_obj.suffix not in ('.elliptica', '.flowcol'):
             path_obj = path_obj.with_suffix('.elliptica')
 
+        # Check if file exists and confirm overwrite
+        print(f"DEBUG: path_obj={path_obj}, exists={path_obj.exists()}")
+        if path_obj.exists():
+            print("DEBUG: File exists, showing overwrite confirm")
+            self._pending_save_project_path = path_obj
+            self._show_overwrite_confirm()
+            return
+
+        print("DEBUG: File does not exist, saving directly")
+        self._do_save_project(path_obj)
+
+    def _do_save_project(self, path_obj: Path) -> None:
+        """Actually perform the project save."""
+        if dpg is None:
+            return
+
         try:
             with self.app.state_lock:
                 save_project(self.app.state, str(path_obj))
@@ -342,6 +361,66 @@ class FileIOController:
                     dpg.set_value("status_text", f"Saved project: {path_obj.name}")
         except Exception as exc:
             dpg.set_value("status_text", f"Failed to save project: {exc}")
+
+    def _show_overwrite_confirm(self) -> None:
+        """Show overwrite confirmation dialog for project save."""
+        print("DEBUG: _show_overwrite_confirm called")
+        if dpg is None:
+            return
+
+        # Create dialog if needed
+        if self._overwrite_confirm_id is None:
+            print("DEBUG: Creating overwrite confirm dialog")
+            with dpg.window(
+                label="Confirm Overwrite",
+                modal=True,
+                show=False,
+                tag="project_overwrite_confirm_modal",
+                no_resize=True,
+                no_collapse=True,
+                width=350,
+                height=120,
+            ) as modal:
+                self._overwrite_confirm_id = modal
+                dpg.add_text("", tag="project_overwrite_confirm_text")
+                dpg.add_spacer(height=10)
+                with dpg.group(horizontal=True):
+                    dpg.add_button(label="Overwrite", width=100, callback=self._on_overwrite_confirmed)
+                    dpg.add_button(label="Cancel", width=100, callback=self._on_overwrite_cancelled)
+
+        # Set the message
+        filename = self._pending_save_project_path.name if self._pending_save_project_path else "file"
+        dpg.set_value("project_overwrite_confirm_text", f"'{filename}' already exists. Overwrite?")
+
+        # Center and show
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        print(f"DEBUG: Showing dialog at ({(viewport_width - 350) // 2}, {(viewport_height - 120) // 2})")
+        dpg.configure_item(
+            self._overwrite_confirm_id,
+            pos=((viewport_width - 350) // 2, (viewport_height - 120) // 2),
+            show=True
+        )
+
+    def _on_overwrite_confirmed(self, sender=None, app_data=None) -> None:
+        """Handle overwrite confirmation."""
+        if dpg is None:
+            return
+
+        dpg.configure_item("project_overwrite_confirm_modal", show=False)
+
+        if self._pending_save_project_path:
+            self._do_save_project(self._pending_save_project_path)
+            self._pending_save_project_path = None
+
+    def _on_overwrite_cancelled(self, sender=None, app_data=None) -> None:
+        """Handle overwrite cancellation."""
+        if dpg is None:
+            return
+
+        dpg.configure_item("project_overwrite_confirm_modal", show=False)
+        self._pending_save_project_path = None
+        dpg.set_value("status_text", "Save cancelled.")
 
     def on_load_project_file_selected(self, sender=None, app_data=None) -> None:
         """Handle load project file selection - load project and cache."""
