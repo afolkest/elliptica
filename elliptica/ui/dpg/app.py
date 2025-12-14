@@ -386,7 +386,7 @@ class EllipticaApp:
         radius = size / 2.2
         mask = ((x - cx) ** 2 + (y - cy) ** 2) <= radius**2
         mask = mask.astype(np.float32)
-        boundary = BoundaryObject(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
+        boundary = BoundaryObject(mask=mask, params={"voltage": 1.0}, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
         add_boundary(self.state, boundary)
 
 

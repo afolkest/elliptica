@@ -11,7 +11,7 @@ def test_boundary_ids():
 
     # Add first boundary
     mask1 = np.ones((10, 10), dtype=np.float32)
-    c1 = BoundaryObject(mask=mask1, voltage=1.0)
+    c1 = BoundaryObject(mask=mask1, params={"voltage": 1.0})
     add_boundary(state, c1)
 
     assert c1.id == 0, f"Expected ID 0, got {c1.id}"
@@ -20,7 +20,7 @@ def test_boundary_ids():
 
     # Add second boundary
     mask2 = np.ones((15, 15), dtype=np.float32)
-    c2 = BoundaryObject(mask=mask2, voltage=-1.0)
+    c2 = BoundaryObject(mask=mask2, params={"voltage": -1.0})
     add_boundary(state, c2)
 
     assert c2.id == 1, f"Expected ID 1, got {c2.id}"
@@ -46,7 +46,7 @@ def test_interior_detection():
     inner = ((x - center)**2 + (y - center)**2) <= 10**2
     ring_mask = (outer & ~inner).astype(np.float32)
 
-    c = BoundaryObject(mask=ring_mask, voltage=1.0)
+    c = BoundaryObject(mask=ring_mask, params={"voltage": 1.0})
     add_boundary(state, c)
 
     assert c.interior_mask is not None, "Interior not auto-detected"
@@ -61,7 +61,7 @@ def test_colorization_settings():
 
     # Create simple boundary
     mask = np.ones((20, 20), dtype=np.float32)
-    c = BoundaryObject(mask=mask, voltage=1.0)
+    c = BoundaryObject(mask=mask, params={"voltage": 1.0})
     add_boundary(state, c)
 
     # Start in grayscale mode

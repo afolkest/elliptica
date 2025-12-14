@@ -35,7 +35,7 @@ def test_roundtrip_empty_project():
 def test_roundtrip_single_boundary():
     """Test save/load with single boundary."""
     mask = np.random.rand(100, 100).astype(np.float32)
-    boundary = BoundaryObject(mask=mask, voltage=0.7, position=(50.0, 60.0))
+    boundary = BoundaryObject(mask=mask, params={"voltage": 0.7}, position=(50.0, 60.0))
 
     state = AppState()
     state.project.boundary_objects.append(boundary)
@@ -52,7 +52,7 @@ def test_roundtrip_single_boundary():
         b = loaded_state.project.boundary_objects[0]
 
         # Check scalar properties
-        assert b.voltage == 0.7
+        assert b.params["voltage"] == 0.7
         assert b.position == (50.0, 60.0)
         assert b.id == 0
 
@@ -67,7 +67,7 @@ def test_roundtrip_multiple_boundaries_with_interior():
     interior1 = np.random.rand(80, 80).astype(np.float32)
     boundary1 = BoundaryObject(
         mask=mask1,
-        voltage=0.3,
+        params={"voltage": 0.3},
         position=(10.0, 20.0),
         interior_mask=interior1,
         scale_factor=1.5,
@@ -78,7 +78,7 @@ def test_roundtrip_multiple_boundaries_with_interior():
     mask2 = np.random.rand(120, 120).astype(np.float32)
     boundary2 = BoundaryObject(
         mask=mask2,
-        voltage=0.9,
+        params={"voltage": 0.9},
         position=(100.0, 150.0),
         edge_smooth_sigma=0.0,
         smear_enabled=True,
@@ -103,7 +103,7 @@ def test_roundtrip_multiple_boundaries_with_interior():
 
         # Check boundary 1
         b1 = loaded_state.project.boundary_objects[0]
-        assert b1.voltage == 0.3
+        assert b1.params["voltage"] == 0.3
         assert b1.position == (10.0, 20.0)
         assert b1.scale_factor == 1.5
         assert b1.edge_smooth_sigma == 2.0
@@ -115,7 +115,7 @@ def test_roundtrip_multiple_boundaries_with_interior():
 
         # Check boundary 2
         b2 = loaded_state.project.boundary_objects[1]
-        assert b2.voltage == 0.9
+        assert b2.params["voltage"] == 0.9
         assert b2.position == (100.0, 150.0)
         assert b2.edge_smooth_sigma == 0.0
         assert b2.smear_enabled is True
@@ -187,7 +187,7 @@ def test_roundtrip_all_settings():
 def test_roundtrip_boundary_color_settings():
     """Test save/load with boundary color settings."""
     mask = np.random.rand(50, 50).astype(np.float32)
-    boundary = BoundaryObject(mask=mask, voltage=0.5, id=0)
+    boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, id=0)
 
     state = AppState()
     state.project.boundary_objects.append(boundary)
@@ -294,7 +294,7 @@ def test_render_cache_roundtrip():
 
     # Create a simple project
     mask = np.random.rand(100, 100).astype(np.float32)
-    boundary = BoundaryObject(mask=mask, voltage=0.5, position=(50.0, 60.0), id=0)
+    boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, position=(50.0, 60.0), id=0)
 
     project = Project()
     project.boundary_objects.append(boundary)
@@ -356,7 +356,7 @@ def test_render_cache_fingerprint_detection():
     from elliptica.serialization import compute_project_fingerprint
 
     mask = np.ones((50, 50), dtype=np.float32)
-    boundary = BoundaryObject(mask=mask, voltage=0.5, position=(10.0, 20.0), id=0)
+    boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, position=(10.0, 20.0), id=0)
 
     project = Project()
     project.boundary_objects.append(boundary)

@@ -117,7 +117,7 @@ def build_dirichlet_from_objects(project: Any) -> tuple[np.ndarray, np.ndarray]:
 
         mask_slice = obj_mask[my0:my1, mx0:mx1]
         mask_bool = mask_slice > 0.5
-        value = obj.voltage if hasattr(obj, 'voltage') else obj.value
+        value = obj.params.get("voltage", 0.0)
 
         mask[y0:y1, x0:x1] |= mask_bool
         values[y0:y1, x0:x1] = np.where(mask_bool, value, values[y0:y1, x0:x1])

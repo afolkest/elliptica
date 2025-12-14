@@ -169,7 +169,7 @@ class ShapeDialogController:
 
             boundary = BoundaryObject(
                 mask=surface_mask,
-                voltage=0.5,
+                params={"voltage": 0.5},
                 position=pos,
                 interior_mask=interior_mask,
             )
