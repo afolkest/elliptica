@@ -1,13 +1,13 @@
-"""File I/O controller for Elliptica UI - conductor import and project save/load."""
+"""File I/O controller for Elliptica UI - boundary import and project save/load."""
 
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from elliptica.app import actions
-from elliptica.mask_utils import load_conductor_masks
+from elliptica.mask_utils import load_boundary_masks
 from elliptica.pde import PDERegistry
 from elliptica.serialization import load_project, save_project, load_render_cache, save_render_cache
-from elliptica.types import Conductor
+from elliptica.types import BoundaryObject
 
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
@@ -22,7 +22,7 @@ MAX_CANVAS_DIM = 8192
 
 
 class FileIOController:
-    """Controller for file I/O operations - conductor import and project save/load."""
+    """Controller for file I/O operations - boundary import and project save/load."""
 
     def __init__(self, app: "EllipticaApp"):
         """Initialize controller with reference to main app.
@@ -33,7 +33,7 @@ class FileIOController:
         self.app = app
 
         # File dialog IDs
-        self.conductor_file_dialog_id: Optional[int] = None
+        self.boundary_file_dialog_id: Optional[int] = None
         self.save_project_dialog_id: Optional[int] = None
         self.load_project_dialog_id: Optional[int] = None
 
@@ -45,12 +45,12 @@ class FileIOController:
         self._overwrite_confirm_id: Optional[int] = None
 
     # ------------------------------------------------------------------
-    # Conductor import
+    # Boundary import
     # ------------------------------------------------------------------
 
-    def ensure_conductor_file_dialog(self) -> None:
-        """Create the conductor file dialog if it doesn't exist."""
-        if dpg is None or self.conductor_file_dialog_id is not None:
+    def ensure_boundary_file_dialog(self) -> None:
+        """Create the boundary file dialog if it doesn't exist."""
+        if dpg is None or self.boundary_file_dialog_id is not None:
             return
 
         # Default to assets/masks if it exists, otherwise use cwd
@@ -62,18 +62,18 @@ class FileIOController:
             show=False,
             modal=True,
             default_path=default_path,
-            callback=self.on_conductor_file_selected,
-            cancel_callback=self.on_conductor_file_cancelled,
+            callback=self.on_boundary_file_selected,
+            cancel_callback=self.on_boundary_file_cancelled,
             width=640,
             height=420,
-            tag="conductor_file_dialog",
+            tag="boundary_file_dialog",
         ) as dialog:
-            self.conductor_file_dialog_id = dialog
+            self.boundary_file_dialog_id = dialog
             dpg.add_file_extension(".png", color=(150, 180, 255, 255))
             dpg.add_file_extension(".*")
 
-    def open_conductor_dialog(self, sender=None, app_data=None) -> None:
-        """Open the conductor file dialog.
+    def open_boundary_dialog(self, sender=None, app_data=None) -> None:
+        """Open the boundary file dialog.
 
         Checks if in edit mode before opening.
         """
@@ -81,23 +81,23 @@ class FileIOController:
             return
         with self.app.state_lock:
             if self.app.state.view_mode != "edit":
-                dpg.set_value("status_text", "Switch to edit mode to add conductors.")
+                dpg.set_value("status_text", "Switch to edit mode to add boundaries.")
                 return
 
-        self.ensure_conductor_file_dialog()
-        if self.conductor_file_dialog_id is not None:
-            dpg.show_item(self.conductor_file_dialog_id)
+        self.ensure_boundary_file_dialog()
+        if self.boundary_file_dialog_id is not None:
+            dpg.show_item(self.boundary_file_dialog_id)
 
-    def on_conductor_file_cancelled(self, sender=None, app_data=None) -> None:
-        """Handle conductor file dialog cancellation."""
+    def on_boundary_file_cancelled(self, sender=None, app_data=None) -> None:
+        """Handle boundary file dialog cancellation."""
         if dpg is None:
             return
         if sender is not None:
             dpg.configure_item(sender, show=False)
-        dpg.set_value("status_text", "Load conductor cancelled.")
+        dpg.set_value("status_text", "Load boundary cancelled.")
 
-    def on_conductor_file_selected(self, sender=None, app_data=None) -> None:
-        """Handle conductor file selection and import."""
+    def on_boundary_file_selected(self, sender=None, app_data=None) -> None:
+        """Handle boundary file selection and import."""
         if dpg is None:
             return
         if sender is not None:
@@ -136,9 +136,9 @@ class FileIOController:
             pass  # If path resolution fails, try with original path_str
 
         try:
-            mask, interior = load_conductor_masks(path_str)
+            mask, interior = load_boundary_masks(path_str)
         except Exception as exc:  # pragma: no cover - PIL errors etc.
-            dpg.set_value("status_text", f"Failed to load conductor: {exc}")
+            dpg.set_value("status_text", f"Failed to load boundary: {exc}")
             return
 
         mask_h, mask_w = mask.shape
@@ -149,12 +149,12 @@ class FileIOController:
         with self.app.state_lock:
             project = self.app.state.project
             canvas_w, canvas_h = project.canvas_resolution
-            # Offset each new conductor by 30px down-right from center so they're all visible
-            num_conductors = len(project.conductors)
-            offset = num_conductors * 30.0
+            # Offset each new boundary by 30px down-right from center so they're all visible
+            num_boundaries = len(project.boundary_objects)
+            offset = num_boundaries * 30.0
             pos = ((canvas_w - mask_w) / 2.0 + offset, (canvas_h - mask_h) / 2.0 + offset)
-            conductor = Conductor(mask=mask, voltage=0.5, position=pos, interior_mask=interior)
-            actions.add_conductor(self.app.state, conductor)
+            boundary = BoundaryObject(mask=mask, voltage=0.5, position=pos, interior_mask=interior)
+            actions.add_boundary(self.app.state, boundary)
             self.app.state.view_mode = "edit"
 
         self.app.canvas_renderer.mark_dirty()
@@ -170,14 +170,14 @@ class FileIOController:
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
         self.app.boundary_controls.update_slider_labels()
-        dpg.set_value("status_text", f"Loaded conductor '{Path(path_str).name}'")
+        dpg.set_value("status_text", f"Loaded boundary '{Path(path_str).name}'")
 
     # ------------------------------------------------------------------
     # Project save/load
     # ------------------------------------------------------------------
 
     def new_project(self, sender=None, app_data=None) -> None:
-        """Create a new project, resetting to default state with a demo conductor."""
+        """Create a new project, resetting to default state with a demo boundary."""
         if dpg is None:
             return
 
@@ -193,7 +193,7 @@ class FileIOController:
             self.app.state.project = new_state.project
             self.app.state.render_settings = new_state.render_settings
             self.app.state.display_settings = new_state.display_settings
-            self.app.state.conductor_color_settings = new_state.conductor_color_settings
+            self.app.state.boundary_color_settings = new_state.boundary_color_settings
             self.app.state.clear_selection()
             self.app.state.view_mode = "edit"
             self.app.state.field_dirty = True
@@ -203,8 +203,8 @@ class FileIOController:
         # Clear current project path
         self.current_project_path = None
 
-        # Add demo conductor
-        self.app._add_demo_conductor()
+        # Add demo boundary
+        self.app._add_demo_boundary()
 
         # Update UI to reflect new state
         self.app.canvas_renderer.mark_dirty()
@@ -451,7 +451,7 @@ class FileIOController:
                 self.app.state.project = new_state.project
                 self.app.state.render_settings = new_state.render_settings
                 self.app.state.display_settings = new_state.display_settings
-                self.app.state.conductor_color_settings = new_state.conductor_color_settings
+                self.app.state.boundary_color_settings = new_state.boundary_color_settings
                 self.app.state.clear_selection()
                 self.app.state.view_mode = "edit"
                 self.app.state.field_dirty = True

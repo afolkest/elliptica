@@ -132,13 +132,13 @@ class ShapeDialogController:
             self.param_inputs[param.name] = input_id
 
     def _on_insert(self, sender=None, app_data=None) -> None:
-        """Insert the configured shape as a new conductor."""
+        """Insert the configured shape as a new boundary."""
         if dpg is None or self.current_shape_key is None:
             return
 
         from elliptica.shapes import SHAPES
-        from elliptica.types import Conductor
-        from elliptica.app.actions import add_conductor
+        from elliptica.types import BoundaryObject
+        from elliptica.app.actions import add_boundary
 
         spec = SHAPES[self.current_shape_key]
 
@@ -160,20 +160,20 @@ class ShapeDialogController:
         with self.app.state_lock:
             canvas_w, canvas_h = self.app.state.project.canvas_resolution
             mask_h, mask_w = surface_mask.shape
-            num_conductors = len(self.app.state.project.conductors)
-            offset = num_conductors * 30.0
+            num_boundaries = len(self.app.state.project.boundary_objects)
+            offset = num_boundaries * 30.0
             pos = (
                 (canvas_w - mask_w) / 2.0 + offset,
                 (canvas_h - mask_h) / 2.0 + offset,
             )
 
-            conductor = Conductor(
+            boundary = BoundaryObject(
                 mask=surface_mask,
                 voltage=0.5,
                 position=pos,
                 interior_mask=interior_mask,
             )
-            add_conductor(self.app.state, conductor)
+            add_boundary(self.app.state, boundary)
             self.app.state.view_mode = "edit"
 
         # Update UI

@@ -4,8 +4,8 @@ import tempfile
 from pathlib import Path
 import numpy as np
 
-from elliptica.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle
-from elliptica.types import Project, Conductor
+from elliptica.app.core import AppState, RenderSettings, DisplaySettings, BoundaryColorSettings, RegionStyle
+from elliptica.types import Project, BoundaryObject
 from elliptica.serialization import save_project, load_project
 from elliptica import defaults
 
@@ -25,22 +25,22 @@ def test_roundtrip_empty_project():
         # Verify project
         assert loaded_state.project.canvas_resolution == state.project.canvas_resolution
         assert loaded_state.project.streamlength_factor == state.project.streamlength_factor
-        assert len(loaded_state.project.conductors) == 0
+        assert len(loaded_state.project.boundary_objects) == 0
 
         # Verify settings
         assert loaded_state.render_settings.multiplier == state.render_settings.multiplier
         assert loaded_state.display_settings.gamma == state.display_settings.gamma
 
 
-def test_roundtrip_single_conductor():
-    """Test save/load with single conductor."""
+def test_roundtrip_single_boundary():
+    """Test save/load with single boundary."""
     mask = np.random.rand(100, 100).astype(np.float32)
-    conductor = Conductor(mask=mask, voltage=0.7, position=(50.0, 60.0))
+    boundary = BoundaryObject(mask=mask, voltage=0.7, position=(50.0, 60.0))
 
     state = AppState()
-    state.project.conductors.append(conductor)
-    state.project.next_conductor_id = 1
-    conductor.id = 0
+    state.project.boundary_objects.append(boundary)
+    state.project.next_boundary_id = 1
+    boundary.id = 0
 
     with tempfile.TemporaryDirectory() as tmpdir:
         filepath = Path(tmpdir) / "test.elliptica"
@@ -48,24 +48,24 @@ def test_roundtrip_single_conductor():
 
         loaded_state = load_project(str(filepath))
 
-        assert len(loaded_state.project.conductors) == 1
-        c = loaded_state.project.conductors[0]
+        assert len(loaded_state.project.boundary_objects) == 1
+        b = loaded_state.project.boundary_objects[0]
 
         # Check scalar properties
-        assert c.voltage == 0.7
-        assert c.position == (50.0, 60.0)
-        assert c.id == 0
+        assert b.voltage == 0.7
+        assert b.position == (50.0, 60.0)
+        assert b.id == 0
 
         # Check mask roundtrip (uint16 PNG has precision loss)
-        assert c.mask.shape == mask.shape
-        assert np.allclose(c.mask, mask, atol=1.0/65535.0)
+        assert b.mask.shape == mask.shape
+        assert np.allclose(b.mask, mask, atol=1.0/65535.0)
 
 
-def test_roundtrip_multiple_conductors_with_interior():
-    """Test save/load with multiple conductors including interior masks."""
+def test_roundtrip_multiple_boundaries_with_interior():
+    """Test save/load with multiple boundaries including interior masks."""
     mask1 = np.random.rand(80, 80).astype(np.float32)
     interior1 = np.random.rand(80, 80).astype(np.float32)
-    conductor1 = Conductor(
+    boundary1 = BoundaryObject(
         mask=mask1,
         voltage=0.3,
         position=(10.0, 20.0),
@@ -76,7 +76,7 @@ def test_roundtrip_multiple_conductors_with_interior():
     )
 
     mask2 = np.random.rand(120, 120).astype(np.float32)
-    conductor2 = Conductor(
+    boundary2 = BoundaryObject(
         mask=mask2,
         voltage=0.9,
         position=(100.0, 150.0),
@@ -87,8 +87,8 @@ def test_roundtrip_multiple_conductors_with_interior():
     )
 
     state = AppState()
-    state.project.conductors = [conductor1, conductor2]
-    state.project.next_conductor_id = 2
+    state.project.boundary_objects = [boundary1, boundary2]
+    state.project.next_boundary_id = 2
     state.project.canvas_resolution = (1024, 768)
 
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -97,32 +97,32 @@ def test_roundtrip_multiple_conductors_with_interior():
 
         loaded_state = load_project(str(filepath))
 
-        assert len(loaded_state.project.conductors) == 2
+        assert len(loaded_state.project.boundary_objects) == 2
         assert loaded_state.project.canvas_resolution == (1024, 768)
-        assert loaded_state.project.next_conductor_id == 2
+        assert loaded_state.project.next_boundary_id == 2
 
-        # Check conductor 1
-        c1 = loaded_state.project.conductors[0]
-        assert c1.voltage == 0.3
-        assert c1.position == (10.0, 20.0)
-        assert c1.scale_factor == 1.5
-        assert c1.edge_smooth_sigma == 2.0
-        assert c1.id == 0
-        assert c1.mask.shape == mask1.shape
-        assert c1.interior_mask is not None
-        assert c1.interior_mask.shape == interior1.shape
-        assert np.allclose(c1.interior_mask, interior1, atol=1.0/65535.0)
+        # Check boundary 1
+        b1 = loaded_state.project.boundary_objects[0]
+        assert b1.voltage == 0.3
+        assert b1.position == (10.0, 20.0)
+        assert b1.scale_factor == 1.5
+        assert b1.edge_smooth_sigma == 2.0
+        assert b1.id == 0
+        assert b1.mask.shape == mask1.shape
+        assert b1.interior_mask is not None
+        assert b1.interior_mask.shape == interior1.shape
+        assert np.allclose(b1.interior_mask, interior1, atol=1.0/65535.0)
 
-        # Check conductor 2
-        c2 = loaded_state.project.conductors[1]
-        assert c2.voltage == 0.9
-        assert c2.position == (100.0, 150.0)
-        assert c2.edge_smooth_sigma == 0.0
-        assert c2.smear_enabled is True
-        assert c2.smear_sigma == 0.003
-        assert c2.id == 1
-        assert c2.mask.shape == mask2.shape
-        assert c2.interior_mask is None
+        # Check boundary 2
+        b2 = loaded_state.project.boundary_objects[1]
+        assert b2.voltage == 0.9
+        assert b2.position == (100.0, 150.0)
+        assert b2.edge_smooth_sigma == 0.0
+        assert b2.smear_enabled is True
+        assert b2.smear_sigma == 0.003
+        assert b2.id == 1
+        assert b2.mask.shape == mask2.shape
+        assert b2.interior_mask is None
 
 
 def test_roundtrip_all_settings():
@@ -184,17 +184,17 @@ def test_roundtrip_all_settings():
         assert loaded_state.project.streamlength_factor == 3.5
 
 
-def test_roundtrip_conductor_color_settings():
-    """Test save/load with conductor color settings."""
+def test_roundtrip_boundary_color_settings():
+    """Test save/load with boundary color settings."""
     mask = np.random.rand(50, 50).astype(np.float32)
-    conductor = Conductor(mask=mask, voltage=0.5, id=0)
+    boundary = BoundaryObject(mask=mask, voltage=0.5, id=0)
 
     state = AppState()
-    state.project.conductors.append(conductor)
-    state.project.next_conductor_id = 1
+    state.project.boundary_objects.append(boundary)
+    state.project.next_boundary_id = 1
 
     # Add custom color settings
-    color_settings = ConductorColorSettings(
+    color_settings = BoundaryColorSettings(
         surface=RegionStyle(
             enabled=True,
             use_palette=False,
@@ -208,7 +208,7 @@ def test_roundtrip_conductor_color_settings():
             solid_color=(0.1, 0.5, 0.9),
         ),
     )
-    state.conductor_color_settings[0] = color_settings
+    state.boundary_color_settings[0] = color_settings
 
     with tempfile.TemporaryDirectory() as tmpdir:
         filepath = Path(tmpdir) / "test.elliptica"
@@ -216,8 +216,8 @@ def test_roundtrip_conductor_color_settings():
 
         loaded_state = load_project(str(filepath))
 
-        assert 0 in loaded_state.conductor_color_settings
-        cs = loaded_state.conductor_color_settings[0]
+        assert 0 in loaded_state.boundary_color_settings
+        cs = loaded_state.boundary_color_settings[0]
 
         # Check surface style
         assert cs.surface.enabled is True
@@ -294,10 +294,10 @@ def test_render_cache_roundtrip():
 
     # Create a simple project
     mask = np.random.rand(100, 100).astype(np.float32)
-    conductor = Conductor(mask=mask, voltage=0.5, position=(50.0, 60.0), id=0)
+    boundary = BoundaryObject(mask=mask, voltage=0.5, position=(50.0, 60.0), id=0)
 
     project = Project()
-    project.conductors.append(conductor)
+    project.boundary_objects.append(boundary)
     project.canvas_resolution = (200, 200)
 
     # Create fake render result
@@ -356,22 +356,22 @@ def test_render_cache_fingerprint_detection():
     from elliptica.serialization import compute_project_fingerprint
 
     mask = np.ones((50, 50), dtype=np.float32)
-    conductor = Conductor(mask=mask, voltage=0.5, position=(10.0, 20.0), id=0)
+    boundary = BoundaryObject(mask=mask, voltage=0.5, position=(10.0, 20.0), id=0)
 
     project = Project()
-    project.conductors.append(conductor)
+    project.boundary_objects.append(boundary)
 
     fp1 = compute_project_fingerprint(project)
 
-    # Move conductor
-    conductor.position = (15.0, 25.0)
+    # Move boundary
+    boundary.position = (15.0, 25.0)
     fp2 = compute_project_fingerprint(project)
 
     # Fingerprints should be different
     assert fp1 != fp2
 
     # Reset position
-    conductor.position = (10.0, 20.0)
+    boundary.position = (10.0, 20.0)
     fp3 = compute_project_fingerprint(project)
 
     # Should match original
@@ -478,7 +478,7 @@ def test_migration_v1_to_v2():
         # Check project
         assert loaded_state.project.canvas_resolution == (640, 480)
         assert loaded_state.project.streamlength_factor == 2.5
-        assert loaded_state.project.next_conductor_id == 1
+        assert loaded_state.project.next_boundary_id == 1
         assert loaded_state.project.boundary_top == 1
         assert loaded_state.project.pde_type == 'poisson'
 
@@ -491,8 +491,8 @@ def test_migration_v1_to_v2():
         assert loaded_state.display_settings.saturation == 0.8
 
         # Check boundary object
-        assert len(loaded_state.project.conductors) == 1
-        b = loaded_state.project.conductors[0]
+        assert len(loaded_state.project.boundary_objects) == 1
+        b = loaded_state.project.boundary_objects[0]
         assert b.voltage == 0.7
         assert b.position == (100.0, 200.0)
         assert b.scale_factor == 1.5

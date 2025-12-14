@@ -10,8 +10,8 @@ pytest.skip("Legacy overlay tests target removed CPU compositor; skip", allow_mo
 import numpy as np
 import time
 from elliptica.app.core import AppState
-from elliptica.types import Conductor
-from elliptica.app.actions import add_conductor, ensure_render
+from elliptica.types import BoundaryObject
+from elliptica.app.actions import add_boundary
 from elliptica.postprocess.color import apply_region_overlays, ColorParams
 
 

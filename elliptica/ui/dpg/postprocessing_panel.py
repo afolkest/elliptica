@@ -74,11 +74,11 @@ class PostprocessingPanel:
         # Debouncing for lightness expression updates
         self.lightness_expr_pending_update: bool = False
         self.lightness_expr_last_update_time: float = 0.0
-        # Target for pending lightness expr update: "global", or (conductor_id, region_type) tuple
+        # Target for pending lightness expr update: "global", or (boundary_id, region_type) tuple
         self.lightness_expr_pending_target: str | tuple[int, str] | None = None
 
         # Cache for custom lightness expressions (preserved when switching to Global mode)
-        # Key: (conductor_id, region_type), Value: expression string
+        # Key: (boundary_id, region_type), Value: expression string
         self._cached_custom_lightness_exprs: dict[tuple[int, str], str] = {}
 
         # Cache for global lightness expression (preserved when disabling)
@@ -169,8 +169,8 @@ class PostprocessingPanel:
             dpg.bind_item_theme(widget_tag, 0)
             dpg.configure_item(widget_tag, enabled=True)
 
-    def _is_conductor_selected(self) -> bool:
-        """Check if a conductor is currently selected."""
+    def _is_boundary_selected(self) -> bool:
+        """Check if a boundary is currently selected."""
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             return selected is not None and selected.id is not None
@@ -180,7 +180,7 @@ class PostprocessingPanel:
         selected = self.app.state.get_selected()
         if selected is None or selected.id is None:
             return None
-        settings = self.app.state.conductor_color_settings.get(selected.id)
+        settings = self.app.state.boundary_color_settings.get(selected.id)
         if settings is None:
             return None
         if self.app.state.selected_region_type == "surface":
@@ -209,9 +209,9 @@ class PostprocessingPanel:
         """Get all context needed for B/C/G slider callbacks in one lock acquisition.
 
         Returns:
-            (has_override, conductor_id, region_type)
-            - has_override: True if conductor selected AND region.enabled is True
-            - conductor_id: Selected conductor's ID, or None
+            (has_override, boundary_id, region_type)
+            - has_override: True if boundary selected AND region.enabled is True
+            - boundary_id: Selected boundary's ID, or None
             - region_type: "surface" or "interior"
         """
         with self.app.state_lock:
@@ -219,7 +219,7 @@ class PostprocessingPanel:
             if selected is None or selected.id is None:
                 return (False, None, "surface")
 
-            settings = self.app.state.conductor_color_settings.get(selected.id)
+            settings = self.app.state.boundary_color_settings.get(selected.id)
             region_type = self.app.state.selected_region_type
 
             if settings is None:
@@ -261,7 +261,7 @@ class PostprocessingPanel:
                 # Context header - ALWAYS visible, text changes based on mode
                 dpg.add_text("Global Settings", tag="context_header_text", color=(150, 200, 255))
 
-                # Region controls line - ONLY shown when conductor selected
+                # Region controls line - ONLY shown when boundary selected
                 with dpg.group(horizontal=True, tag="region_controls_line", show=False):
                     dpg.add_radio_button(
                         items=["Surface", "Interior"],
@@ -280,7 +280,7 @@ class PostprocessingPanel:
                 with dpg.group(tag="global_palette_group"):
                     self._build_global_palette_ui("global_palette_group", palette_colormaps)
 
-                # Region palette UI (shown in conductor mode)
+                # Region palette UI (shown in boundary mode)
                 with dpg.group(tag="region_palette_group", show=False):
                     self._build_region_palette_ui("region_palette_group", palette_colormaps)
 
@@ -671,22 +671,22 @@ class PostprocessingPanel:
         self._update_color_config_from_expressions()
 
     def update_context_ui(self) -> None:
-        """Update UI based on current selection context (global vs conductor)."""
+        """Update UI based on current selection context (global vs boundary)."""
         if dpg is None:
             return
 
-        is_conductor_selected = self._is_conductor_selected()
+        is_boundary_selected = self._is_boundary_selected()
 
-        if is_conductor_selected:
-            # Conductor mode
+        if is_boundary_selected:
+            # Boundary mode
             with self.app.state_lock:
                 selected = self.app.state.get_selected()
-                conductor_idx = self.app.state.get_single_selected_idx()
+                boundary_idx = self.app.state.get_single_selected_idx()
 
             # Update context header text (always visible, just change text)
             region_type = self.app.state.selected_region_type
             region_label = "Surface" if region_type == "surface" else "Interior"
-            dpg.set_value("context_header_text", f"Conductor {conductor_idx + 1} - {region_label}")
+            dpg.set_value("context_header_text", f"Boundary {boundary_idx + 1} - {region_label}")
 
             # Sync radio button with state
             dpg.set_value("region_toggle_radio", region_label)
@@ -737,7 +737,7 @@ class PostprocessingPanel:
                 dpg.set_value("lightness_expr_input", global_expr)
                 self._set_input_grayed("lightness_expr_input", True)
 
-            # Clip% always shows global, grayed in conductor mode
+            # Clip% always shows global, grayed in boundary mode
             self._set_slider_grayed("clip_slider", True)
             dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
 
@@ -772,7 +772,7 @@ class PostprocessingPanel:
                 dpg.configure_item("smear_sigma_slider", show=False)
 
         else:
-            # Global mode
+            # Global mode (no boundary selected)
             dpg.set_value("context_header_text", "Global Settings")
 
             # Hide region controls, show placeholder (maintains layout)
@@ -849,7 +849,7 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        # Clip% always edits global (disabled in conductor mode anyway)
+        # Clip% always edits global (disabled in boundary mode anyway)
         value = float(app_data)
 
         # IMMEDIATELY update state so other refreshes use the correct value
@@ -867,11 +867,11 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        has_override, conductor_id, region_type = self._get_slider_context()
+        has_override, boundary_id, region_type = self._get_slider_context()
 
         with self.app.state_lock:
-            if has_override and conductor_id is not None:
-                actions.set_region_brightness(self.app.state, conductor_id, region_type, value)
+            if has_override and boundary_id is not None:
+                actions.set_region_brightness(self.app.state, boundary_id, region_type, value)
             else:
                 self.app.state.display_settings.brightness = value
                 self.app.state.invalidate_base_rgb()
@@ -884,11 +884,11 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        has_override, conductor_id, region_type = self._get_slider_context()
+        has_override, boundary_id, region_type = self._get_slider_context()
 
         with self.app.state_lock:
-            if has_override and conductor_id is not None:
-                actions.set_region_contrast(self.app.state, conductor_id, region_type, value)
+            if has_override and boundary_id is not None:
+                actions.set_region_contrast(self.app.state, boundary_id, region_type, value)
             else:
                 self.app.state.display_settings.contrast = value
                 self.app.state.invalidate_base_rgb()
@@ -901,11 +901,11 @@ class PostprocessingPanel:
             return
 
         value = float(app_data)
-        has_override, conductor_id, region_type = self._get_slider_context()
+        has_override, boundary_id, region_type = self._get_slider_context()
 
         with self.app.state_lock:
-            if has_override and conductor_id is not None:
-                actions.set_region_gamma(self.app.state, conductor_id, region_type, value)
+            if has_override and boundary_id is not None:
+                actions.set_region_gamma(self.app.state, boundary_id, region_type, value)
             else:
                 self.app.state.display_settings.gamma = value
                 self.app.state.invalidate_base_rgb()
@@ -960,7 +960,7 @@ class PostprocessingPanel:
 
         # Capture the target NOW based on UI state (radio button), not region_style state
         # The radio button reflects the user's intent directly
-        if self._is_conductor_selected():
+        if self._is_boundary_selected():
             mode = dpg.get_value("lightness_expr_mode_radio")
             if mode == "Custom":
                 with self.app.state_lock:
@@ -990,8 +990,8 @@ class PostprocessingPanel:
             target = self.lightness_expr_pending_target
             if isinstance(target, tuple):
                 # Per-region update
-                conductor_id, region_type = target
-                self._apply_region_lightness_expr_update(conductor_id, region_type)
+                boundary_id, region_type = target
+                self._apply_region_lightness_expr_update(boundary_id, region_type)
             else:
                 # Global update
                 self._apply_lightness_expr_update()
@@ -1034,12 +1034,12 @@ class PostprocessingPanel:
             if selected is None or selected.id is None:
                 return
 
-            # Ensure ConductorColorSettings exists for this conductor
-            from elliptica.app.core import ConductorColorSettings
-            if selected.id not in self.app.state.conductor_color_settings:
-                self.app.state.conductor_color_settings[selected.id] = ConductorColorSettings()
+            # Ensure BoundaryColorSettings exists for this boundary
+            from elliptica.app.core import BoundaryColorSettings
+            if selected.id not in self.app.state.boundary_color_settings:
+                self.app.state.boundary_color_settings[selected.id] = BoundaryColorSettings()
 
-            settings = self.app.state.conductor_color_settings[selected.id]
+            settings = self.app.state.boundary_color_settings[selected.id]
             region_type = self.app.state.selected_region_type
             region_style = settings.surface if region_type == "surface" else settings.interior
             cache_key = (selected.id, region_type)
@@ -1061,11 +1061,11 @@ class PostprocessingPanel:
         self.update_context_ui()
         self.app.display_pipeline.refresh_display()
 
-    def _apply_region_lightness_expr_update(self, conductor_id: int, region_type: str) -> None:
+    def _apply_region_lightness_expr_update(self, boundary_id: int, region_type: str) -> None:
         """Apply the current per-region lightness expression.
 
         Args:
-            conductor_id: The conductor ID to update
+            boundary_id: The boundary ID to update
             region_type: "surface" or "interior"
         """
         if dpg is None:
@@ -1077,17 +1077,17 @@ class PostprocessingPanel:
 
         with self.app.state_lock:
             # Ensure settings exist
-            from elliptica.app.core import ConductorColorSettings
-            if conductor_id not in self.app.state.conductor_color_settings:
-                self.app.state.conductor_color_settings[conductor_id] = ConductorColorSettings()
+            from elliptica.app.core import BoundaryColorSettings
+            if boundary_id not in self.app.state.boundary_color_settings:
+                self.app.state.boundary_color_settings[boundary_id] = BoundaryColorSettings()
 
-            settings = self.app.state.conductor_color_settings[conductor_id]
+            settings = self.app.state.boundary_color_settings[boundary_id]
             region_style = settings.surface if region_type == "surface" else settings.interior
 
             # Set the expression (we're targeting this region, so apply it)
             region_style.lightness_expr = expr
             # Also update cache so switching Global->Custom restores latest edit
-            cache_key = (conductor_id, region_type)
+            cache_key = (boundary_id, region_type)
             self._cached_custom_lightness_exprs[cache_key] = expr
 
         self.app.display_pipeline.refresh_display()

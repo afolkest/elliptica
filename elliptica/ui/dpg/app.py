@@ -29,7 +29,7 @@ from elliptica.ui.dpg.canvas_renderer import CanvasRenderer
 from elliptica.ui.dpg.shape_dialog import ShapeDialogController
 from elliptica.ui.dpg.fonts import setup_fonts
 from elliptica.ui.dpg.theme import apply_theme
-from elliptica.types import Conductor, Project, clone_conductor
+from elliptica.types import BoundaryObject, Project, clone_boundary_object
 from elliptica import defaults
 
 
@@ -63,7 +63,7 @@ if dpg is not None:
 def _snapshot_project(project: Project) -> Project:
     """Create a snapshot of project safe to use off the UI thread."""
     return Project(
-        conductors=[clone_conductor(c, preserve_id=True) for c in project.conductors],
+        boundary_objects=[clone_boundary_object(b, preserve_id=True) for b in project.boundary_objects],
         canvas_resolution=project.canvas_resolution,
         streamlength_factor=project.streamlength_factor,
         renders=list(project.renders),
@@ -132,9 +132,9 @@ class EllipticaApp:
         self.postprocess_panel = PostprocessingPanel(self)
         self.boundary_controls = BoundaryControlsPanel(self)
 
-        # Seed a demo conductor if project is empty so the canvas has content for manual testing.
-        if not self.state.project.conductors:
-            self._add_demo_conductor()
+        # Seed a demo boundary if project is empty so the canvas has content for manual testing.
+        if not self.state.project.boundary_objects:
+            self._add_demo_boundary()
 
     def _on_mouse_wheel(self, sender, app_data) -> None:
         """Capture mouse wheel delta from handler."""
@@ -247,7 +247,7 @@ class EllipticaApp:
                         width=250,
                     )
                     dpg.add_spacer(height=6)
-                    dpg.add_button(label="Load Conductor...", callback=self.file_io.open_conductor_dialog)
+                    dpg.add_button(label="Load Boundary...", callback=self.file_io.open_boundary_dialog)
                     dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
                     dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
                     self.cache_panel.build_view_postprocessing_button(edit_group)
@@ -307,7 +307,7 @@ class EllipticaApp:
 
         self.display_pipeline.texture_manager.refresh_render_texture()
         self._update_control_visibility()
-        self.file_io.ensure_conductor_file_dialog()
+        self.file_io.ensure_boundary_file_dialog()
         self._update_canvas_inputs()
         self.boundary_controls.rebuild_controls()
 
@@ -375,9 +375,9 @@ class EllipticaApp:
     # ------------------------------------------------------------------
     # Canvas drawing
     # ------------------------------------------------------------------
-    def _add_demo_conductor(self) -> None:
-        """Populate state with a simple circular conductor for quick manual testing."""
-        from elliptica.app.actions import add_conductor
+    def _add_demo_boundary(self) -> None:
+        """Populate state with a simple circular boundary for quick manual testing."""
+        from elliptica.app.actions import add_boundary
 
         canvas_w, canvas_h = self.state.project.canvas_resolution
         size = min(canvas_w, canvas_h) // 4 or 128
@@ -386,8 +386,8 @@ class EllipticaApp:
         radius = size / 2.2
         mask = ((x - cx) ** 2 + (y - cy) ** 2) <= radius**2
         mask = mask.astype(np.float32)
-        conductor = Conductor(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
-        add_conductor(self.state, conductor)
+        boundary = BoundaryObject(mask=mask, voltage=1.0, position=((canvas_w - size) / 2.0, (canvas_h - size) / 2.0))
+        add_boundary(self.state, boundary)
 
 
     def _update_canvas_inputs(self) -> None:

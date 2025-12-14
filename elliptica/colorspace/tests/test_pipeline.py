@@ -90,8 +90,8 @@ class TestBuildFieldBindings:
         torch.testing.assert_close(bindings['mag'], expected_mag)
 
 
-class MockConductor:
-    """Mock conductor for testing."""
+class MockBoundary:
+    """Mock boundary for testing."""
     def __init__(self, id: int):
         self.id = id
 
@@ -101,30 +101,30 @@ class TestBuildRegionMasks:
 
     def test_basic_masks(self):
         """Test basic mask construction."""
-        conductors = [MockConductor(0), MockConductor(1)]
+        boundaries = [MockBoundary(0), MockBoundary(1)]
         surface_masks = [np.ones((10, 10)), np.zeros((10, 10))]
         interior_masks = [np.zeros((10, 10)), np.ones((10, 10))]
 
-        masks = build_region_masks(surface_masks, interior_masks, conductors)
+        masks = build_region_masks(surface_masks, interior_masks, boundaries)
 
-        assert 'conductor_0_surface' in masks
-        assert 'conductor_0_interior' in masks
-        assert 'conductor_1_surface' in masks
-        assert 'conductor_1_interior' in masks
+        assert 'boundary_0_surface' in masks
+        assert 'boundary_0_interior' in masks
+        assert 'boundary_1_surface' in masks
+        assert 'boundary_1_interior' in masks
 
     def test_none_masks_skipped(self):
         """Test that None masks are skipped."""
-        conductors = [MockConductor(0)]
+        boundaries = [MockBoundary(0)]
         surface_masks = [None]
         interior_masks = [np.ones((10, 10))]
 
-        masks = build_region_masks(surface_masks, interior_masks, conductors)
+        masks = build_region_masks(surface_masks, interior_masks, boundaries)
 
-        assert 'conductor_0_surface' not in masks
-        assert 'conductor_0_interior' in masks
+        assert 'boundary_0_surface' not in masks
+        assert 'boundary_0_interior' in masks
 
-    def test_empty_conductors(self):
-        """Test with no conductors."""
+    def test_empty_boundaries(self):
+        """Test with no boundaries."""
         masks = build_region_masks([], [], [])
         assert masks == {}
 
@@ -222,15 +222,15 @@ class TestRenderWithColorConfigGPU:
 
         assert rgb.shape == (10, 10, 3)
 
-    def test_with_conductor_masks(self):
-        """Test with conductor masks."""
+    def test_with_boundary_masks(self):
+        """Test with boundary masks."""
         config = ColorConfig(
             global_mapping=ColorMapping(L="0.5", C="0.1", H="180"),
             region_mappings={
-                'conductor_0_interior': ColorMapping.solid(L=0.1, C=0, H=0),
+                'boundary_0_interior': ColorMapping.solid(L=0.1, C=0, H=0),
             },
         )
-        conductors = [MockConductor(0)]
+        boundaries = [MockBoundary(0)]
         scalar_tensor = torch.rand(10, 10)
         interior_mask = torch.zeros(10, 10)
         interior_mask[3:7, 3:7] = 1.0
@@ -238,7 +238,7 @@ class TestRenderWithColorConfigGPU:
         rgb = render_with_color_config_gpu(
             config, scalar_tensor,
             interior_masks_gpu=[interior_mask],
-            conductors=conductors,
+            boundaries=boundaries,
         )
 
         assert rgb.shape == (10, 10, 3)
@@ -267,10 +267,10 @@ class TestPostprocessIntegration:
 
         rgb, percentiles = apply_full_postprocess_gpu(
             scalar_tensor=scalar_tensor,
-            conductor_masks_cpu=None,
+            boundary_masks_cpu=None,
             interior_masks_cpu=None,
-            conductor_color_settings={},
-            conductors=[],
+            boundary_color_settings={},
+            boundaries=[],
             render_shape=(20, 20),
             canvas_resolution=(20, 20),
             clip_percent=1.0,
@@ -295,10 +295,10 @@ class TestPostprocessIntegration:
 
         rgb, percentiles = apply_full_postprocess_gpu(
             scalar_tensor=scalar_tensor,
-            conductor_masks_cpu=None,
+            boundary_masks_cpu=None,
             interior_masks_cpu=None,
-            conductor_color_settings={},
-            conductors=[],
+            boundary_color_settings={},
+            boundaries=[],
             render_shape=(20, 20),
             canvas_resolution=(20, 20),
             clip_percent=1.0,

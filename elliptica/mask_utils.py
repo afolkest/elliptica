@@ -12,7 +12,7 @@ def load_alpha(path: str, threshold: float = 0.0):
         return (alpha > threshold).astype(np.float32)
     return alpha.astype(np.float32)
 
-def load_conductor_masks(shell_path: str):
+def load_boundary_masks(shell_path: str):
     """Load shell mask and try to load matching interior mask."""
     shell = load_alpha(shell_path)
     interior_path = Path(shell_path).parent / Path(shell_path).stem.replace("_shell", "_interior")

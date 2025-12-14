@@ -22,11 +22,11 @@ class BoundaryControlsPanel:
 
         # Widget IDs
         self.container_id: Optional[int] = None
-        # Map: conductor_idx -> header_id (for collapsing headers)
+        # Map: boundary_idx -> header_id (for collapsing headers)
         self.header_ids: Dict[int, int] = {}
-        # Map: conductor_idx -> param_name -> slider_id (for boundary_params)
+        # Map: boundary_idx -> param_name -> slider_id (for boundary_params)
         self.slider_ids: Dict[int, Dict[str, int]] = {}
-        # Map: conductor_idx -> field_name -> widget_id (for boundary_fields)
+        # Map: boundary_idx -> field_name -> widget_id (for boundary_fields)
         self.field_ids: Dict[int, Dict[str, int]] = {}
         # Cache for enum choices: field_name -> [(label, value)]
         self.enum_choices: Dict[str, list] = {}
@@ -68,7 +68,7 @@ class BoundaryControlsPanel:
         self.field_defs.clear()
 
         with self.app.state_lock:
-            conductors = list(self.app.state.project.conductors)
+            boundaries = list(self.app.state.project.boundary_objects)
             selected_indices = set(self.app.state.selected_indices)
 
         # Get active PDE definition to know what sliders to build
@@ -82,11 +82,11 @@ class BoundaryControlsPanel:
             if f.field_type == "enum":
                 self.enum_choices[f.name] = list(f.choices)
 
-        if not conductors:
+        if not boundaries:
             dpg.add_text("No boundaries loaded.", parent=self.container_id)
             return
 
-        for idx, conductor in enumerate(conductors):
+        for idx, boundary in enumerate(boundaries):
             label = f"Object {idx + 1}"
             if idx in selected_indices:
                 label += " (selected)"
@@ -94,7 +94,7 @@ class BoundaryControlsPanel:
             # Add boundary type to label if bc_type field exists
             bc_type_field = self.field_defs.get("bc_type")
             if bc_type_field and bc_type_field.field_type == "enum":
-                current_bc = conductor.params.get("bc_type", bc_type_field.default)
+                current_bc = boundary.params.get("bc_type", bc_type_field.default)
                 for lbl, val in bc_type_field.choices:
                     if val == current_bc:
                         # Extract short name (e.g., "Dirichlet" from "Dirichlet (fixed V)")
@@ -110,14 +110,14 @@ class BoundaryControlsPanel:
 
                 # Build rich boundary_fields (enums, floats with visibility rules, etc.)
                 for field in fields_meta:
-                    current_val = conductor.params.get(field.name, field.default)
+                    current_val = boundary.params.get(field.name, field.default)
                     widget_id = self._build_field_widget(idx, field, current_val)
                     if widget_id is not None:
                         self.field_ids[idx][field.name] = widget_id
 
                 # Dynamic sliders for PDE parameters (legacy boundary_params)
                 for param in params_meta:
-                    current_val = conductor.params.get(param.name, param.default_value)
+                    current_val = boundary.params.get(param.name, param.default_value)
 
                     with dpg.group(horizontal=True):
                         slider_id = dpg.add_slider_float(
@@ -138,7 +138,7 @@ class BoundaryControlsPanel:
                 # Edge smoothing slider (inline, no header)
                 dpg.add_slider_float(
                     label="Edge Smooth",
-                    default_value=float(conductor.edge_smooth_sigma),
+                    default_value=float(boundary.edge_smooth_sigma),
                     min_value=0.0,
                     max_value=5.0,
                     format="%.1f px",
@@ -160,23 +160,23 @@ class BoundaryControlsPanel:
             return
 
         with self.app.state_lock:
-            conductors = list(self.app.state.project.conductors)
+            boundaries = list(self.app.state.project.boundary_objects)
             selected_indices = set(self.app.state.selected_indices)
 
         bc_type_field = self.field_defs.get("bc_type")
 
         for idx, header_id in self.header_ids.items():
-            if idx >= len(conductors) or not dpg.does_item_exist(header_id):
+            if idx >= len(boundaries) or not dpg.does_item_exist(header_id):
                 continue
 
-            conductor = conductors[idx]
+            boundary = boundaries[idx]
             label = f"Object {idx + 1}"
             if idx in selected_indices:
                 label += " (selected)"
 
             # Add boundary type to label if bc_type field exists
             if bc_type_field and bc_type_field.field_type == "enum":
-                current_bc = conductor.params.get("bc_type", bc_type_field.default)
+                current_bc = boundary.params.get("bc_type", bc_type_field.default)
                 for lbl, val in bc_type_field.choices:
                     if val == current_bc:
                         short_name = lbl.split(" (")[0] if " (" in lbl else lbl
@@ -278,8 +278,8 @@ class BoundaryControlsPanel:
             value = float(app_data)
 
         with self.app.state_lock:
-            if idx < len(self.app.state.project.conductors):
-                self.app.state.project.conductors[idx].params[field_name] = value
+            if idx < len(self.app.state.project.boundary_objects):
+                self.app.state.project.boundary_objects[idx].params[field_name] = value
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {field_name} = {value}")
@@ -307,7 +307,7 @@ class BoundaryControlsPanel:
             return
 
         for idx, field_map in self.field_ids.items():
-            # Collect current values for this conductor
+            # Collect current values for this boundary
             current_values = {}
             for field_name, group_id in field_map.items():
                 field_def = self.field_defs.get(field_name)
@@ -347,19 +347,19 @@ class BoundaryControlsPanel:
             return
 
         with self.app.state_lock:
-            conductors = list(self.app.state.project.conductors)
+            boundaries = list(self.app.state.project.boundary_objects)
 
         for idx, param_map in list(self.slider_ids.items()):
-            if idx >= len(conductors):
+            if idx >= len(boundaries):
                 continue
-                
+
             if skip_idx is not None and idx == skip_idx:
                 continue
 
-            conductor = conductors[idx]
+            boundary = boundaries[idx]
             for param_name, slider_id in param_map.items():
                 if dpg.does_item_exist(slider_id):
-                    val = conductor.params.get(param_name, 0.0)
+                    val = boundary.params.get(param_name, 0.0)
                     dpg.set_value(slider_id, float(val))
 
     def on_param_slider(self, sender=None, app_data=None, user_data=None) -> None:
@@ -372,10 +372,10 @@ class BoundaryControlsPanel:
         value = float(app_data)
 
         with self.app.state_lock:
-            if idx < len(self.app.state.project.conductors):
+            if idx < len(self.app.state.project.boundary_objects):
                 # Update params dict directly
                 # TODO: Add an action for this to support undo/redo
-                self.app.state.project.conductors[idx].params[param_name] = value
+                self.app.state.project.boundary_objects[idx].params[param_name] = value
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {param_name} = {value:.3f}")
@@ -390,8 +390,8 @@ class BoundaryControlsPanel:
         value = float(app_data)
 
         with self.app.state_lock:
-            if idx < len(self.app.state.project.conductors):
-                self.app.state.project.conductors[idx].edge_smooth_sigma = value
+            if idx < len(self.app.state.project.boundary_objects):
+                self.app.state.project.boundary_objects[idx].edge_smooth_sigma = value
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} edge smoothing = {value:.1f} px")

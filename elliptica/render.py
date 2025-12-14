@@ -421,7 +421,7 @@ def compute_lic(
         noise_oversample: Oversample factor for noise generation
         noise_sigma: Low-pass filter sigma for noise
         mask: Optional boolean mask to block streamlines (True = blocked)
-        edge_gain_strength: Brightness boost near conductor edges (0.0 = none)
+        edge_gain_strength: Brightness boost near boundary edges (0.0 = none)
         edge_gain_power: Falloff curve sharpness for edge gain
     """
     field_h, field_w = ex.shape
@@ -643,6 +643,6 @@ def downsample_lic(
     return zoom(filtered, (scale_y, scale_x), order=1)
 
 
-# REMOVED: apply_conductor_smear() - replaced by unified GPU/CPU version in gpu/smear.py
+# REMOVED: apply_boundary_smear() - replaced by unified GPU/CPU version in gpu/smear.py
 # The GPU implementation works on both GPU (device='mps'/'cuda') and CPU (device='cpu')
 # using PyTorch operations, eliminating the need for this scipy-based duplicate.

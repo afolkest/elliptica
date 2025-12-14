@@ -67,33 +67,33 @@ def build_field_bindings(
 
 
 def build_region_masks(
-    conductor_masks: Optional[list[Array]],
+    boundary_masks: Optional[list[Array]],
     interior_masks: Optional[list[Array]],
-    conductors: list,
+    boundaries: list,
 ) -> dict[str, Array]:
     """Build region masks dict for ColorConfig.
 
-    Creates named masks for each conductor's surface and interior regions.
-    Names follow the pattern: 'conductor_{id}_surface', 'conductor_{id}_interior'
+    Creates named masks for each boundary's surface and interior regions.
+    Names follow the pattern: 'boundary_{id}_surface', 'boundary_{id}_interior'
 
     Args:
-        conductor_masks: List of surface masks per conductor
-        interior_masks: List of interior masks per conductor
-        conductors: List of Conductor objects (used for IDs)
+        boundary_masks: List of surface masks per boundary
+        interior_masks: List of interior masks per boundary
+        boundaries: List of BoundaryObject objects (used for IDs)
 
     Returns:
         Dict mapping region names to mask arrays
     """
     masks: dict[str, Array] = {}
 
-    for idx, conductor in enumerate(conductors):
-        cid = conductor.id if conductor.id is not None else idx
+    for idx, boundary in enumerate(boundaries):
+        bid = boundary.id if boundary.id is not None else idx
 
-        if conductor_masks and idx < len(conductor_masks) and conductor_masks[idx] is not None:
-            masks[f'conductor_{cid}_surface'] = conductor_masks[idx]
+        if boundary_masks and idx < len(boundary_masks) and boundary_masks[idx] is not None:
+            masks[f'boundary_{bid}_surface'] = boundary_masks[idx]
 
         if interior_masks and idx < len(interior_masks) and interior_masks[idx] is not None:
-            masks[f'conductor_{cid}_interior'] = interior_masks[idx]
+            masks[f'boundary_{bid}_interior'] = interior_masks[idx]
 
     return masks
 
@@ -124,9 +124,9 @@ def render_with_color_config_gpu(
     scalar_tensor: torch.Tensor,
     ex_tensor: Optional[torch.Tensor] = None,
     ey_tensor: Optional[torch.Tensor] = None,
-    conductor_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
+    boundary_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
     interior_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
-    conductors: Optional[list] = None,
+    boundaries: Optional[list] = None,
     solution: Optional[dict[str, np.ndarray]] = None,
 ) -> torch.Tensor:
     """GPU rendering using ColorConfig expressions.
@@ -139,9 +139,9 @@ def render_with_color_config_gpu(
         scalar_tensor: LIC texture tensor (H, W) on GPU
         ex_tensor: Field X component tensor (H, W) on GPU, optional
         ey_tensor: Field Y component tensor (H, W) on GPU, optional
-        conductor_masks_gpu: List of surface mask tensors on GPU
+        boundary_masks_gpu: List of surface mask tensors on GPU
         interior_masks_gpu: List of interior mask tensors on GPU
-        conductors: List of Conductor objects (for region naming)
+        boundaries: List of BoundaryObject objects (for region naming)
         solution: Optional dict of CPU solution arrays (will be uploaded to GPU)
 
     Returns:
@@ -169,22 +169,22 @@ def render_with_color_config_gpu(
                     # Numpy array, upload to GPU
                     bindings[name] = torch.from_numpy(arr).to(device=device, dtype=dtype)
 
-    # Build region masks if we have conductors
+    # Build region masks if we have boundaries
     region_masks: dict[str, torch.Tensor] = {}
-    if conductors is not None:
-        for idx, conductor in enumerate(conductors):
-            cid = conductor.id if conductor.id is not None else idx
+    if boundaries is not None:
+        for idx, boundary in enumerate(boundaries):
+            bid = boundary.id if boundary.id is not None else idx
 
-            if conductor_masks_gpu and idx < len(conductor_masks_gpu):
-                mask = conductor_masks_gpu[idx]
+            if boundary_masks_gpu and idx < len(boundary_masks_gpu):
+                mask = boundary_masks_gpu[idx]
                 if mask is not None:
                     # Threshold soft mask to binary (match existing pipeline behavior)
-                    region_masks[f'conductor_{cid}_surface'] = (mask > 0.5).float()
+                    region_masks[f'boundary_{bid}_surface'] = (mask > 0.5).float()
 
             if interior_masks_gpu and idx < len(interior_masks_gpu):
                 mask = interior_masks_gpu[idx]
                 if mask is not None:
-                    region_masks[f'conductor_{cid}_interior'] = (mask > 0.5).float()
+                    region_masks[f'boundary_{bid}_interior'] = (mask > 0.5).float()
 
     # Render using ColorConfig
     rgb = config.render(bindings, region_masks if region_masks else None)

@@ -1,4 +1,4 @@
-"""Geometric shape generators for conductors.
+"""Geometric shape generators for boundaries.
 
 Data-driven shape system - add new shapes by extending SHAPES registry.
 """

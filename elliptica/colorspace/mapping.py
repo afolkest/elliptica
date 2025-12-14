@@ -106,7 +106,7 @@ class ColorMapping:
         """Create a solid color mapping (no field dependencies).
 
         This is a convenience method for creating mappings that produce
-        a single uniform color, useful for conductor interiors, etc.
+        a single uniform color, useful for boundary interiors, etc.
 
         Args:
             L: Lightness value (0-1)
@@ -189,20 +189,20 @@ class ColorConfig:
                 H="200",
             ),
             region_mappings={
-                'conductor_0_surface': ColorMapping(
+                'boundary_0_surface': ColorMapping(
                     L="0.4 + 0.3 * clipnorm(lic, 0.5, 99.5)",
                     C="0.08",
                     H="30",  # copper
                 ),
-                'conductor_0_interior': ColorMapping.solid(L=0.12, C=0, H=0),
+                'boundary_0_interior': ColorMapping.solid(L=0.12, C=0, H=0),
             },
         )
 
         rgb = config.render(
             bindings={'lic': lic, 'mag': mag},
             region_masks={
-                'conductor_0_surface': surface_mask,
-                'conductor_0_interior': interior_mask,
+                'boundary_0_surface': surface_mask,
+                'boundary_0_interior': interior_mask,
             },
         )
     """

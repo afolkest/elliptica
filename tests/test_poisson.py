@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from elliptica.poisson import solve_poisson_system, DIRICHLET, NEUMANN
 from elliptica.field_pde import compute_field_pde
 from elliptica.pde.relaxation import build_relaxation_mask, relax_potential_band
-from elliptica.types import Project, Conductor
+from elliptica.types import Project, BoundaryObject
 from elliptica.pde import PDERegistry
 from elliptica.pde.poisson_pde import POISSON_PDE
 
@@ -209,8 +209,8 @@ def test_compute_field_preview_scale_accuracy():
     project = Project(canvas_resolution=(64, 64))
     mask = np.zeros((16, 16), dtype=bool)
     mask[4:12, 4:12] = True
-    conductor = Conductor(mask=mask, voltage=1.0, position=(24, 24))
-    project.conductors.append(conductor)
+    boundary = BoundaryObject(mask=mask, voltage=1.0, position=(24, 24))
+    project.boundary_objects.append(boundary)
 
     _, (ex_full, ey_full) = compute_field_pde(project, poisson_scale=1.0)
     _, (ex_preview, ey_preview) = compute_field_pde(project, poisson_scale=0.5)

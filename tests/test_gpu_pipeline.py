@@ -8,14 +8,14 @@ from pathlib import Path
 ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 
-from elliptica.types import Project, Conductor
+from elliptica.types import Project, BoundaryObject
 
 
 def test_gpu_pipeline_imports():
     """Test that GPU pipeline modules can be imported."""
     try:
         from elliptica.gpu.ops import apply_highpass_gpu
-        from elliptica.gpu.smear import apply_conductor_smear_gpu
+        from elliptica.gpu.smear import apply_region_smear_gpu
         from elliptica.gpu.overlay import apply_region_overlays_gpu
         from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
         print("✓ All GPU modules import successfully")
@@ -33,26 +33,26 @@ def test_hybrid_cpu_fallback():
     lic_array = np.random.rand(100, 100).astype(np.float32)
     project = Project(canvas_resolution=(100, 100))
 
-    # Simple conductor
+    # Simple boundary
     mask = np.zeros((20, 20), dtype=np.float32)
     mask[5:15, 5:15] = 1.0
-    conductor = Conductor(
+    boundary = BoundaryObject(
         id=0,
         mask=mask,
         voltage=1.0,
         position=(40.0, 40.0),
         smear_enabled=False,
     )
-    project.conductors.append(conductor)
+    project.boundary_objects.append(boundary)
 
     # Run hybrid pipeline (will use GPU if available, CPU otherwise)
     try:
         final_rgb, used_percentiles = apply_full_postprocess_hybrid(
             scalar_array=lic_array,
-            conductor_masks=None,
+            boundary_masks=None,
             interior_masks=None,
-            conductor_color_settings={},
-            conductors=project.conductors,
+            boundary_color_settings={},
+            boundaries=project.boundary_objects,
             render_shape=lic_array.shape,
             canvas_resolution=project.canvas_resolution,
             clip_percent=0.5,

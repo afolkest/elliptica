@@ -601,9 +601,9 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
         phi_values_extended = phi_values
         w_mask_extended = w_mask
 
-    # Save conductor mask for LIC blocking (all objects where field is ~zero)
+    # Save boundary mask for LIC blocking (all objects where field is ~zero)
     # Include both Dirichlet (extended) and Neumann objects
-    conductor_dirichlet_mask = phi_mask_extended | neumann_mask
+    boundary_dirichlet_mask = phi_mask_extended | neumann_mask
 
     # Edge BCs from project.bc (resolved upstream)
     bc_map = getattr(project, "bc", {}) or {}
@@ -673,7 +673,7 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
 
     phi = phi_field.astype(np.float32)
 
-    return {"phi": phi, "dirichlet_mask": conductor_dirichlet_mask}
+    return {"phi": phi, "dirichlet_mask": boundary_dirichlet_mask}
 
 
 BIHARMONIC_PDE = PDEDefinition(

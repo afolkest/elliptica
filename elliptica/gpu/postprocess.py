@@ -106,10 +106,10 @@ def apply_saturation_gpu(
 
 def apply_full_postprocess_gpu(
     scalar_tensor: torch.Tensor,
-    conductor_masks_cpu: list[np.ndarray] | None,
+    boundary_masks_cpu: list[np.ndarray] | None,
     interior_masks_cpu: list[np.ndarray] | None,
-    conductor_color_settings: dict,
-    conductors: list,
+    boundary_color_settings: dict,
+    boundaries: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
     clip_percent: float,
@@ -119,7 +119,7 @@ def apply_full_postprocess_gpu(
     color_enabled: bool,
     palette: str,
     lic_percentiles: Tuple[float, float] | None = None,
-    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    boundary_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
     color_config: "ColorConfig | None" = None,
     ex_tensor: torch.Tensor | None = None,
@@ -132,18 +132,18 @@ def apply_full_postprocess_gpu(
 
     This is the unified entry point that chains:
     1. Base RGB colorization (GPU) - via palette LUT or ColorConfig expressions
-    2. Region overlays (GPU) - via conductor_color_settings or ColorConfig regions
-    3. Conductor smear (GPU) - optional, palette mode only
+    2. Region overlays (GPU) - via boundary_color_settings or ColorConfig regions
+    3. Boundary smear (GPU) - optional, palette mode only
     4. Saturation adjustment (GPU) - chroma multiplier in OKLch
 
     Everything stays on GPU until the final result.
 
     Args:
         scalar_tensor: LIC grayscale field (H, W) on GPU
-        conductor_masks_cpu: List of conductor masks (CPU arrays)
+        boundary_masks_cpu: List of boundary masks (CPU arrays)
         interior_masks_cpu: List of interior masks (CPU arrays)
-        conductor_color_settings: Per-conductor color settings (legacy palette mode)
-        conductors: List of Conductor objects
+        boundary_color_settings: Per-boundary color settings (legacy palette mode)
+        boundaries: List of BoundaryObject objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
         clip_percent: Percentile clipping
@@ -153,7 +153,7 @@ def apply_full_postprocess_gpu(
         color_enabled: Whether to use color palette
         palette: Color palette name
         lic_percentiles: Precomputed (vmin, vmax) for smear normalization
-        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
+        boundary_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
         color_config: Optional ColorConfig for expression-based coloring.
                      When provided, uses OKLCH expressions instead of palette mode.
@@ -207,10 +207,10 @@ def apply_full_postprocess_gpu(
         from elliptica.colorspace.pipeline import render_with_color_config_gpu
 
         # Upload masks to GPU if not already done
-        if conductor_masks_gpu is None and conductor_masks_cpu is not None:
-            conductor_masks_gpu = [
+        if boundary_masks_gpu is None and boundary_masks_cpu is not None:
+            boundary_masks_gpu = [
                 GPUContext.to_gpu(m) if m is not None else None
-                for m in conductor_masks_cpu
+                for m in boundary_masks_cpu
             ]
         if interior_masks_gpu is None and interior_masks_cpu is not None:
             interior_masks_gpu = [
@@ -224,9 +224,9 @@ def apply_full_postprocess_gpu(
             scalar_tensor,
             ex_tensor=ex_tensor,
             ey_tensor=ey_tensor,
-            conductor_masks_gpu=conductor_masks_gpu,
+            boundary_masks_gpu=boundary_masks_gpu,
             interior_masks_gpu=interior_masks_gpu,
-            conductors=conductors,
+            boundaries=boundaries,
             solution=solution_gpu,  # Pass GPU tensors directly
         )
 
@@ -267,24 +267,24 @@ def apply_full_postprocess_gpu(
             solution_gpu,
         )
 
-    # Step 2: Apply region overlays (if any conductors have custom colors)
+    # Step 2: Apply region overlays (if any boundaries have custom colors)
     # Must come BEFORE smear so that custom colors get smeared too!
     has_overlays = any(
-        conductor.id in conductor_color_settings
-        for conductor in conductors
+        boundary.id in boundary_color_settings
+        for boundary in boundaries
     )
 
-    if has_overlays and conductor_masks_cpu is not None and interior_masks_cpu is not None:
+    if has_overlays and boundary_masks_cpu is not None and interior_masks_cpu is not None:
         # Upload masks to GPU (or use pre-uploaded masks if available)
-        if conductor_masks_gpu is None or interior_masks_gpu is None:
-            conductor_masks_gpu = []
+        if boundary_masks_gpu is None or interior_masks_gpu is None:
+            boundary_masks_gpu = []
             interior_masks_gpu = []
 
-            for mask_cpu in conductor_masks_cpu:
+            for mask_cpu in boundary_masks_cpu:
                 if mask_cpu is not None:
-                    conductor_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
+                    boundary_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
                 else:
-                    conductor_masks_gpu.append(None)
+                    boundary_masks_gpu.append(None)
 
             for mask_cpu in interior_masks_cpu:
                 if mask_cpu is not None:
@@ -296,10 +296,10 @@ def apply_full_postprocess_gpu(
         base_rgb = apply_region_overlays_gpu(
             base_rgb,
             scalar_tensor,
-            conductor_masks_gpu,
+            boundary_masks_gpu,
             interior_masks_gpu,
-            conductor_color_settings,
-            conductors,
+            boundary_color_settings,
+            boundaries,
             clip_percent,
             brightness,
             contrast,
@@ -314,20 +314,20 @@ def apply_full_postprocess_gpu(
 
     # Step 3: Apply region smear (if any region has smear enabled)
     # Comes AFTER region overlays so smear applies to custom colored regions
-    has_smear = _has_any_smear_enabled(conductor_color_settings, conductors)
+    has_smear = _has_any_smear_enabled(boundary_color_settings, boundaries)
     if has_smear:
         base_rgb = apply_region_smear_gpu(
             base_rgb,
             scalar_tensor,
-            conductor_masks_cpu,
+            boundary_masks_cpu,
             interior_masks_cpu,
-            conductors,
+            boundaries,
             render_shape,
             canvas_resolution,
             lut_tensor,
             used_percentiles,
-            conductor_color_settings,
-            conductor_masks_gpu,
+            boundary_color_settings,
+            boundary_masks_gpu,
             interior_masks_gpu,
             brightness,
             contrast,
@@ -347,10 +347,10 @@ def apply_full_postprocess_gpu(
 
 def apply_full_postprocess_hybrid(
     scalar_array: np.ndarray,
-    conductor_masks: list[np.ndarray] | None,
+    boundary_masks: list[np.ndarray] | None,
     interior_masks: list[np.ndarray] | None,
-    conductor_color_settings: dict,
-    conductors: list,
+    boundary_color_settings: dict,
+    boundaries: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
     clip_percent: float,
@@ -362,7 +362,7 @@ def apply_full_postprocess_hybrid(
     lic_percentiles: Tuple[float, float] | None = None,
     use_gpu: bool = True,
     scalar_tensor: torch.Tensor | None = None,
-    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    boundary_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
     color_config: "ColorConfig | None" = None,
     ex_tensor: torch.Tensor | None = None,
@@ -375,10 +375,10 @@ def apply_full_postprocess_hybrid(
 
     Args:
         scalar_array: LIC grayscale field (H, W) CPU array
-        conductor_masks: List of conductor masks (CPU arrays)
+        boundary_masks: List of boundary masks (CPU arrays)
         interior_masks: List of interior masks (CPU arrays)
-        conductor_color_settings: Per-conductor color settings
-        conductors: List of Conductor objects
+        boundary_color_settings: Per-boundary color settings
+        boundaries: List of BoundaryObject objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
         clip_percent: Percentile clipping
@@ -390,7 +390,7 @@ def apply_full_postprocess_hybrid(
         lic_percentiles: Precomputed (vmin, vmax) for smear normalization
         use_gpu: Whether to attempt GPU acceleration
         scalar_tensor: Optional pre-uploaded scalar tensor on GPU (saves upload time)
-        conductor_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
+        boundary_masks_gpu: Optional pre-uploaded GPU masks (avoids repeated CPU→GPU transfers)
         interior_masks_gpu: Optional pre-uploaded GPU interior masks
         color_config: Optional ColorConfig for expression-based coloring
         ex_tensor: Electric field X component on GPU (for ColorConfig)
@@ -409,10 +409,10 @@ def apply_full_postprocess_hybrid(
 
             rgb_tensor, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor,
-                conductor_masks,
+                boundary_masks,
                 interior_masks,
-                conductor_color_settings,
-                conductors,
+                boundary_color_settings,
+                boundaries,
                 render_shape,
                 canvas_resolution,
                 clip_percent,
@@ -422,7 +422,7 @@ def apply_full_postprocess_hybrid(
                 color_enabled,
                 palette,
                 lic_percentiles,
-                conductor_masks_gpu,
+                boundary_masks_gpu,
                 interior_masks_gpu,
                 color_config,
                 ex_tensor,
@@ -459,10 +459,10 @@ def apply_full_postprocess_hybrid(
 
             rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
                 scalar_tensor_cpu,
-                conductor_masks,
+                boundary_masks,
                 interior_masks,
-                conductor_color_settings,
-                conductors,
+                boundary_color_settings,
+                boundaries,
                 render_shape,
                 canvas_resolution,
                 clip_percent,
@@ -492,10 +492,10 @@ def apply_full_postprocess_hybrid(
 
         rgb_tensor_cpu, used_percentiles = apply_full_postprocess_gpu(
             scalar_tensor_cpu,
-            conductor_masks,
+            boundary_masks,
             interior_masks,
-            conductor_color_settings,
-            conductors,
+            boundary_color_settings,
+            boundaries,
             render_shape,
             canvas_resolution,
             clip_percent,

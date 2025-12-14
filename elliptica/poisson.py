@@ -47,10 +47,10 @@ def _build_poisson_system(
     row_index = np.empty(total_nonzero, dtype=np.int32) #parametrizes which equation
     col_index = np.empty(total_nonzero, dtype=np.int32)
 
-    #sparse matrix operator, equal to laplacian except at or adjacent to conductors
+    #sparse matrix operator, equal to laplacian except at or adjacent to boundaries
     almost_laplacian = np.empty(total_nonzero, dtype=PRECISION)
 
-    #rhs, equalling negative charge density except at or adjacent to conductor
+    #rhs, equalling negative charge density except at or adjacent to boundaries
     rhs = np.empty(N, dtype=PRECISION)
 
     n_nonzero = 0

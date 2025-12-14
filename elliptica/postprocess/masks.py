@@ -1,4 +1,4 @@
-"""Mask rasterization and interior detection for conductor colorization."""
+"""Mask rasterization and interior detection for boundary colorization."""
 
 import numpy as np
 from scipy.ndimage import distance_transform_edt, binary_fill_holes, zoom
@@ -8,16 +8,16 @@ from elliptica.mask_utils import blur_mask
 
 
 def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.ndarray]:
-    """Derive interior from hollow conductor mask using morphological hole filling.
+    """Derive interior from hollow boundary mask using morphological hole filling.
 
-    For hollow conductors (rings), detects the empty region inside.
-    For solid conductors (disks), returns None.
+    For hollow boundaries (rings), detects the empty region inside.
+    For solid boundaries (disks), returns None.
 
     Uses standard morphological operation: binary_fill_holes identifies regions
     surrounded by the mask but not part of it.
 
     Args:
-        mask: Binary/grayscale conductor mask
+        mask: Binary/grayscale boundary mask
         thickness: Unused, kept for API compatibility
 
     Returns:
@@ -30,7 +30,7 @@ def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.nda
     if not np.any(binary):
         return None
 
-    # Fill holes: identifies interior regions surrounded by conductor
+    # Fill holes: identifies interior regions surrounded by boundary
     filled = binary_fill_holes(binary)
 
     # Interior is the difference between filled and original
@@ -43,8 +43,8 @@ def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.nda
     return interior.astype(np.float32)
 
 
-def rasterize_conductor_masks(
-    conductors,
+def rasterize_boundary_masks(
+    boundaries,
     shape: tuple[int, int],
     margin: float,
     scale: float,
@@ -52,10 +52,10 @@ def rasterize_conductor_masks(
     offset_y: int = 0,
     domain_size: tuple[float, float] | None = None,
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    """Rasterize conductor masks onto display grid.
+    """Rasterize boundary masks onto display grid.
 
     Args:
-        conductors: List of Conductor objects
+        boundaries: List of BoundaryObject objects
         shape: Target (height, width) for rasterized masks
         margin: Physical margin used in render (pre-scale)
         scale: multiplier * supersample used for render
@@ -88,14 +88,14 @@ def rasterize_conductor_masks(
         scale_x = scale
         scale_y = scale
 
-    for conductor in conductors:
+    for boundary in boundaries:
         # Get edge smoothing sigma (same as used in field solver and LIC mask)
-        edge_smooth_sigma = getattr(conductor, 'edge_smooth_sigma', 0.0)
+        edge_smooth_sigma = getattr(boundary, 'edge_smooth_sigma', 0.0)
 
         # Rasterize surface mask with edge smoothing
         surface = _rasterize_single_mask(
-            conductor.mask,
-            conductor.position,
+            boundary.mask,
+            boundary.position,
             (height, width),
             margin,
             scale_x,
@@ -107,10 +107,10 @@ def rasterize_conductor_masks(
         surface_masks.append(surface)
 
         # Rasterize interior mask if present (no smoothing - interior is derived region)
-        if conductor.interior_mask is not None:
+        if boundary.interior_mask is not None:
             interior = _rasterize_single_mask(
-                conductor.interior_mask,
-                conductor.position,
+                boundary.interior_mask,
+                boundary.position,
                 (height, width),
                 margin,
                 scale_x,

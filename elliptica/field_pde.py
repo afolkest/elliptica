@@ -90,7 +90,7 @@ def compute_field_pde(
             self.pde_params = original_project.pde_params
             # Pass through other attributes
             self.canvas_resolution = original_project.canvas_resolution
-            self.conductors = original_project.conductors
+            self.boundary_objects = original_project.boundary_objects
 
     # Handle resolution scaling
     if solve_scale < 0.999:

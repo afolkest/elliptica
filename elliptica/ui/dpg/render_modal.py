@@ -182,7 +182,7 @@ class RenderModalController:
                 )
                 edge_strength_label = dpg.add_text("Edge Halo Strength")
                 with dpg.tooltip(edge_strength_label):
-                    dpg.add_text("Brightness boost near conductor edges. Creates a glowing halo effect around objects.")
+                    dpg.add_text("Brightness boost near boundary edges. Creates a glowing halo effect around objects.")
 
             with dpg.group(horizontal=True):
                 self.edge_gain_power_slider_id = dpg.add_slider_float(
@@ -444,7 +444,7 @@ class RenderModalController:
         solve_scale = float(dpg.get_value(self.solve_scale_slider_id)) if self.solve_scale_slider_id is not None else defaults.DEFAULT_SOLVE_SCALE
         noise_seed = int(dpg.get_value(self.seed_input_id)) if self.seed_input_id is not None else defaults.DEFAULT_NOISE_SEED
         noise_sigma = float(dpg.get_value(self.sigma_input_id)) if self.sigma_input_id is not None else defaults.DEFAULT_NOISE_SIGMA
-        use_mask = True  # Always block streamlines at conductors
+        use_mask = True  # Always block streamlines at boundaries
         edge_gain_strength = float(dpg.get_value(self.edge_gain_strength_slider_id)) if self.edge_gain_strength_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_STRENGTH
         edge_gain_power = float(dpg.get_value(self.edge_gain_power_slider_id)) if self.edge_gain_power_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_POWER
 

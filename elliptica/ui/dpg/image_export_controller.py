@@ -15,7 +15,7 @@ import numpy as np
 from PIL import Image
 from datetime import datetime
 
-from elliptica.postprocess.masks import rasterize_conductor_masks
+from elliptica.postprocess.masks import rasterize_boundary_masks
 from elliptica.render import downsample_lic
 
 if TYPE_CHECKING:
@@ -394,7 +394,7 @@ class ImageExportController:
             project = _snapshot_project(self.app.state.project)
             settings = replace(self.app.state.display_settings)
             render_settings = replace(self.app.state.render_settings)
-            conductor_color_settings = {k: v for k, v in self.app.state.conductor_color_settings.items()}
+            boundary_color_settings = {k: v for k, v in self.app.state.boundary_color_settings.items()}
             color_config = self.app.state.color_config
 
         def export_job():
@@ -422,11 +422,11 @@ class ImageExportController:
                 return ('error', 'Render failed')
 
             # Rasterize masks at export resolution
-            conductor_masks = None
+            boundary_masks = None
             interior_masks = None
-            if project.conductors:
-                conductor_masks, interior_masks = rasterize_conductor_masks(
-                    project.conductors,
+            if project.boundary_objects:
+                boundary_masks, interior_masks = rasterize_boundary_masks(
+                    project.boundary_objects,
                     result.array.shape,
                     result.margin,
                     multiplier * render_settings.supersample,
@@ -457,10 +457,10 @@ class ImageExportController:
             canvas_w, canvas_h = project.canvas_resolution
             final_rgb, _ = apply_full_postprocess_hybrid(
                 scalar_array=result.array,
-                conductor_masks=conductor_masks,
+                boundary_masks=boundary_masks,
                 interior_masks=interior_masks,
-                conductor_color_settings=conductor_color_settings,
-                conductors=project.conductors,
+                boundary_color_settings=boundary_color_settings,
+                boundaries=project.boundary_objects,
                 render_shape=result.array.shape,
                 canvas_resolution=(canvas_w, canvas_h),
                 clip_percent=settings.clip_percent,
@@ -543,12 +543,12 @@ class ImageExportController:
             result = cache.result
             project = _snapshot_project(self.app.state.project)
             settings = replace(self.app.state.display_settings)
-            conductor_color_settings = {k: v for k, v in self.app.state.conductor_color_settings.items()}
+            boundary_color_settings = {k: v for k, v in self.app.state.boundary_color_settings.items()}
             color_config = self.app.state.color_config  # Expression-based coloring (if set)
             multiplier = cache.multiplier
             supersample = cache.supersample
             # Snapshot cached masks (these are correct - don't regenerate!)
-            cached_conductor_masks = [m.copy() if m is not None else None for m in cache.conductor_masks] if cache.conductor_masks else None
+            cached_boundary_masks = [m.copy() if m is not None else None for m in cache.boundary_masks] if cache.boundary_masks else None
             cached_interior_masks = [m.copy() if m is not None else None for m in cache.interior_masks] if cache.interior_masks else None
 
         canvas_w, canvas_h = project.canvas_resolution
@@ -567,13 +567,13 @@ class ImageExportController:
                 lic_array,
                 project,
                 settings,
-                conductor_color_settings,
+                boundary_color_settings,
                 (canvas_w, canvas_h),
                 margin_physical,
                 render_scale,
                 result.offset_x,
                 result.offset_y,
-                cached_conductor_masks,
+                cached_boundary_masks,
                 cached_interior_masks,
                 color_config,
                 result.solution,
@@ -608,7 +608,7 @@ class ImageExportController:
                 downsampled_lic,
                 project,
                 settings,
-                conductor_color_settings,
+                boundary_color_settings,
                 (canvas_w, canvas_h),
                 margin_physical,
                 output_scale,
@@ -633,13 +633,13 @@ class ImageExportController:
                 lic_array,
                 project,
                 settings,
-                conductor_color_settings,
+                boundary_color_settings,
                 (canvas_w, canvas_h),
                 margin_physical,
                 render_scale,
                 result.offset_x,
                 result.offset_y,
-                cached_conductor_masks,
+                cached_boundary_masks,
                 cached_interior_masks,
                 color_config,
                 result.solution,
@@ -657,13 +657,13 @@ class ImageExportController:
         lic_array: np.ndarray,
         project: "Project",
         settings,
-        conductor_color_settings: dict,
+        boundary_color_settings: dict,
         canvas_resolution: tuple[int, int],
         margin_physical: float,
         scale: float,
         offset_x: int,
         offset_y: int,
-        cached_conductor_masks: list = None,
+        cached_boundary_masks: list = None,
         cached_interior_masks: list = None,
         color_config=None,
         solution: dict = None,
@@ -674,7 +674,7 @@ class ImageExportController:
             lic_array: Grayscale LIC array
             project: Project snapshot
             settings: Display settings snapshot
-            conductor_color_settings: Conductor color settings
+            boundary_color_settings: Boundary color settings
             canvas_resolution: Canvas resolution (width, height)
             margin_physical: Physical margin in canvas units
             scale: Pixels per canvas unit (multiplier or multiplier*supersample)
@@ -685,15 +685,15 @@ class ImageExportController:
             Final RGB array with all post-processing applied
         """
         # Use cached masks if available (avoids regeneration errors), otherwise generate at this resolution
-        if cached_conductor_masks is not None and cached_interior_masks is not None:
-            conductor_masks = cached_conductor_masks
+        if cached_boundary_masks is not None and cached_interior_masks is not None:
+            boundary_masks = cached_boundary_masks
             interior_masks = cached_interior_masks
         else:
-            conductor_masks = None
+            boundary_masks = None
             interior_masks = None
-            if project.conductors:
-                conductor_masks, interior_masks = rasterize_conductor_masks(
-                    project.conductors,
+            if project.boundary_objects:
+                boundary_masks, interior_masks = rasterize_boundary_masks(
+                    project.boundary_objects,
                     lic_array.shape,
                     margin_physical,
                     scale,
@@ -703,7 +703,7 @@ class ImageExportController:
 
         # Compute percentiles for smear (if needed at export resolution)
         lic_percentiles = None
-        if any(c.smear_enabled for c in project.conductors):
+        if any(b.smear_enabled for b in project.boundary_objects):
             clip_percent = float(settings.clip_percent)
             if clip_percent > 0.0:
                 vmin = float(np.percentile(lic_array, clip_percent))
@@ -732,10 +732,10 @@ class ImageExportController:
 
         final_rgb, _ = apply_full_postprocess_hybrid(
             scalar_array=lic_array,
-            conductor_masks=conductor_masks,
+            boundary_masks=boundary_masks,
             interior_masks=interior_masks,
-            conductor_color_settings=conductor_color_settings,
-            conductors=project.conductors,
+            boundary_color_settings=boundary_color_settings,
+            boundaries=project.boundary_objects,
             render_shape=lic_array.shape,
             canvas_resolution=canvas_resolution,
             clip_percent=settings.clip_percent,
