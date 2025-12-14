@@ -13,8 +13,8 @@ except ImportError:
     dpg = None  # type: ignore
 
 
-# Conductor overlay colors for edit mode (RGBA with alpha)
-CONDUCTOR_COLORS = [
+# Boundary overlay colors for edit mode (RGBA with alpha)
+BOUNDARY_COLORS = [
     (0.39, 0.59, 1.0, 0.7),
     (1.0, 0.39, 0.59, 0.7),
     (0.59, 1.0, 0.39, 0.7),
@@ -99,7 +99,7 @@ class CanvasRenderer:
         """Get contours for selected region, scaled to canvas coordinates.
 
         Args:
-            selected_idx: Conductor index
+            selected_idx: Boundary index
             region_type: "surface" or "interior"
             render_cache: Render cache with masks
             canvas_w, canvas_h: Canvas dimensions for scaling
@@ -111,7 +111,7 @@ class CanvasRenderer:
         if region_type == "interior":
             masks = render_cache.interior_masks
         else:
-            masks = render_cache.conductor_masks
+            masks = render_cache.boundary_masks
 
         if masks is None or selected_idx < 0 or selected_idx >= len(masks):
             return None
@@ -169,9 +169,9 @@ class CanvasRenderer:
                 dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
             i += period
 
-    def _get_conductor_contours(self, conductor, offset_x: float, offset_y: float) -> list[np.ndarray]:
-        """Extract contours from conductor mask and offset to canvas position."""
-        contours = self._extract_contours(conductor.mask)
+    def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float) -> list[np.ndarray]:
+        """Extract contours from boundary mask and offset to canvas position."""
+        contours = self._extract_contours(boundary.mask)
         result = []
         for contour in contours:
             offset_contour = contour.copy()
@@ -184,7 +184,7 @@ class CanvasRenderer:
         """Redraw the canvas with current state.
 
         This renders the background, grid (in edit mode), render texture (in render mode),
-        and conductor overlays (in edit mode).
+        and boundary overlays (in edit mode).
         """
         if dpg is None or self.app.canvas_layer_id is None:
             return
@@ -196,7 +196,7 @@ class CanvasRenderer:
             selected_idx = self.app.state.get_single_selected_idx()  # For render mode
             selected_region_type = self.app.state.selected_region_type
             canvas_w, canvas_h = project.canvas_resolution
-            conductors = list(project.conductors)
+            boundaries = list(project.boundary_objects)
             render_cache = self.app.state.render_cache
             view_mode = self.app.state.view_mode
 
@@ -261,11 +261,11 @@ class CanvasRenderer:
                         self._draw_dashed_contour(contour, self.app.canvas_layer_id)
 
         if view_mode == "edit" or render_cache is None:
-            for idx, conductor in enumerate(conductors):
-                tex_id = self.app.display_pipeline.texture_manager.ensure_conductor_texture(idx, conductor.mask, CONDUCTOR_COLORS)
-                x0, y0 = conductor.position
-                width = conductor.mask.shape[1]
-                height = conductor.mask.shape[0]
+            for idx, boundary in enumerate(boundaries):
+                tex_id = self.app.display_pipeline.texture_manager.ensure_boundary_texture(idx, boundary.mask, BOUNDARY_COLORS)
+                x0, y0 = boundary.position
+                width = boundary.mask.shape[1]
+                height = boundary.mask.shape[0]
                 dpg.draw_image(
                     tex_id,
                     pmin=(x0, y0),
@@ -274,9 +274,9 @@ class CanvasRenderer:
                     uv_max=(1.0, 1.0),
                     parent=self.app.canvas_layer_id,
                 )
-                # Draw contour outline for selected conductors
+                # Draw contour outline for selected boundaries
                 if idx in selected_indices:
-                    contours = self._get_conductor_contours(conductor, x0, y0)
+                    contours = self._get_boundary_contours(boundary, x0, y0)
                     for contour in contours:
                         self._draw_dashed_contour(
                             contour, self.app.canvas_layer_id,

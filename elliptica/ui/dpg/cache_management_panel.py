@@ -1,5 +1,5 @@
 """Cache management panel controller for Elliptica UI."""
-from elliptica.postprocess.masks import rasterize_conductor_masks
+from elliptica.postprocess.masks import rasterize_boundary_masks
 from typing import Optional, TYPE_CHECKING
 
 from elliptica.serialization import compute_project_fingerprint
@@ -170,23 +170,23 @@ class CacheManagementPanel:
                 return
 
             # Load or rebuild masks at full render resolution
-            if self.app.state.project.conductors:
-                if cache.result.conductor_masks_canvas is not None:
+            if self.app.state.project.boundary_objects:
+                if cache.result.boundary_masks_canvas is not None:
                     # Use pre-computed masks from render
-                    cache.conductor_masks = cache.result.conductor_masks_canvas
+                    cache.boundary_masks = cache.result.boundary_masks_canvas
                     cache.interior_masks = cache.result.interior_masks_canvas
                 else:
                     # Fallback: rasterize masks (for compatibility with older cached renders)
                     scale = cache.multiplier * cache.supersample
-                    conductor_masks, interior_masks = rasterize_conductor_masks(
-                        self.app.state.project.conductors,
+                    boundary_masks, interior_masks = rasterize_boundary_masks(
+                        self.app.state.project.boundary_objects,
                         cache.result.canvas_scaled_shape,
                         cache.result.margin,
                         scale,
                         cache.result.offset_x,
                         cache.result.offset_y,
                     )
-                    cache.conductor_masks = conductor_masks
+                    cache.boundary_masks = boundary_masks
                     cache.interior_masks = interior_masks
 
             # Recompute LIC percentiles for smear (critical for loaded caches!)

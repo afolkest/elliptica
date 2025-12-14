@@ -26,8 +26,8 @@ def convolve(
         kernel: The kernel to use for the convolution. 1d numpy array.
         iterations: The number of iterations to use for the convolution. Default is 1.
         boundaries: Boundary condition ("closed" or "periodic"). Default is "closed".
-        mask: Optional boolean mask to block streamlines (conductors). None for no blocking.
-        edge_gain_strength: Brightness boost near conductor edges (0.0 = none, higher = brighter halos).
+        mask: Optional boolean mask to block streamlines (boundaries). None for no blocking.
+        edge_gain_strength: Brightness boost near boundary edges (0.0 = none, higher = brighter halos).
         edge_gain_power: Falloff curve sharpness for edge gain (higher = sharper edge).
 
     Returns:

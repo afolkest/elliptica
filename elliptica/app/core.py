@@ -12,7 +12,7 @@ from elliptica import defaults
 from elliptica.gpu import GPUContext
 from elliptica.pipeline import RenderResult
 from elliptica.postprocess.color import ColorParams
-from elliptica.types import Project, Conductor
+from elliptica.types import Project, BoundaryObject
 
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -60,8 +60,8 @@ def resolve_region_postprocess_params(
 
 
 @dataclass
-class ConductorColorSettings:
-    """Color settings for a conductor's two regions."""
+class BoundaryColorSettings:
+    """Color settings for a boundary object's two regions."""
     surface: RegionStyle = field(default_factory=RegionStyle)
     interior: RegionStyle = field(default_factory=RegionStyle)
 
@@ -121,14 +121,14 @@ class RenderCache:
         multiplier: float,
         supersample: float,
         base_rgb: Optional[np.ndarray] = None,
-        conductor_masks: Optional[list[np.ndarray]] = None,
+        boundary_masks: Optional[list[np.ndarray]] = None,
         interior_masks: Optional[list[np.ndarray]] = None,
         project_fingerprint: str = "",
         result_gpu: Optional[torch.Tensor] = None,
         ex_gpu: Optional[torch.Tensor] = None,
         ey_gpu: Optional[torch.Tensor] = None,
         lic_percentiles: Optional[tuple[float, float]] = None,
-        conductor_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
+        boundary_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
         interior_masks_gpu: Optional[list[Optional[torch.Tensor]]] = None,
     ):
         self.result = result  # Full resolution RenderResult
@@ -137,7 +137,7 @@ class RenderCache:
         self.base_rgb = base_rgb  # Cached RGB at full resolution
 
         # Masks at full render resolution (for region overlays and smear)
-        self.conductor_masks = conductor_masks
+        self.boundary_masks = boundary_masks
         self.interior_masks = interior_masks
 
         self.project_fingerprint = project_fingerprint
@@ -154,7 +154,7 @@ class RenderCache:
         self.lic_percentiles_clip_percent: float | None = 0.5 if lic_percentiles is not None else None  # Clip% used for cached percentiles
 
         # GPU mask tensors (cached to avoid repeated CPU→GPU transfers)
-        self.conductor_masks_gpu = conductor_masks_gpu
+        self.boundary_masks_gpu = boundary_masks_gpu
         self.interior_masks_gpu = interior_masks_gpu
 
 
@@ -167,7 +167,7 @@ class AppState:
     display_settings: DisplaySettings = field(default_factory=DisplaySettings)
 
     # Interaction state
-    selected_indices: set[int] = field(default_factory=set)  # Selected conductor indices
+    selected_indices: set[int] = field(default_factory=set)  # Selected boundary indices
     selected_region_type: str = "surface"  # "surface" or "interior"
     view_mode: str = "edit"  # "edit" or "render"
 
@@ -178,22 +178,22 @@ class AppState:
     # Cached outputs
     render_cache: Optional[RenderCache] = None
 
-    # Per-conductor color settings (keyed by conductor.id)
-    conductor_color_settings: dict[int, ConductorColorSettings] = field(default_factory=dict)
+    # Per-boundary color settings (keyed by boundary.id)
+    boundary_color_settings: dict[int, BoundaryColorSettings] = field(default_factory=dict)
 
     # Expression-based color configuration (None = use palette mode)
     # When set, overrides palette/brightness/contrast/gamma with OKLCH expressions
     color_config: Optional["ColorConfig"] = None
 
     def set_selected(self, idx: int) -> None:
-        """Replace selection with single conductor at index, or clear if invalid."""
+        """Replace selection with single boundary at index, or clear if invalid."""
         self.selected_indices.clear()
-        if 0 <= idx < len(self.project.conductors):
+        if 0 <= idx < len(self.project.boundary_objects):
             self.selected_indices.add(idx)
 
     def toggle_selected(self, idx: int) -> None:
-        """Toggle conductor in/out of selection (for shift-click)."""
-        if not (0 <= idx < len(self.project.conductors)):
+        """Toggle boundary in/out of selection (for shift-click)."""
+        if not (0 <= idx < len(self.project.boundary_objects)):
             return
         if idx in self.selected_indices:
             self.selected_indices.discard(idx)
@@ -204,19 +204,19 @@ class AppState:
         """Clear all selection."""
         self.selected_indices.clear()
 
-    def get_selected(self) -> Optional[Conductor]:
-        """Return selected conductor only if exactly one is selected."""
+    def get_selected(self) -> Optional[BoundaryObject]:
+        """Return selected boundary only if exactly one is selected."""
         if len(self.selected_indices) == 1:
             idx = next(iter(self.selected_indices))
-            if 0 <= idx < len(self.project.conductors):
-                return self.project.conductors[idx]
+            if 0 <= idx < len(self.project.boundary_objects):
+                return self.project.boundary_objects[idx]
         return None
 
     def get_single_selected_idx(self) -> int:
         """Return selected index if exactly one selected, else -1."""
         if len(self.selected_indices) == 1:
             idx = next(iter(self.selected_indices))
-            if 0 <= idx < len(self.project.conductors):
+            if 0 <= idx < len(self.project.boundary_objects):
                 return idx
         return -1
 
@@ -227,7 +227,7 @@ class AppState:
             self.render_cache.result_gpu = None
             self.render_cache.ex_gpu = None
             self.render_cache.ey_gpu = None
-            self.render_cache.conductor_masks_gpu = None
+            self.render_cache.boundary_masks_gpu = None
             self.render_cache.interior_masks_gpu = None
             # Release GPU memory back to system
             GPUContext.empty_cache()

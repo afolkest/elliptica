@@ -82,7 +82,7 @@ class RenderOrchestrator:
 
             # Keep masks at full render resolution (from RenderResult)
             # No downsampling - DearPyGUI will handle display scaling
-            conductor_masks = result.conductor_masks_canvas
+            boundary_masks = result.boundary_masks_canvas
             interior_masks = result.interior_masks_canvas
 
             # Precompute LIC percentiles (used for both smear normalization and postprocessing)
@@ -97,7 +97,7 @@ class RenderOrchestrator:
                 multiplier=settings_snapshot.multiplier,
                 supersample=settings_snapshot.supersample,
                 base_rgb=None,  # Will be built on-demand during postprocessing
-                conductor_masks=conductor_masks,
+                boundary_masks=boundary_masks,
                 interior_masks=interior_masks,
                 lic_percentiles=lic_percentiles,
             )
@@ -125,14 +125,14 @@ class RenderOrchestrator:
                             if isinstance(array, np.ndarray) and array.ndim == 2:
                                 cache.solution_gpu[name] = GPUContext.to_gpu(array)
 
-                    # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
-                    if conductor_masks is not None:
-                        cache.conductor_masks_gpu = []
-                        for mask in conductor_masks:
+                    # Upload boundary masks to GPU (avoids repeated CPU→GPU transfers on every display update)
+                    if boundary_masks is not None:
+                        cache.boundary_masks_gpu = []
+                        for mask in boundary_masks:
                             if mask is not None:
-                                cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
+                                cache.boundary_masks_gpu.append(GPUContext.to_gpu(mask))
                             else:
-                                cache.conductor_masks_gpu.append(None)
+                                cache.boundary_masks_gpu.append(None)
 
                     if interior_masks is not None:
                         cache.interior_masks_gpu = []

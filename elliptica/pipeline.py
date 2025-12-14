@@ -8,7 +8,7 @@ import time
 import os
 from elliptica.types import Project
 from elliptica.field_pde import compute_field_pde
-from elliptica.postprocess.masks import rasterize_conductor_masks
+from elliptica.postprocess.masks import rasterize_boundary_masks
 from elliptica.render import (
     compute_lic,
     downsample_lic,
@@ -33,8 +33,8 @@ class RenderResult:
     solve_scale: float = 1.0  # PDE solve resolution relative to render grid
     ex: np.ndarray | None = None  # Electric field X component (for anisotropic blur)
     ey: np.ndarray | None = None  # Electric field Y component (for anisotropic blur)
-    # Cached conductor masks at canvas resolution (saves redundant rasterization)
-    conductor_masks_canvas: list[np.ndarray] | None = None  # Surface masks
+    # Cached boundary masks at canvas resolution (saves redundant rasterization)
+    boundary_masks_canvas: list[np.ndarray] | None = None  # Surface masks
     interior_masks_canvas: list[np.ndarray] | None = None  # Interior masks
     # Solution dict from PDE solver (for noise correlation, multiple field extractions, etc.)
     solution: dict[str, np.ndarray] | None = None
@@ -154,9 +154,9 @@ def perform_render(
     t_solve_end = time.time()
     print(f"  PDE solve completed in {t_solve_end - t_solve_start:.2f}s")
 
-    # Generate conductor mask for LIC blocking if enabled
+    # Generate boundary mask for LIC blocking if enabled
     lic_mask = None
-    if use_mask and project.conductors:
+    if use_mask and project.boundary_objects:
         from elliptica.mask_utils import blur_mask
         from scipy.ndimage import zoom
 
@@ -177,18 +177,18 @@ def perform_render(
             scale_x = compute_w / domain_w if domain_w > 0 else 1.0
             scale_y = compute_h / domain_h if domain_h > 0 else 1.0
 
-            for conductor in project.conductors:
-                x = (conductor.position[0] + margin_physical) * scale_x
-                y = (conductor.position[1] + margin_physical) * scale_y
+            for boundary in project.boundary_objects:
+                x = (boundary.position[0] + margin_physical) * scale_x
+                y = (boundary.position[1] + margin_physical) * scale_y
 
                 # Scale and blur mask (same logic as field.py)
                 if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
-                    scaled_mask = zoom(conductor.mask, (scale_y, scale_x), order=0)
+                    scaled_mask = zoom(boundary.mask, (scale_y, scale_x), order=0)
                 else:
-                    scaled_mask = conductor.mask
+                    scaled_mask = boundary.mask
 
                 scale_factor = (scale_x + scale_y) / 2.0
-                scaled_sigma = conductor.edge_smooth_sigma * scale_factor
+                scaled_sigma = boundary.edge_smooth_sigma * scale_factor
                 scaled_mask = blur_mask(scaled_mask, scaled_sigma)
 
                 mask_h, mask_w = scaled_mask.shape
@@ -212,7 +212,7 @@ def perform_render(
             mask_img = (lic_mask.astype(np.uint8) * 255)
             Image.fromarray(mask_img).save(out_dir / "debug_lic_mask.png")
     else:
-        print(f"  LIC mask disabled (use_mask={use_mask}, conductors={len(project.conductors)})")
+        print(f"  LIC mask disabled (use_mask={use_mask}, boundaries={len(project.boundary_objects)})")
 
     num_passes = max(1, num_passes)
     min_compute = min(compute_w, compute_h)
@@ -256,13 +256,13 @@ def perform_render(
     ex_cropped = ex[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
     ey_cropped = ey[crop_y0:crop_y1, crop_x0:crop_x1].astype(np.float32, copy=True)
 
-    # Rasterize conductor masks at canvas resolution (do this once to avoid redundant rasterization)
+    # Rasterize boundary masks at canvas resolution (do this once to avoid redundant rasterization)
     # Pass domain_size so scale factors match the field solver exactly
-    conductor_masks_canvas = None
+    boundary_masks_canvas = None
     interior_masks_canvas = None
-    if project.conductors:
-        conductor_masks_canvas, interior_masks_canvas = rasterize_conductor_masks(
-            project.conductors,
+    if project.boundary_objects:
+        boundary_masks_canvas, interior_masks_canvas = rasterize_boundary_masks(
+            project.boundary_objects,
             lic_cropped.shape,
             margin_physical,
             scale,
@@ -284,7 +284,7 @@ def perform_render(
         solve_scale=solve_scale,
         ex=ex_cropped,
         ey=ey_cropped,
-        conductor_masks_canvas=conductor_masks_canvas,
+        boundary_masks_canvas=boundary_masks_canvas,
         interior_masks_canvas=interior_masks_canvas,
         solution=solution,  # Store the PDE solution dict
     )

@@ -4,15 +4,13 @@ import pytest
 pytest.skip("Legacy per-region compositor tests rely on removed CPU overlay API; skip", allow_module_level=True)
 
 import numpy as np
-from elliptica.types import Conductor
+from elliptica.types import BoundaryObject
 from elliptica.app.core import AppState
 from elliptica.app.actions import (
-    add_conductor,
+    add_boundary,
     set_region_style_enabled,
     set_region_palette,
     set_region_solid_color,
-    ensure_render,
-    ensure_base_rgb,
 )
 from elliptica.postprocess.color import apply_region_overlays
 

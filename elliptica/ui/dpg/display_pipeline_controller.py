@@ -93,10 +93,10 @@ class DisplayPipelineController:
                 'canvas_resolution': self.app.state.project.canvas_resolution,
             }
 
-            # Deep copy conductor_color_settings (mutable nested dict)
+            # Deep copy boundary_color_settings (mutable nested dict)
             from copy import deepcopy
-            conductor_color_settings_snapshot = deepcopy(self.app.state.conductor_color_settings)
-            conductors_snapshot = list(self.app.state.project.conductors)
+            boundary_color_settings_snapshot = deepcopy(self.app.state.boundary_color_settings)
+            boundaries_snapshot = list(self.app.state.project.boundary_objects)
             color_config_snapshot = self.app.state.color_config
 
             # Get cached percentiles if valid
@@ -109,10 +109,10 @@ class DisplayPipelineController:
             # References to GPU tensors (safe - they're not modified during postprocess)
             scalar_array = cache.result.array
             render_shape = cache.result.array.shape
-            conductor_masks = cache.conductor_masks
+            boundary_masks = cache.boundary_masks
             interior_masks = cache.interior_masks
             scalar_tensor = cache.result_gpu
-            conductor_masks_gpu = cache.conductor_masks_gpu
+            boundary_masks_gpu = cache.boundary_masks_gpu
             interior_masks_gpu = cache.interior_masks_gpu
             ex_tensor = cache.ex_gpu
             ey_tensor = cache.ey_gpu
@@ -150,10 +150,10 @@ class DisplayPipelineController:
             try:
                 final_rgb, used_percentiles = apply_full_postprocess_hybrid(
                     scalar_array=scalar_array,
-                    conductor_masks=conductor_masks,
+                    boundary_masks=boundary_masks,
                     interior_masks=interior_masks,
-                    conductor_color_settings=conductor_color_settings_snapshot,
-                    conductors=conductors_snapshot,
+                    boundary_color_settings=boundary_color_settings_snapshot,
+                    boundaries=boundaries_snapshot,
                     render_shape=render_shape,
                     canvas_resolution=settings_snapshot['canvas_resolution'],
                     clip_percent=settings_snapshot['clip_percent'],
@@ -165,7 +165,7 @@ class DisplayPipelineController:
                     lic_percentiles=lic_percentiles,
                     use_gpu=True,
                     scalar_tensor=scalar_tensor,
-                    conductor_masks_gpu=conductor_masks_gpu,
+                    boundary_masks_gpu=boundary_masks_gpu,
                     interior_masks_gpu=interior_masks_gpu,
                     color_config=color_config_snapshot,
                     ex_tensor=ex_tensor,

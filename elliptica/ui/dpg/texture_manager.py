@@ -54,7 +54,7 @@ def _rgb_array_to_texture_data(rgb: np.ndarray) -> Tuple[int, int, np.ndarray]:
 
 
 class TextureManager:
-    """Manages DearPyGui textures for conductor overlays and rendered images."""
+    """Manages DearPyGui textures for boundary overlays and rendered images."""
 
     def __init__(self, app: "EllipticaApp"):
         self.app = app
@@ -63,8 +63,8 @@ class TextureManager:
         self.palette_colormaps: Dict[str, int] = {}  # palette_name -> colormap_tag
         self.render_texture_id: Optional[int] = None
         self.render_texture_size: Optional[Tuple[int, int]] = None
-        self.conductor_textures: Dict[int, int] = {}  # conductor_idx -> texture_id
-        self.conductor_texture_shapes: Dict[int, Tuple[int, int]] = {}  # conductor_idx -> (height, width)
+        self.boundary_textures: Dict[int, int] = {}  # boundary_idx -> texture_id
+        self.boundary_texture_shapes: Dict[int, Tuple[int, int]] = {}  # boundary_idx -> (height, width)
 
     def create_registries(self) -> None:
         """Create texture and colormap registries in DPG."""
@@ -103,23 +103,23 @@ class TextureManager:
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
             self.palette_colormaps[palette_name] = tag
 
-    def ensure_conductor_texture(self, idx: int, mask: np.ndarray, conductor_colors: list) -> int:
-        """Create or update conductor texture, returns texture ID.
+    def ensure_boundary_texture(self, idx: int, mask: np.ndarray, boundary_colors: list) -> int:
+        """Create or update boundary texture, returns texture ID.
 
         Args:
-            idx: Conductor index
-            mask: Conductor mask array (height, width)
-            conductor_colors: List of RGBA colors for conductors
+            idx: Boundary index
+            mask: Boundary mask array (height, width)
+            boundary_colors: List of RGBA colors for boundaries
 
         Returns:
             DPG texture ID
         """
         assert dpg is not None and self.texture_registry_id is not None
 
-        tex_id = self.conductor_textures.get(idx)
+        tex_id = self.boundary_textures.get(idx)
         width = mask.shape[1]
         height = mask.shape[0]
-        existing_shape = self.conductor_texture_shapes.get(idx)
+        existing_shape = self.boundary_texture_shapes.get(idx)
 
         # Check if texture needs recreation (doesn't exist or size changed)
         if tex_id is not None:
@@ -128,16 +128,16 @@ class TextureManager:
                 if exists:
                     dpg.delete_item(tex_id)
                 tex_id = None
-                self.conductor_textures.pop(idx, None)
+                self.boundary_textures.pop(idx, None)
 
         # Only convert and upload if texture doesn't exist (avoids 45 GB/sec bandwidth waste)
         if tex_id is None:
             # Convert mask to RGBA texture data
-            rgba_flat = _mask_to_rgba(mask, conductor_colors[idx % len(conductor_colors)])
+            rgba_flat = _mask_to_rgba(mask, boundary_colors[idx % len(boundary_colors)])
             tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
-            self.conductor_textures[idx] = tex_id
+            self.boundary_textures[idx] = tex_id
 
-        self.conductor_texture_shapes[idx] = (height, width)
+        self.boundary_texture_shapes[idx] = (height, width)
         return tex_id
 
     def refresh_render_texture(self) -> None:
@@ -202,10 +202,10 @@ class TextureManager:
                 try:
                     final_rgb, used_percentiles = apply_full_postprocess_hybrid(
                         scalar_array=cache.result.array,  # Full resolution!
-                        conductor_masks=cache.conductor_masks,  # Full resolution!
+                        boundary_masks=cache.boundary_masks,  # Full resolution!
                         interior_masks=cache.interior_masks,  # Full resolution!
-                        conductor_color_settings=self.app.state.conductor_color_settings,
-                        conductors=self.app.state.project.conductors,
+                        boundary_color_settings=self.app.state.boundary_color_settings,
+                        boundaries=self.app.state.project.boundary_objects,
                         render_shape=cache.result.array.shape,  # Full resolution shape
                         canvas_resolution=self.app.state.project.canvas_resolution,
                         clip_percent=clip_percent,
@@ -217,7 +217,7 @@ class TextureManager:
                         lic_percentiles=lic_percentiles,
                         use_gpu=True,
                         scalar_tensor=cache.result_gpu,  # Use full-res GPU tensor if available
-                        conductor_masks_gpu=cache.conductor_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
+                        boundary_masks_gpu=cache.boundary_masks_gpu,  # Use cached GPU masks (no repeated transfers!)
                         interior_masks_gpu=cache.interior_masks_gpu,  # Use cached GPU masks
                         color_config=self.app.state.color_config,  # Expression-based coloring (if set)
                         ex_tensor=cache.ex_gpu,  # Field components for ColorConfig mag binding
@@ -280,12 +280,12 @@ class TextureManager:
         else:
             dpg.set_value(self.render_texture_id, data)
 
-    def clear_conductor_texture(self, idx: int) -> None:
-        """Clear cached conductor texture (forces recreation on next draw)."""
-        self.conductor_textures.pop(idx, None)
-        self.conductor_texture_shapes.pop(idx, None)
+    def clear_boundary_texture(self, idx: int) -> None:
+        """Clear cached boundary texture (forces recreation on next draw)."""
+        self.boundary_textures.pop(idx, None)
+        self.boundary_texture_shapes.pop(idx, None)
 
-    def clear_all_conductor_textures(self) -> None:
-        """Clear all conductor textures."""
-        self.conductor_textures.clear()
-        self.conductor_texture_shapes.clear()
+    def clear_all_boundary_textures(self) -> None:
+        """Clear all boundary textures."""
+        self.boundary_textures.clear()
+        self.boundary_texture_shapes.clear()

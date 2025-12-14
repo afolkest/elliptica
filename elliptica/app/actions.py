@@ -5,47 +5,47 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import zoom
 
-from elliptica.types import Conductor
-from elliptica.app.core import AppState, ConductorColorSettings
+from elliptica.types import BoundaryObject
+from elliptica.app.core import AppState, BoundaryColorSettings
 from elliptica.postprocess.masks import derive_interior
 from elliptica import defaults
 
-MAX_CONDUCTOR_DIM = 32768
+MAX_BOUNDARY_DIM = 32768
 
 
-def add_conductor(state: AppState, conductor: Conductor) -> None:
-    """Insert a new conductor and mark field/render dirty."""
+def add_boundary(state: AppState, boundary: BoundaryObject) -> None:
+    """Insert a new boundary object and mark field/render dirty."""
 
     # Assign unique ID
-    conductor.id = state.project.next_conductor_id
-    state.project.next_conductor_id += 1
+    boundary.id = state.project.next_boundary_id
+    state.project.next_boundary_id += 1
 
     # Auto-detect interior if not provided
-    if conductor.interior_mask is None:
-        interior = derive_interior(conductor.mask, thickness=0.1)
+    if boundary.interior_mask is None:
+        interior = derive_interior(boundary.mask, thickness=0.1)
         if interior is not None:
-            conductor.interior_mask = interior
+            boundary.interior_mask = interior
 
-    state.project.conductors.append(conductor)
-    state.set_selected(len(state.project.conductors) - 1)
+    state.project.boundary_objects.append(boundary)
+    state.set_selected(len(state.project.boundary_objects) - 1)
 
     # Initialize color settings
-    state.conductor_color_settings[conductor.id] = ConductorColorSettings()
+    state.boundary_color_settings[boundary.id] = BoundaryColorSettings()
 
     state.field_dirty = True
     state.render_dirty = True
 
 
-def remove_conductor(state: AppState, idx: int) -> None:
-    """Remove conductor by index."""
-    if 0 <= idx < len(state.project.conductors):
-        conductor = state.project.conductors[idx]
+def remove_boundary(state: AppState, idx: int) -> None:
+    """Remove boundary object by index."""
+    if 0 <= idx < len(state.project.boundary_objects):
+        boundary = state.project.boundary_objects[idx]
 
         # Clean up color settings
-        if conductor.id is not None:
-            state.conductor_color_settings.pop(conductor.id, None)
+        if boundary.id is not None:
+            state.boundary_color_settings.pop(boundary.id, None)
 
-        del state.project.conductors[idx]
+        del state.project.boundary_objects[idx]
 
         # Update selection: remove deleted index, shift higher indices down
         new_selection = set()
@@ -61,19 +61,19 @@ def remove_conductor(state: AppState, idx: int) -> None:
         state.render_dirty = True
 
 
-def move_conductor(state: AppState, idx: int, dx: float, dy: float) -> None:
-    """Translate conductor by delta."""
-    if 0 <= idx < len(state.project.conductors):
-        cond = state.project.conductors[idx]
-        cond.position = (cond.position[0] + dx, cond.position[1] + dy)
+def move_boundary(state: AppState, idx: int, dx: float, dy: float) -> None:
+    """Translate boundary object by delta."""
+    if 0 <= idx < len(state.project.boundary_objects):
+        boundary = state.project.boundary_objects[idx]
+        boundary.position = (boundary.position[0] + dx, boundary.position[1] + dy)
         state.field_dirty = True
         state.render_dirty = True
 
 
-def set_conductor_voltage(state: AppState, idx: int, voltage: float) -> None:
-    """Assign voltage to conductor."""
-    if 0 <= idx < len(state.project.conductors):
-        state.project.conductors[idx].voltage = voltage
+def set_boundary_voltage(state: AppState, idx: int, voltage: float) -> None:
+    """Assign voltage to boundary object."""
+    if 0 <= idx < len(state.project.boundary_objects):
+        state.project.boundary_objects[idx].voltage = voltage
         state.field_dirty = True
         state.render_dirty = True
 
@@ -151,41 +151,41 @@ def set_solve_scale(state: AppState, scale: float) -> None:
         state.render_dirty = True
 
 
-def scale_conductor(state: AppState, idx: int, scale_delta: float) -> bool:
-    """Scale a conductor mask by a delta factor around its center.
+def scale_boundary(state: AppState, idx: int, scale_delta: float) -> bool:
+    """Scale a boundary mask by a delta factor around its center.
 
     Args:
         state: Application state
-        idx: Conductor index
+        idx: Boundary object index
         scale_delta: Multiplicative factor (e.g., 1.1 for 10% larger, 0.9 for 10% smaller)
     """
-    if not (0 <= idx < len(state.project.conductors)):
+    if not (0 <= idx < len(state.project.boundary_objects)):
         return False
     scale_delta = float(scale_delta)
     if not np.isfinite(scale_delta) or scale_delta <= 0.0:
         return False
 
-    conductor = state.project.conductors[idx]
+    boundary = state.project.boundary_objects[idx]
 
     # Store original on first scale
-    if conductor.original_mask is None:
-        conductor.original_mask = conductor.mask.copy()
-        if conductor.interior_mask is not None:
-            conductor.original_interior_mask = conductor.interior_mask.copy()
+    if boundary.original_mask is None:
+        boundary.original_mask = boundary.mask.copy()
+        if boundary.interior_mask is not None:
+            boundary.original_interior_mask = boundary.interior_mask.copy()
 
     # Calculate new cumulative scale factor
-    new_scale_factor = conductor.scale_factor * scale_delta
+    new_scale_factor = boundary.scale_factor * scale_delta
 
     # Clamp to reasonable range
     if new_scale_factor < 0.01 or new_scale_factor > 100.0:
         return False
 
     # Always scale from original to preserve quality
-    source_mask = conductor.original_mask
+    source_mask = boundary.original_mask
     if source_mask.size == 0:
         return False
 
-    old_h, old_w = conductor.mask.shape
+    old_h, old_w = boundary.mask.shape
     orig_h, orig_w = source_mask.shape
     new_h = max(1, int(round(orig_h * new_scale_factor)))
     new_w = max(1, int(round(orig_w * new_scale_factor)))
@@ -193,7 +193,7 @@ def scale_conductor(state: AppState, idx: int, scale_delta: float) -> bool:
     if new_h == old_h and new_w == old_w:
         return False
 
-    if new_h > MAX_CONDUCTOR_DIM or new_w > MAX_CONDUCTOR_DIM:
+    if new_h > MAX_BOUNDARY_DIM or new_w > MAX_BOUNDARY_DIM:
         return False
 
     scale_y = new_h / orig_h
@@ -202,16 +202,16 @@ def scale_conductor(state: AppState, idx: int, scale_delta: float) -> bool:
     scaled_mask = zoom(source_mask, (scale_y, scale_x), order=1)
     scaled_mask = np.clip(scaled_mask, 0.0, 1.0).astype(np.float32)
 
-    if conductor.original_interior_mask is not None:
-        scaled_interior = zoom(conductor.original_interior_mask, (scale_y, scale_x), order=1)
-        conductor.interior_mask = np.clip(scaled_interior, 0.0, 1.0).astype(np.float32)
+    if boundary.original_interior_mask is not None:
+        scaled_interior = zoom(boundary.original_interior_mask, (scale_y, scale_x), order=1)
+        boundary.interior_mask = np.clip(scaled_interior, 0.0, 1.0).astype(np.float32)
 
-    center_x = conductor.position[0] + old_w / 2.0
-    center_y = conductor.position[1] + old_h / 2.0
+    center_x = boundary.position[0] + old_w / 2.0
+    center_y = boundary.position[1] + old_h / 2.0
 
-    conductor.mask = scaled_mask
-    conductor.scale_factor = new_scale_factor
-    conductor.position = (
+    boundary.mask = scaled_mask
+    boundary.scale_factor = new_scale_factor
+    boundary.position = (
         center_x - new_w / 2.0,
         center_y - new_h / 2.0,
     )
@@ -235,20 +235,20 @@ def set_palette(state: AppState, palette: str) -> None:
         state.invalidate_base_rgb()
 
 
-def set_region_style_enabled(state: AppState, conductor_id: int, region: str, enabled: bool) -> bool:
+def set_region_style_enabled(state: AppState, boundary_id: int, region: str, enabled: bool) -> bool:
     """Toggle custom colorization for a region.
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         enabled: Enable/disable custom colorization
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_style_enabled: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_style_enabled: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":
@@ -258,20 +258,20 @@ def set_region_style_enabled(state: AppState, conductor_id: int, region: str, en
     return True
 
 
-def set_region_palette(state: AppState, conductor_id: int, region: str, palette: str) -> bool:
+def set_region_palette(state: AppState, boundary_id: int, region: str, palette: str) -> bool:
     """Set palette for region (implies use_palette=True and enabled=True).
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         palette: Palette name
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_palette: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_palette: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":
@@ -285,20 +285,20 @@ def set_region_palette(state: AppState, conductor_id: int, region: str, palette:
     return True
 
 
-def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb: tuple[float, float, float]) -> bool:
+def set_region_solid_color(state: AppState, boundary_id: int, region: str, rgb: tuple[float, float, float]) -> bool:
     """Set solid color for region (implies use_palette=False and enabled=True).
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         rgb: RGB tuple in [0, 1]
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_solid_color: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_solid_color: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":
@@ -312,20 +312,20 @@ def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb:
     return True
 
 
-def set_region_brightness(state: AppState, conductor_id: int, region: str, brightness: float | None) -> bool:
+def set_region_brightness(state: AppState, boundary_id: int, region: str, brightness: float | None) -> bool:
     """Set per-region brightness override (None = inherit from global).
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         brightness: Brightness value, or None to inherit from global
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_brightness: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_brightness: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":
@@ -335,20 +335,20 @@ def set_region_brightness(state: AppState, conductor_id: int, region: str, brigh
     return True
 
 
-def set_region_contrast(state: AppState, conductor_id: int, region: str, contrast: float | None) -> bool:
+def set_region_contrast(state: AppState, boundary_id: int, region: str, contrast: float | None) -> bool:
     """Set per-region contrast override (None = inherit from global).
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         contrast: Contrast value, or None to inherit from global
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_contrast: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_contrast: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":
@@ -358,20 +358,20 @@ def set_region_contrast(state: AppState, conductor_id: int, region: str, contras
     return True
 
 
-def set_region_gamma(state: AppState, conductor_id: int, region: str, gamma: float | None) -> bool:
+def set_region_gamma(state: AppState, boundary_id: int, region: str, gamma: float | None) -> bool:
     """Set per-region gamma override (None = inherit from global).
 
     Args:
-        conductor_id: Conductor ID
+        boundary_id: Boundary object ID
         region: "surface" or "interior"
         gamma: Gamma value, or None to inherit from global
 
     Returns:
-        True if successful, False if conductor_color_settings missing for this conductor
+        True if successful, False if boundary_color_settings missing for this boundary
     """
-    settings = state.conductor_color_settings.get(conductor_id)
+    settings = state.boundary_color_settings.get(boundary_id)
     if settings is None:
-        print(f"⚠️  set_region_gamma: no settings for conductor {conductor_id}")
+        print(f"⚠️  set_region_gamma: no settings for boundary {boundary_id}")
         return False
 
     if region == "surface":

@@ -9,7 +9,7 @@ from elliptica.poisson import DIRICHLET
 
 @dataclass
 class BoundaryObject:
-    """Generic boundary object for any PDE (replaces Conductor)."""
+    """Generic boundary object for any PDE."""
     mask: np.ndarray
     params: dict[str, float] = field(default_factory=dict)  # Generic parameters
     position: tuple[float, float] = (0.0, 0.0)
@@ -63,40 +63,34 @@ class BoundaryObject:
         self.voltage = v
 
 
-# Legacy alias for compatibility
-Conductor = BoundaryObject
-
-
-def clone_conductor(conductor: "Conductor", preserve_id: bool = True) -> "Conductor":
-    """Deep-copy a conductor with all its data.
+def clone_boundary_object(boundary: BoundaryObject, preserve_id: bool = True) -> BoundaryObject:
+    """Deep-copy a boundary object with all its data.
 
     Args:
-        conductor: The conductor to clone
+        boundary: The boundary object to clone
         preserve_id: If True, preserve the original id (for rendering snapshots).
                      If False, set id=None so a new id is assigned on add (for clipboard paste).
 
     Returns:
-        A deep copy of the conductor
+        A deep copy of the boundary object
     """
-    interior = conductor.interior_mask.copy() if conductor.interior_mask is not None else None
-    original = conductor.original_mask.copy() if conductor.original_mask is not None else None
-    original_interior = conductor.original_interior_mask.copy() if conductor.original_interior_mask is not None else None
+    interior = boundary.interior_mask.copy() if boundary.interior_mask is not None else None
+    original = boundary.original_mask.copy() if boundary.original_mask is not None else None
+    original_interior = boundary.original_interior_mask.copy() if boundary.original_interior_mask is not None else None
 
-    return Conductor(
-        mask=conductor.mask.copy(),
-        params=conductor.params.copy(),
-        position=conductor.position,
+    return BoundaryObject(
+        mask=boundary.mask.copy(),
+        params=boundary.params.copy(),
+        position=boundary.position,
         interior_mask=interior,
         original_mask=original,
         original_interior_mask=original_interior,
-        scale_factor=conductor.scale_factor,
-        edge_smooth_sigma=conductor.edge_smooth_sigma,
-        smear_enabled=conductor.smear_enabled,
-        smear_sigma=conductor.smear_sigma,
-        id=conductor.id if preserve_id else None,
+        scale_factor=boundary.scale_factor,
+        edge_smooth_sigma=boundary.edge_smooth_sigma,
+        smear_enabled=boundary.smear_enabled,
+        smear_sigma=boundary.smear_sigma,
+        id=boundary.id if preserve_id else None,
     )
-
-
 
 
 
@@ -109,11 +103,11 @@ class RenderInfo:
 
 @dataclass
 class Project:
-    conductors: list[Conductor] = field(default_factory=list)
+    boundary_objects: list[BoundaryObject] = field(default_factory=list)
     canvas_resolution: tuple[int, int] = defaults.DEFAULT_CANVAS_RESOLUTION
     streamlength_factor: float = defaults.DEFAULT_STREAMLENGTH_FACTOR
     renders: list[RenderInfo] = field(default_factory=list)
-    next_conductor_id: int = 0  # Incremental counter for conductor IDs
+    next_boundary_id: int = 0  # Incremental counter for boundary object IDs
     # Boundary conditions for Poisson solver (DIRICHLET=0 or NEUMANN=1)
     boundary_top: int = DIRICHLET
     boundary_bottom: int = DIRICHLET
@@ -124,17 +118,6 @@ class Project:
     pde_type: str = "poisson"  # Active PDE type
     pde_params: dict = field(default_factory=dict)  # PDE-specific parameters
     pde_bc: dict = field(default_factory=dict)  # Per-PDE boundary condition values
-
-    # === Compatibility accessors ===
-    @property
-    def boundary_objects(self) -> list[BoundaryObject]:
-        """Generic accessor for boundary objects (same as conductors)."""
-        return self.conductors
-
-    @boundary_objects.setter
-    def boundary_objects(self, objs: list[BoundaryObject]) -> None:
-        """Generic setter for boundary objects."""
-        self.conductors = objs
 
     @property
     def shape(self) -> tuple[int, int]:

@@ -11,7 +11,7 @@ ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "LineIntegralConvolutions" / "src"))
 
-from elliptica.types import Project, Conductor
+from elliptica.types import Project, BoundaryObject
 from elliptica.field_pde import compute_field_pde
 from elliptica.render import (
     compute_lic,
@@ -28,8 +28,8 @@ ASSET = ROOT / "assets" / "masks" / "disciples_shell.png"
 def prepare_project(mask: np.ndarray) -> Project:
     h, w = mask.shape
     project = Project(canvas_resolution=(w, h))
-    conductor = Conductor(mask=mask, voltage=1.0, position=(0.0, 0.0))
-    project.conductors.append(conductor)
+    boundary = BoundaryObject(mask=mask, voltage=1.0, position=(0.0, 0.0))
+    project.boundary_objects.append(boundary)
     return project
 
 

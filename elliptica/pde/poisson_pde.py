@@ -11,7 +11,7 @@ from .base import PDEDefinition, BoundaryParameter, BCField
 
 
 # Constants for inner boundary BC types
-INNER_DIRICHLET = 0  # Fixed potential (default conductor behavior)
+INNER_DIRICHLET = 0  # Fixed potential (default boundary behavior)
 INNER_NEUMANN = 1    # Specified normal flux (∂φ/∂n = g)
 
 
@@ -178,7 +178,7 @@ POISSON_PDE = PDEDefinition(
             default=0.0,
             min_value=-1.0,
             max_value=1.0,
-            description="Electric potential of the conductor",
+            description="Electric potential of the boundary",
             visible_when={"bc_type": INNER_DIRICHLET},
         ),
         BCField(

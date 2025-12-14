@@ -14,8 +14,8 @@ from io import BytesIO
 import numpy as np
 from PIL import Image
 
-from elliptica.app.core import AppState, RenderSettings, DisplaySettings, ConductorColorSettings, RegionStyle, RenderCache
-from elliptica.types import Project, Conductor
+from elliptica.app.core import AppState, RenderSettings, DisplaySettings, BoundaryColorSettings, RegionStyle, RenderCache
+from elliptica.types import Project, BoundaryObject
 from elliptica.pipeline import RenderResult
 from elliptica import defaults
 
@@ -56,7 +56,7 @@ def save_project(state: AppState, filepath: str) -> None:
     # Create ZIP archive
     with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
         # Save each boundary object and its masks
-        for i, boundary in enumerate(state.project.conductors):
+        for i, boundary in enumerate(state.project.boundary_objects):
             boundary_meta = _boundary_object_to_dict(boundary, i)
             metadata['boundary_objects'].append(boundary_meta)
 
@@ -70,7 +70,7 @@ def save_project(state: AppState, filepath: str) -> None:
                 _save_mask_to_zip(zf, boundary.original_interior_mask, boundary_meta['masks']['original_interior_mask']['file'])
 
         # Save boundary color settings
-        for boundary_id, color_settings in state.conductor_color_settings.items():
+        for boundary_id, color_settings in state.boundary_color_settings.items():
             metadata['boundary_color_settings'][str(boundary_id)] = _color_settings_to_dict(color_settings)
 
         # Write metadata JSON
@@ -132,7 +132,7 @@ def load_project(filepath: str) -> AppState:
                             raise ProjectLoadError(f"Corrupt mask file {mask_info['file']}: {e}")
 
                 boundary = _dict_to_boundary_object(boundary_meta, masks)
-                project.conductors.append(boundary)
+                project.boundary_objects.append(boundary)
 
             # Reconstruct state
             state = AppState(
@@ -144,7 +144,7 @@ def load_project(filepath: str) -> AppState:
             # Load boundary color settings
             for boundary_id_str, color_settings_dict in metadata.get('boundary_color_settings', {}).items():
                 boundary_id = int(boundary_id_str)
-                state.conductor_color_settings[boundary_id] = _dict_to_color_settings(color_settings_dict)
+                state.boundary_color_settings[boundary_id] = _dict_to_color_settings(color_settings_dict)
 
             return state
 
@@ -161,7 +161,7 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
     return {
         'canvas_resolution': list(project.canvas_resolution),
         'streamlength_factor': project.streamlength_factor,
-        'next_boundary_id': project.next_conductor_id,
+        'next_boundary_id': project.next_boundary_id,
         'boundary_top': project.boundary_top,
         'boundary_bottom': project.boundary_bottom,
         'boundary_left': project.boundary_left,
@@ -175,10 +175,10 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
 def _dict_to_project(data: dict[str, Any]) -> Project:
     """Reconstruct Project from dict."""
     return Project(
-        conductors=[],  # Will be populated separately
+        boundary_objects=[],  # Will be populated separately
         canvas_resolution=tuple(data['canvas_resolution']),
         streamlength_factor=data['streamlength_factor'],
-        next_conductor_id=data['next_boundary_id'],
+        next_boundary_id=data['next_boundary_id'],
         boundary_top=data['boundary_top'],
         boundary_bottom=data['boundary_bottom'],
         boundary_left=data['boundary_left'],
@@ -189,7 +189,7 @@ def _dict_to_project(data: dict[str, Any]) -> Project:
     )
 
 
-def _boundary_object_to_dict(boundary: Conductor, index: int) -> dict[str, Any]:
+def _boundary_object_to_dict(boundary: BoundaryObject, index: int) -> dict[str, Any]:
     """Convert BoundaryObject to JSON-serializable dict (without numpy arrays)."""
     mask_h, mask_w = boundary.mask.shape
 
@@ -241,9 +241,9 @@ def _boundary_object_to_dict(boundary: Conductor, index: int) -> dict[str, Any]:
     }
 
 
-def _dict_to_boundary_object(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Conductor:
+def _dict_to_boundary_object(data: dict[str, Any], masks: dict[str, np.ndarray]) -> BoundaryObject:
     """Reconstruct BoundaryObject from dict + loaded masks."""
-    return Conductor(
+    return BoundaryObject(
         mask=masks['mask'],
         params=data['params'],
         position=tuple(data['position']),
@@ -320,17 +320,17 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
     )
 
 
-def _color_settings_to_dict(settings: ConductorColorSettings) -> dict[str, Any]:
-    """Convert ConductorColorSettings to dict."""
+def _color_settings_to_dict(settings: BoundaryColorSettings) -> dict[str, Any]:
+    """Convert BoundaryColorSettings to dict."""
     return {
         'surface': _region_style_to_dict(settings.surface),
         'interior': _region_style_to_dict(settings.interior),
     }
 
 
-def _dict_to_color_settings(data: dict[str, Any]) -> ConductorColorSettings:
-    """Reconstruct ConductorColorSettings from dict."""
-    return ConductorColorSettings(
+def _dict_to_color_settings(data: dict[str, Any]) -> BoundaryColorSettings:
+    """Reconstruct BoundaryColorSettings from dict."""
+    return BoundaryColorSettings(
         surface=_dict_to_region_style(data['surface']),
         interior=_dict_to_region_style(data['interior']),
     )
@@ -413,7 +413,7 @@ def _load_mask_from_zip(zf: zipfile.ZipFile, filename: str) -> np.ndarray:
 def compute_project_fingerprint(project: Project) -> str:
     """Compute hash of all properties that affect rendering.
 
-    This fingerprint changes whenever conductors are moved, voltages change,
+    This fingerprint changes whenever boundary objects are moved, voltages change,
     canvas is resized, or any other render-affecting property changes.
 
     Returns:
@@ -428,17 +428,17 @@ def compute_project_fingerprint(project: Project) -> str:
         f"pde_bc:{getattr(project, 'pde_bc', {})}",
     ]
 
-    # Per-conductor state (order matters!)
-    for i, c in enumerate(project.conductors):
+    # Per-boundary state (order matters!)
+    for i, b in enumerate(project.boundary_objects):
         # Scalar properties
-        parts.append(f"c{i}:v={c.voltage}")
-        parts.append(f"c{i}:pos={c.position[0]:.2f},{c.position[1]:.2f}")
-        parts.append(f"c{i}:scale={c.scale_factor}")
-        parts.append(f"c{i}:edge_smooth={c.edge_smooth_sigma}")
+        parts.append(f"b{i}:v={b.voltage}")
+        parts.append(f"b{i}:pos={b.position[0]:.2f},{b.position[1]:.2f}")
+        parts.append(f"b{i}:scale={b.scale_factor}")
+        parts.append(f"b{i}:edge_smooth={b.edge_smooth_sigma}")
 
         # Mask data hash (expensive but necessary)
-        mask_hash = hashlib.md5(c.mask.tobytes()).hexdigest()[:8]
-        parts.append(f"c{i}:mask={mask_hash}")
+        mask_hash = hashlib.md5(b.mask.tobytes()).hexdigest()[:8]
+        parts.append(f"b{i}:mask={mask_hash}")
 
     # Combine and hash
     combined = "|".join(parts)

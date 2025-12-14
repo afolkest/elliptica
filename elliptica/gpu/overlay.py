@@ -100,10 +100,10 @@ def fill_region_gpu(
 def apply_region_overlays_gpu(
     base_rgb: torch.Tensor,
     scalar_tensor: torch.Tensor,
-    conductor_masks: list[torch.Tensor],
+    boundary_masks: list[torch.Tensor],
     interior_masks: list[torch.Tensor],
-    conductor_color_settings: dict,
-    conductors: list,
+    boundary_color_settings: dict,
+    boundaries: list,
     clip_percent: float,
     brightness: float,
     contrast: float,
@@ -120,10 +120,10 @@ def apply_region_overlays_gpu(
     Args:
         base_rgb: Base RGB tensor (H, W, 3) in [0, 1] on GPU
         scalar_tensor: Original scalar LIC tensor (H, W) on GPU
-        conductor_masks: List of surface mask tensors on GPU
+        boundary_masks: List of surface mask tensors on GPU
         interior_masks: List of interior mask tensors on GPU
-        conductor_color_settings: dict[conductor_id -> ConductorColorSettings]
-        conductors: List of Conductor objects
+        boundary_color_settings: dict[boundary_id -> BoundaryColorSettings]
+        boundaries: List of BoundaryObject objects
         clip_percent: Percentile clipping for colorization
         brightness: Brightness adjustment
         contrast: Contrast adjustment
@@ -145,10 +145,10 @@ def apply_region_overlays_gpu(
 
     # Collect unique parameter combinations needed
     unique_param_sets = set()
-    for conductor in conductors:
-        if conductor.id is None:
+    for boundary in boundaries:
+        if boundary.id is None:
             continue
-        settings = conductor_color_settings.get(conductor.id)
+        settings = boundary_color_settings.get(boundary.id)
         if settings is None:
             continue
 
@@ -189,11 +189,11 @@ def apply_region_overlays_gpu(
         )
 
     # Blend each region using cached palette RGB
-    for idx, conductor in enumerate(conductors):
-        if conductor.id is None:
+    for idx, boundary in enumerate(boundaries):
+        if boundary.id is None:
             continue
 
-        settings = conductor_color_settings.get(conductor.id)
+        settings = boundary_color_settings.get(boundary.id)
         if settings is None:
             continue
 
@@ -202,7 +202,7 @@ def apply_region_overlays_gpu(
             mask_soft = interior_masks[idx]
             if torch.any(mask_soft > 0):
                 # Use soft mask for alpha blending (no threshold) to avoid gaps
-                # between smoothed conductor edges and hard interior edges
+                # between smoothed boundary edges and hard interior edges
                 mask = mask_soft
 
                 # Check if this region has a custom lightness expression
@@ -236,8 +236,8 @@ def apply_region_overlays_gpu(
                     result = blend_region_gpu(result, region_rgb, mask)
 
         # Apply surface region (upper layer)
-        if idx < len(conductor_masks) and conductor_masks[idx] is not None:
-            mask_soft = conductor_masks[idx]
+        if idx < len(boundary_masks) and boundary_masks[idx] is not None:
+            mask_soft = boundary_masks[idx]
             if torch.any(mask_soft > 0):
                 # Use soft mask for alpha blending - creates smooth antialiased edges
                 mask = mask_soft

@@ -39,13 +39,13 @@ def compute_mask_bbox_cpu(mask: np.ndarray, pad: int, max_h: int, max_w: int) ->
     return (y_min_pad, y_max_pad, x_min_pad, x_max_pad)
 
 
-def _has_any_smear_enabled(conductor_color_settings: dict | None, conductors: list) -> bool:
+def _has_any_smear_enabled(boundary_color_settings: dict | None, boundaries: list) -> bool:
     """Check if any region has smear enabled."""
-    if conductor_color_settings is None:
+    if boundary_color_settings is None:
         return False
-    for conductor in conductors:
-        if conductor.id in conductor_color_settings:
-            settings = conductor_color_settings[conductor.id]
+    for boundary in boundaries:
+        if boundary.id in boundary_color_settings:
+            settings = boundary_color_settings[boundary.id]
             if settings.surface.smear_enabled or settings.interior.smear_enabled:
                 return True
     return False
@@ -173,15 +173,15 @@ def _apply_smear_to_region(
 def apply_region_smear_gpu(
     rgb_tensor: torch.Tensor,
     lic_gray_tensor: torch.Tensor,
-    conductor_masks: list[np.ndarray] | None,
+    boundary_masks: list[np.ndarray] | None,
     interior_masks: list[np.ndarray] | None,
-    conductors: list,
+    boundaries: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
     lut_tensor: torch.Tensor | None,
     lic_percentiles: Tuple[float, float] | None = None,
-    conductor_color_settings: dict | None = None,
-    conductor_masks_gpu: list[torch.Tensor | None] | None = None,
+    boundary_color_settings: dict | None = None,
+    boundary_masks_gpu: list[torch.Tensor | None] | None = None,
     interior_masks_gpu: list[torch.Tensor | None] | None = None,
     brightness: float = 0.0,
     contrast: float = 1.0,
@@ -193,20 +193,20 @@ def apply_region_smear_gpu(
 ) -> torch.Tensor:
     """Apply smear effect to regions (both surfaces and interiors) on GPU.
 
-    Smear is now a per-region effect stored in conductor_color_settings.
+    Smear is now a per-region effect stored in boundary_color_settings.
 
     Args:
         rgb_tensor: Current RGB image (H, W, 3) float32 in [0, 1] on GPU
         lic_gray_tensor: Original LIC grayscale (H, W) float32 on GPU
-        conductor_masks: List of conductor surface masks (CPU arrays)
+        boundary_masks: List of boundary surface masks (CPU arrays)
         interior_masks: List of interior masks (CPU arrays)
-        conductors: List of Conductor objects
+        boundaries: List of BoundaryObject objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
         lut_tensor: Color palette LUT on GPU, or None for grayscale
         lic_percentiles: Precomputed (vmin, vmax) for normalization
-        conductor_color_settings: Per-conductor color settings dict (contains smear settings)
-        conductor_masks_gpu: Optional pre-uploaded surface masks on GPU
+        boundary_color_settings: Per-boundary color settings dict (contains smear settings)
+        boundary_masks_gpu: Optional pre-uploaded surface masks on GPU
         interior_masks_gpu: Optional pre-uploaded interior masks on GPU
         brightness: Global brightness adjustment
         contrast: Global contrast multiplier
@@ -218,14 +218,14 @@ def apply_region_smear_gpu(
     Returns:
         Modified RGB tensor (H, W, 3) float32 in [0, 1] on GPU
     """
-    if conductor_color_settings is None:
+    if boundary_color_settings is None:
         return rgb_tensor
 
     out = rgb_tensor.clone()
     render_h, render_w = render_shape
 
     # Precompute percentiles if needed
-    if lic_percentiles is None and _has_any_smear_enabled(conductor_color_settings, conductors):
+    if lic_percentiles is None and _has_any_smear_enabled(boundary_color_settings, boundaries):
         flat = lic_gray_tensor.flatten()
         quantiles = torch.tensor([0.005, 0.995], device=lic_gray_tensor.device, dtype=lic_gray_tensor.dtype)
         vmin_tensor, vmax_tensor = quantile_safe(flat, quantiles)
@@ -235,17 +235,17 @@ def apply_region_smear_gpu(
     else:
         vmin, vmax = 0.0, 1.0
 
-    for idx, conductor in enumerate(conductors):
-        if conductor.id not in conductor_color_settings:
+    for idx, boundary in enumerate(boundaries):
+        if boundary.id not in boundary_color_settings:
             continue
 
-        settings = conductor_color_settings[conductor.id]
+        settings = boundary_color_settings[boundary.id]
 
         # Apply smear to surface if enabled
         if settings.surface.smear_enabled:
-            if conductor_masks is not None and idx < len(conductor_masks) and conductor_masks[idx] is not None:
-                mask_cpu = conductor_masks[idx]
-                mask_gpu = conductor_masks_gpu[idx] if conductor_masks_gpu and idx < len(conductor_masks_gpu) else None
+            if boundary_masks is not None and idx < len(boundary_masks) and boundary_masks[idx] is not None:
+                mask_cpu = boundary_masks[idx]
+                mask_gpu = boundary_masks_gpu[idx] if boundary_masks_gpu and idx < len(boundary_masks_gpu) else None
                 out = _apply_smear_to_region(
                     out, lic_gray_tensor, mask_cpu, mask_gpu, settings.surface,
                     render_shape, vmin, vmax, lut_tensor, brightness, contrast, gamma,
@@ -266,8 +266,4 @@ def apply_region_smear_gpu(
     return torch.clamp(out, 0.0, 1.0)
 
 
-# Legacy alias for compatibility
-apply_conductor_smear_gpu = apply_region_smear_gpu
-
-
-__all__ = ['apply_region_smear_gpu', 'apply_conductor_smear_gpu']
+__all__ = ['apply_region_smear_gpu']

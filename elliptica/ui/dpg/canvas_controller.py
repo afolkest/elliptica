@@ -7,7 +7,7 @@ import math
 
 from elliptica import defaults
 from elliptica.app import actions
-from elliptica.types import Conductor, clone_conductor
+from elliptica.types import BoundaryObject, clone_boundary_object
 
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
@@ -21,17 +21,17 @@ except ImportError:
 MIN_HIT_TARGET = 10  # Minimum clickable area in pixels
 
 
-def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
-    """Test whether canvas coordinate lands inside conductor hit area.
+def _point_in_boundary(boundary: BoundaryObject, x: float, y: float) -> bool:
+    """Test whether canvas coordinate lands inside boundary hit area.
 
-    For small conductors, expands bounding box to MIN_HIT_TARGET for easier selection.
-    For larger conductors, uses pixel-perfect mask testing.
+    For small boundaries, expands bounding box to MIN_HIT_TARGET for easier selection.
+    For larger boundaries, uses pixel-perfect mask testing.
     """
-    cx, cy = conductor.position
-    mask = conductor.mask
+    cx, cy = boundary.position
+    mask = boundary.mask
     h, w = mask.shape
 
-    # Calculate expanded bounds for small conductors
+    # Calculate expanded bounds for small boundaries
     expand_x = max(0, (MIN_HIT_TARGET - w) / 2)
     expand_y = max(0, (MIN_HIT_TARGET - h) / 2)
 
@@ -41,11 +41,11 @@ def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
     if y < cy - expand_y or y >= cy + h + expand_y:
         return False
 
-    # For small conductors, bounding box hit is enough
+    # For small boundaries, bounding box hit is enough
     if w <= MIN_HIT_TARGET or h <= MIN_HIT_TARGET:
         return True
 
-    # For larger conductors, do pixel-perfect test
+    # For larger boundaries, do pixel-perfect test
     local_x = int(round(x - cx))
     local_y = int(round(y - cy))
     if local_x < 0 or local_y < 0:
@@ -56,7 +56,7 @@ def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
 
 
 class CanvasController:
-    """Handles canvas mouse/keyboard input, hit detection, and conductor manipulation."""
+    """Handles canvas mouse/keyboard input, hit detection, and boundary manipulation."""
 
     def __init__(self, app: "EllipticaApp"):
         self.app = app
@@ -79,7 +79,7 @@ class CanvasController:
         self.shift_down: bool = False
 
         # Clipboard (list for multi-select copy)
-        self.clipboard_conductors: list[Conductor] = []
+        self.clipboard_boundaries: list[BoundaryObject] = []
 
     def on_mouse_wheel(self, sender, app_data) -> None:
         """Capture mouse wheel delta from DPG handler."""
@@ -111,27 +111,27 @@ class CanvasController:
         canvas_y = screen_y / self.app.display_scale if self.app.display_scale > 0 else screen_y
         return canvas_x, canvas_y
 
-    def find_hit_conductor(self, x: float, y: float) -> int:
-        """Find which conductor (if any) is at canvas coordinates. Returns index or -1."""
+    def find_hit_boundary(self, x: float, y: float) -> int:
+        """Find which boundary (if any) is at canvas coordinates. Returns index or -1."""
         with self.app.state_lock:
-            conductors = self.app.state.project.conductors
-            for idx in reversed(range(len(conductors))):
-                if _point_in_conductor(conductors[idx], x, y):
+            boundaries = self.app.state.project.boundary_objects
+            for idx in reversed(range(len(boundaries))):
+                if _point_in_boundary(boundaries[idx], x, y):
                     return idx
         return -1
 
-    def find_conductors_in_box(self, x1: float, y1: float, x2: float, y2: float) -> set[int]:
-        """Find all conductors with actual mask pixels inside selection box."""
+    def find_boundaries_in_box(self, x1: float, y1: float, x2: float, y2: float) -> set[int]:
+        """Find all boundaries with actual mask pixels inside selection box."""
         # Normalize box coordinates
         min_x, max_x = min(x1, x2), max(x1, x2)
         min_y, max_y = min(y1, y2), max(y1, y2)
 
         result = set()
         with self.app.state_lock:
-            conductors = self.app.state.project.conductors
-            for idx, conductor in enumerate(conductors):
-                cx, cy = conductor.position
-                mask = conductor.mask
+            boundaries = self.app.state.project.boundary_objects
+            for idx, boundary in enumerate(boundaries):
+                cx, cy = boundary.position
+                mask = boundary.mask
                 h, w = mask.shape
 
                 # Quick bounding box rejection
@@ -152,12 +152,12 @@ class CanvasController:
         return result
 
     def detect_region_at_point(self, canvas_x: float, canvas_y: float) -> tuple[int, Optional[str]]:
-        """Detect which conductor region is at canvas point.
+        """Detect which boundary region is at canvas point.
 
-        Returns (conductor_idx, region) where region is "surface" or "interior" or None.
+        Returns (boundary_idx, region) where region is "surface" or "interior" or None.
         """
         cache = self.app.state.render_cache
-        if cache is None or cache.conductor_masks is None or cache.interior_masks is None:
+        if cache is None or cache.boundary_masks is None or cache.interior_masks is None:
             return -1, None
 
         # Masks are at FULL RENDER RESOLUTION (canvas × multiplier × supersample)
@@ -166,9 +166,9 @@ class CanvasController:
         mask_x = int(canvas_x * scale)
         mask_y = int(canvas_y * scale)
 
-        # Check each conductor in reverse order (top to bottom)
-        for idx in reversed(range(len(self.app.state.project.conductors))):
-            if idx >= len(cache.interior_masks) or idx >= len(cache.conductor_masks):
+        # Check each boundary in reverse order (top to bottom)
+        for idx in reversed(range(len(self.app.state.project.boundary_objects))):
+            if idx >= len(cache.interior_masks) or idx >= len(cache.boundary_masks):
                 continue
 
             # Check interior first (it's inside, so higher priority)
@@ -180,7 +180,7 @@ class CanvasController:
                         return idx, "interior"
 
             # Check surface
-            surface_mask = cache.conductor_masks[idx]
+            surface_mask = cache.boundary_masks[idx]
             if surface_mask is not None:
                 h, w = surface_mask.shape
                 if 0 <= mask_y < h and 0 <= mask_x < w:
@@ -189,8 +189,8 @@ class CanvasController:
 
         return -1, None
 
-    def scale_selected_conductors(self, factor: float) -> bool:
-        """Scale all selected conductors by factor. Returns True if any scaled."""
+    def scale_selected_boundaries(self, factor: float) -> bool:
+        """Scale all selected boundaries by factor. Returns True if any scaled."""
         if dpg is None:
             return False
         factor = max(float(factor), 0.05)
@@ -198,9 +198,9 @@ class CanvasController:
         with self.app.state_lock:
             indices = list(self.app.state.selected_indices)
             for idx in indices:
-                changed = actions.scale_conductor(self.app.state, idx, factor)
+                changed = actions.scale_boundary(self.app.state, idx, factor)
                 if changed:
-                    self.app.display_pipeline.texture_manager.clear_conductor_texture(idx)
+                    self.app.display_pipeline.texture_manager.clear_boundary_texture(idx)
                     any_changed = True
 
         if not any_changed:
@@ -212,7 +212,7 @@ class CanvasController:
         self.app.postprocess_panel.update_region_properties_panel()
         count = len(indices)
         if count == 1:
-            dpg.set_value("status_text", f"Scaled C{indices[0] + 1} by {factor:.2f}×")
+            dpg.set_value("status_text", f"Scaled B{indices[0] + 1} by {factor:.2f}×")
         else:
             dpg.set_value("status_text", f"Scaled {count} objects by {factor:.2f}×")
         return True
@@ -226,7 +226,7 @@ class CanvasController:
         dialogs = [
             file_io.load_project_dialog_id,
             file_io.save_project_dialog_id,
-            file_io.conductor_file_dialog_id,
+            file_io.boundary_file_dialog_id,
         ]
 
         for dialog_id in dialogs:
@@ -301,7 +301,7 @@ class CanvasController:
             if has_selection:
                 scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
                 scale_factor = max(0.05, min(scale_factor, 20.0))
-                if self.scale_selected_conductors(scale_factor):
+                if self.scale_selected_boundaries(scale_factor):
                     x, y = self.get_canvas_mouse_pos()
                     self.drag_last_pos = (x, y)
 
@@ -324,17 +324,17 @@ class CanvasController:
         # Edit mode: click/shift-click to select, drag to move, box select from empty space
         if pressed and self.is_mouse_over_canvas():
             x, y = self.get_canvas_mouse_pos()
-            hit_idx = self.find_hit_conductor(x, y)
+            hit_idx = self.find_hit_boundary(x, y)
 
             with self.app.state_lock:
                 if hit_idx >= 0:
-                    # Clicked on a conductor
+                    # Clicked on a boundary
                     if self.shift_down:
                         # Shift-click: toggle selection
                         self.app.state.toggle_selected(hit_idx)
                     else:
                         # Normal click: if clicking on already-selected, keep selection for drag
-                        # Otherwise, replace selection with clicked conductor
+                        # Otherwise, replace selection with clicked boundary
                         if hit_idx not in self.app.state.selected_indices:
                             self.app.state.set_selected(hit_idx)
                     self.app.state.selected_region_type = "surface"
@@ -365,14 +365,14 @@ class CanvasController:
                 self.app.canvas_renderer.mark_dirty()
 
             elif self.drag_active:
-                # Drag all selected conductors
+                # Drag all selected boundaries
                 dx = x - self.drag_last_pos[0]
                 dy = y - self.drag_last_pos[1]
                 if abs(dx) > 0.1 or abs(dy) > 0.1:
                     with self.app.state_lock:
                         for idx in self.app.state.selected_indices:
-                            if 0 <= idx < len(self.app.state.project.conductors):
-                                actions.move_conductor(self.app.state, idx, dx, dy)
+                            if 0 <= idx < len(self.app.state.project.boundary_objects):
+                                actions.move_boundary(self.app.state, idx, dx, dy)
                     self.drag_last_pos = (x, y)
                     self.app.canvas_renderer.mark_dirty()
 
@@ -382,7 +382,7 @@ class CanvasController:
                 # Finish box selection
                 x, y = self.get_canvas_mouse_pos()
                 self.box_select_end = (x, y)
-                hits = self.find_conductors_in_box(
+                hits = self.find_boundaries_in_box(
                     self.box_select_start[0], self.box_select_start[1],
                     self.box_select_end[0], self.box_select_end[1]
                 )
@@ -435,12 +435,12 @@ class CanvasController:
                 with self.app.state_lock:
                     # Delete in reverse order to maintain valid indices
                     for idx in indices_to_delete:
-                        actions.remove_conductor(self.app.state, idx)
-                    self.app.display_pipeline.texture_manager.clear_all_conductor_textures()
+                        actions.remove_boundary(self.app.state, idx)
+                    self.app.display_pipeline.texture_manager.clear_all_boundary_textures()
                 self.app.canvas_renderer.mark_dirty()
                 self.app.boundary_controls.rebuild_controls()
                 count = len(indices_to_delete)
-                msg = "Conductor deleted" if count == 1 else f"{count} conductors deleted"
+                msg = "Boundary deleted" if count == 1 else f"{count} boundaries deleted"
                 dpg.set_value("status_text", msg)
         self.backspace_down_last = backspace_down
 
@@ -456,12 +456,12 @@ class CanvasController:
                     can_copy = mode == "edit" and len(selected) > 0
                 if can_copy:
                     with self.app.state_lock:
-                        self.clipboard_conductors = [
-                            clone_conductor(self.app.state.project.conductors[idx], preserve_id=False)
+                        self.clipboard_boundaries = [
+                            clone_boundary_object(self.app.state.project.boundary_objects[idx], preserve_id=False)
                             for idx in sorted(selected)
                         ]
-                    count = len(self.clipboard_conductors)
-                    msg = f"Copied C{selected[0] + 1}" if count == 1 else f"Copied {count} objects"
+                    count = len(self.clipboard_boundaries)
+                    msg = f"Copied B{selected[0] + 1}" if count == 1 else f"Copied {count} objects"
                     dpg.set_value("status_text", msg)
             self.ctrl_c_down_last = ctrl_c_down
 
@@ -473,18 +473,18 @@ class CanvasController:
             if ctrl_v_down and not self.ctrl_v_down_last:
                 with self.app.state_lock:
                     mode = self.app.state.view_mode
-                    can_paste = mode == "edit" and len(self.clipboard_conductors) > 0
+                    can_paste = mode == "edit" and len(self.clipboard_boundaries) > 0
                 if can_paste:
                     with self.app.state_lock:
                         new_indices = set()
-                        for conductor in self.clipboard_conductors:
-                            pasted = clone_conductor(conductor, preserve_id=False)
+                        for boundary in self.clipboard_boundaries:
+                            pasted = clone_boundary_object(boundary, preserve_id=False)
                             # Offset by 30px down-right
                             px, py = pasted.position
                             pasted.position = (px + 30.0, py + 30.0)
-                            actions.add_conductor(self.app.state, pasted)
-                            new_indices.add(len(self.app.state.project.conductors) - 1)
-                        # Select all pasted conductors
+                            actions.add_boundary(self.app.state, pasted)
+                            new_indices.add(len(self.app.state.project.boundary_objects) - 1)
+                        # Select all pasted boundaries
                         self.app.state.selected_indices = new_indices
                     self.app.canvas_renderer.mark_dirty()
                     self.app.boundary_controls.rebuild_controls()
