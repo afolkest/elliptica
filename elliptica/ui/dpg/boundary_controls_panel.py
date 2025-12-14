@@ -280,7 +280,6 @@ class BoundaryControlsPanel:
         with self.app.state_lock:
             if idx < len(self.app.state.project.conductors):
                 self.app.state.project.conductors[idx].params[field_name] = value
-                self.app.state.field_cache = None
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {field_name} = {value}")
@@ -377,7 +376,6 @@ class BoundaryControlsPanel:
                 # Update params dict directly
                 # TODO: Add an action for this to support undo/redo
                 self.app.state.project.conductors[idx].params[param_name] = value
-                self.app.state.field_cache = None
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {param_name} = {value:.3f}")
@@ -394,7 +392,6 @@ class BoundaryControlsPanel:
         with self.app.state_lock:
             if idx < len(self.app.state.project.conductors):
                 self.app.state.project.conductors[idx].edge_smooth_sigma = value
-                self.app.state.field_cache = None
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} edge smoothing = {value:.1f} px")
