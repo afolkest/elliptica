@@ -1,11 +1,10 @@
 ======= bugs ========
-- saving givngs no warning on overwrite 
+- saving give no warning on overwrite 
 
 ======= features ===========
 - undo/redo 
 - progress bars
 - exports
-- drag and move many conductors 
 - make sure shrinking items in render menu is not posibble (deselect)
 - add lock conductor feature (lol how long until we have layers)
 - add drawing feature
