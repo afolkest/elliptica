@@ -355,35 +355,44 @@ def ensure_base_rgb(state: AppState) -> bool:
     return True
 
 
-def set_region_style_enabled(state: AppState, conductor_id: int, region: str, enabled: bool) -> None:
+def set_region_style_enabled(state: AppState, conductor_id: int, region: str, enabled: bool) -> bool:
     """Toggle custom colorization for a region.
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         enabled: Enable/disable custom colorization
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_style_enabled: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.enabled = enabled
     elif region == "interior":
         settings.interior.enabled = enabled
+    return True
 
 
-def set_region_palette(state: AppState, conductor_id: int, region: str, palette: str) -> None:
+def set_region_palette(state: AppState, conductor_id: int, region: str, palette: str) -> bool:
     """Set palette for region (implies use_palette=True and enabled=True).
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         palette: Palette name
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_palette: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.enabled = True  # Auto-enable when palette is selected
@@ -393,19 +402,24 @@ def set_region_palette(state: AppState, conductor_id: int, region: str, palette:
         settings.interior.enabled = True  # Auto-enable when palette is selected
         settings.interior.use_palette = True
         settings.interior.palette = palette
+    return True
 
 
-def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb: tuple[float, float, float]) -> None:
+def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb: tuple[float, float, float]) -> bool:
     """Set solid color for region (implies use_palette=False and enabled=True).
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         rgb: RGB tuple in [0, 1]
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_solid_color: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.enabled = True  # Auto-enable when color is selected
@@ -415,57 +429,73 @@ def set_region_solid_color(state: AppState, conductor_id: int, region: str, rgb:
         settings.interior.enabled = True  # Auto-enable when color is selected
         settings.interior.use_palette = False
         settings.interior.solid_color = rgb
+    return True
 
 
-def set_region_brightness(state: AppState, conductor_id: int, region: str, brightness: float | None) -> None:
+def set_region_brightness(state: AppState, conductor_id: int, region: str, brightness: float | None) -> bool:
     """Set per-region brightness override (None = inherit from global).
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         brightness: Brightness value, or None to inherit from global
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_brightness: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.brightness = brightness
     elif region == "interior":
         settings.interior.brightness = brightness
+    return True
 
 
-def set_region_contrast(state: AppState, conductor_id: int, region: str, contrast: float | None) -> None:
+def set_region_contrast(state: AppState, conductor_id: int, region: str, contrast: float | None) -> bool:
     """Set per-region contrast override (None = inherit from global).
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         contrast: Contrast value, or None to inherit from global
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_contrast: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.contrast = contrast
     elif region == "interior":
         settings.interior.contrast = contrast
+    return True
 
 
-def set_region_gamma(state: AppState, conductor_id: int, region: str, gamma: float | None) -> None:
+def set_region_gamma(state: AppState, conductor_id: int, region: str, gamma: float | None) -> bool:
     """Set per-region gamma override (None = inherit from global).
 
     Args:
         conductor_id: Conductor ID
         region: "surface" or "interior"
         gamma: Gamma value, or None to inherit from global
+
+    Returns:
+        True if successful, False if conductor_color_settings missing for this conductor
     """
     settings = state.conductor_color_settings.get(conductor_id)
     if settings is None:
-        return
+        print(f"⚠️  set_region_gamma: no settings for conductor {conductor_id}")
+        return False
 
     if region == "surface":
         settings.surface.gamma = gamma
     elif region == "interior":
         settings.interior.gamma = gamma
+    return True
