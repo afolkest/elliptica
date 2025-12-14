@@ -7,7 +7,7 @@ import math
 
 from elliptica import defaults
 from elliptica.app import actions
-from elliptica.types import Conductor
+from elliptica.types import Conductor, clone_conductor
 
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
@@ -53,31 +53,6 @@ def _point_in_conductor(conductor: Conductor, x: float, y: float) -> bool:
     if local_y >= h or local_x >= w:
         return False
     return mask[local_y, local_x] > 0.5
-
-
-def _clone_conductor(conductor: Conductor) -> Conductor:
-    """Deep-copy conductor data for clipboard."""
-    interior = None
-    if conductor.interior_mask is not None:
-        interior = conductor.interior_mask.copy()
-    original = None
-    if conductor.original_mask is not None:
-        original = conductor.original_mask.copy()
-    original_interior = None
-    if conductor.original_interior_mask is not None:
-        original_interior = conductor.original_interior_mask.copy()
-    return Conductor(
-        mask=conductor.mask.copy(),
-        voltage=conductor.voltage,
-        position=conductor.position,
-        interior_mask=interior,
-        original_mask=original,
-        original_interior_mask=original_interior,
-        scale_factor=conductor.scale_factor,
-        edge_smooth_sigma=conductor.edge_smooth_sigma,
-        smear_enabled=conductor.smear_enabled,
-        smear_sigma=conductor.smear_sigma,
-    )
 
 
 class CanvasController:
@@ -482,7 +457,7 @@ class CanvasController:
                 if can_copy:
                     with self.app.state_lock:
                         self.clipboard_conductors = [
-                            _clone_conductor(self.app.state.project.conductors[idx])
+                            clone_conductor(self.app.state.project.conductors[idx], preserve_id=False)
                             for idx in sorted(selected)
                         ]
                     count = len(self.clipboard_conductors)
@@ -503,7 +478,7 @@ class CanvasController:
                     with self.app.state_lock:
                         new_indices = set()
                         for conductor in self.clipboard_conductors:
-                            pasted = _clone_conductor(conductor)
+                            pasted = clone_conductor(conductor, preserve_id=False)
                             # Offset by 30px down-right
                             px, py = pasted.position
                             pasted.position = (px + 30.0, py + 30.0)

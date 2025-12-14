@@ -328,14 +328,11 @@ class FileIOController:
             path_obj = path_obj.with_suffix('.elliptica')
 
         # Check if file exists and confirm overwrite
-        print(f"DEBUG: path_obj={path_obj}, exists={path_obj.exists()}")
         if path_obj.exists():
-            print("DEBUG: File exists, showing overwrite confirm")
             self._pending_save_project_path = path_obj
             self._show_overwrite_confirm()
             return
 
-        print("DEBUG: File does not exist, saving directly")
         self._do_save_project(path_obj)
 
     def _do_save_project(self, path_obj: Path) -> None:
@@ -364,13 +361,11 @@ class FileIOController:
 
     def _show_overwrite_confirm(self) -> None:
         """Show overwrite confirmation dialog for project save."""
-        print("DEBUG: _show_overwrite_confirm called")
         if dpg is None:
             return
 
         # Create dialog if needed
         if self._overwrite_confirm_id is None:
-            print("DEBUG: Creating overwrite confirm dialog")
             with dpg.window(
                 label="Confirm Overwrite",
                 modal=True,
@@ -395,7 +390,6 @@ class FileIOController:
         # Center and show
         viewport_width = dpg.get_viewport_width()
         viewport_height = dpg.get_viewport_height()
-        print(f"DEBUG: Showing dialog at ({(viewport_width - 350) // 2}, {(viewport_height - 120) // 2})")
         dpg.configure_item(
             self._overwrite_confirm_id,
             pos=((viewport_width - 350) // 2, (viewport_height - 120) // 2),
@@ -450,9 +444,7 @@ class FileIOController:
                     break
 
             # Sync PDERegistry to loaded project's PDE type
-            print(f"DEBUG: Loading project with pde_type={new_state.project.pde_type!r}")
             PDERegistry.set_active(new_state.project.pde_type)
-            print(f"DEBUG: PDERegistry active is now {PDERegistry.get_active_name()!r}")
 
             with self.app.state_lock:
                 # Replace current state with loaded state
@@ -573,15 +565,36 @@ class FileIOController:
             if dpg.does_item_exist("saturation_slider"):
                 dpg.set_value("saturation_slider", self.app.state.display_settings.saturation)
 
-            # PDE type combo
+            # PDE type combo - use full label format from pde_label_map
             if self.app.pde_combo_id is not None:
-                pde_type = self.app.state.project.pde_type
-                active_pde = PDERegistry.get(pde_type)
-                if active_pde:
-                    dpg.set_value(self.app.pde_combo_id, active_pde.label)
+                label = self.app._label_for_active_pde()
+                if label:
+                    dpg.set_value(self.app.pde_combo_id, label)
+
+            # Color mode radio - restore expressions mode if color_config was set
+            has_color_config = self.app.state.color_config is not None
+            if dpg.does_item_exist("color_mode_radio"):
+                mode_value = "Expressions" if has_color_config else "Palette"
+                dpg.set_value("color_mode_radio", mode_value)
+                panel.color_mode = "expressions" if has_color_config else "palette"
+                # Update visibility of mode groups
+                dpg.configure_item("palette_mode_group", show=(panel.color_mode == "palette"))
+                dpg.configure_item("expressions_mode_group", show=(panel.color_mode == "expressions"))
+
+            # Lightness expression checkbox and input (global mode)
+            lightness_expr = self.app.state.display_settings.lightness_expr
+            if dpg.does_item_exist("lightness_expr_checkbox"):
+                dpg.set_value("lightness_expr_checkbox", lightness_expr is not None)
+            if dpg.does_item_exist("lightness_expr_group"):
+                dpg.configure_item("lightness_expr_group", show=(lightness_expr is not None))
+            if dpg.does_item_exist("lightness_expr_input") and lightness_expr is not None:
+                dpg.set_value("lightness_expr_input", lightness_expr)
 
         # Sync global palette UI text (outside lock - no state modification)
         self.sync_palette_ui()
+
+        # Update context-dependent UI (slider states, region controls visibility, etc.)
+        self.app.postprocess_panel.update_context_ui()
 
     def sync_palette_ui(self) -> None:
         """Sync global palette UI text to match current state.

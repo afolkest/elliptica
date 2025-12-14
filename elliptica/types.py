@@ -67,6 +67,36 @@ class BoundaryObject:
 Conductor = BoundaryObject
 
 
+def clone_conductor(conductor: "Conductor", preserve_id: bool = True) -> "Conductor":
+    """Deep-copy a conductor with all its data.
+
+    Args:
+        conductor: The conductor to clone
+        preserve_id: If True, preserve the original id (for rendering snapshots).
+                     If False, set id=None so a new id is assigned on add (for clipboard paste).
+
+    Returns:
+        A deep copy of the conductor
+    """
+    interior = conductor.interior_mask.copy() if conductor.interior_mask is not None else None
+    original = conductor.original_mask.copy() if conductor.original_mask is not None else None
+    original_interior = conductor.original_interior_mask.copy() if conductor.original_interior_mask is not None else None
+
+    return Conductor(
+        mask=conductor.mask.copy(),
+        params=conductor.params.copy(),
+        position=conductor.position,
+        interior_mask=interior,
+        original_mask=original,
+        original_interior_mask=original_interior,
+        scale_factor=conductor.scale_factor,
+        edge_smooth_sigma=conductor.edge_smooth_sigma,
+        smear_enabled=conductor.smear_enabled,
+        smear_sigma=conductor.smear_sigma,
+        id=conductor.id if preserve_id else None,
+    )
+
+
 
 
 

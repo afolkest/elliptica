@@ -551,22 +551,6 @@ class ImageExportController:
             cached_conductor_masks = [m.copy() if m is not None else None for m in cache.conductor_masks] if cache.conductor_masks else None
             cached_interior_masks = [m.copy() if m is not None else None for m in cache.interior_masks] if cache.interior_masks else None
 
-            # DEBUG: Print conductor color settings
-            print("\n=== EXPORT DEBUG ===")
-            print(f"Total conductors in project: {len(project.conductors)}")
-            print(f"conductor_color_settings keys: {list(conductor_color_settings.keys())}")
-            for conductor in project.conductors:
-                print(f"Conductor ID: {conductor.id} (type: {type(conductor.id)})")
-                if conductor.id in conductor_color_settings:
-                    cs = conductor_color_settings[conductor.id]
-                    print(f"  Interior enabled: {cs.interior.enabled}")
-                    print(f"  Interior palette: {cs.interior.palette}")
-                    print(f"  Interior use_palette: {cs.interior.use_palette}")
-                    print(f"  Surface enabled: {cs.surface.enabled}")
-                else:
-                    print(f"  ⚠️  NOT FOUND in conductor_color_settings!")
-            print("===================\n")
-
         canvas_w, canvas_h = project.canvas_resolution
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_dir = Path.cwd() / "outputs"

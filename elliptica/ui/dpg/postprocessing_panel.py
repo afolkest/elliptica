@@ -822,6 +822,7 @@ class PostprocessingPanel:
         self.lightness_expr_pending_target = None
         self.smear_pending_value = None
         self.clip_pending_value = None
+        self.expr_pending_update = False  # Clear expression editor debounce too
         self.update_context_ui()
 
     # ------------------------------------------------------------------
