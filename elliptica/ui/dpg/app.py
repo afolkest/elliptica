@@ -29,7 +29,7 @@ from elliptica.ui.dpg.canvas_renderer import CanvasRenderer
 from elliptica.ui.dpg.shape_dialog import ShapeDialogController
 from elliptica.ui.dpg.fonts import setup_fonts
 from elliptica.ui.dpg.theme import apply_theme
-from elliptica.types import Conductor, Project
+from elliptica.types import Conductor, Project, clone_conductor
 from elliptica import defaults
 
 
@@ -60,36 +60,10 @@ if dpg is not None:
     V_KEY = getattr(dpg, "mvKey_V", None)
 
 
-def _clone_conductor(conductor: Conductor) -> Conductor:
-    """Deep-copy conductor data for background rendering."""
-    interior = None
-    if conductor.interior_mask is not None:
-        interior = conductor.interior_mask.copy()
-    original = None
-    if conductor.original_mask is not None:
-        original = conductor.original_mask.copy()
-    original_interior = None
-    if conductor.original_interior_mask is not None:
-        original_interior = conductor.original_interior_mask.copy()
-    return Conductor(
-        mask=conductor.mask.copy(),
-        params=conductor.params.copy(),  # Copy params dict
-        position=conductor.position,
-        interior_mask=interior,
-        original_mask=original,
-        original_interior_mask=original_interior,
-        scale_factor=conductor.scale_factor,
-        edge_smooth_sigma=conductor.edge_smooth_sigma,
-        smear_enabled=conductor.smear_enabled,
-        smear_sigma=conductor.smear_sigma,
-        id=conductor.id,  # Critical for conductor_color_settings lookup!
-    )
-
-
 def _snapshot_project(project: Project) -> Project:
     """Create a snapshot of project safe to use off the UI thread."""
     return Project(
-        conductors=[_clone_conductor(c) for c in project.conductors],
+        conductors=[clone_conductor(c, preserve_id=True) for c in project.conductors],
         canvas_resolution=project.canvas_resolution,
         streamlength_factor=project.streamlength_factor,
         renders=list(project.renders),
