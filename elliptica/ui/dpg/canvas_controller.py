@@ -282,13 +282,26 @@ class CanvasController:
 
         return False
 
+    def is_menu_open(self) -> bool:
+        """Check if any dropdown menu is currently open."""
+        if dpg is None:
+            return False
+
+        menu_tags = ["file_menu", "export_menu"]
+        for tag in menu_tags:
+            if dpg.does_item_exist(tag):
+                # Check both active (menu expanded) and hovered states
+                if dpg.is_item_active(tag) or dpg.is_item_hovered(tag):
+                    return True
+        return False
+
     def process_canvas_mouse(self) -> None:
         """Process mouse input on canvas (clicks, drags, wheel)."""
         if dpg is None or self.app.canvas_id is None:
             return
 
-        # Don't process canvas input when file dialogs or modals are open
-        if self.is_file_dialog_showing() or self.is_modal_open():
+        # Don't process canvas input when file dialogs, modals, or menus are open
+        if self.is_file_dialog_showing() or self.is_modal_open() or self.is_menu_open():
             return
 
         mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
@@ -421,8 +434,8 @@ class CanvasController:
         if dpg is None or BACKSPACE_KEY is None:
             return
 
-        # Don't process keyboard shortcuts when file dialogs or modals are open
-        if self.is_file_dialog_showing() or self.is_modal_open():
+        # Don't process keyboard shortcuts when file dialogs, modals, or menus are open
+        if self.is_file_dialog_showing() or self.is_modal_open() or self.is_menu_open():
             self.backspace_down_last = False
             self.ctrl_c_down_last = False
             self.ctrl_v_down_last = False

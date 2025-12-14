@@ -242,7 +242,7 @@ class EllipticaApp:
 
         # Add menu bar
         with dpg.viewport_menu_bar():
-            with dpg.menu(label="File"):
+            with dpg.menu(label="File", tag="file_menu"):
                 dpg.add_menu_item(label="New Project", callback=self.file_io.new_project)
                 dpg.add_menu_item(label="Load Project...", callback=self.file_io.open_load_project_dialog)
                 dpg.add_menu_item(label="Save Project...", callback=self.file_io.open_save_project_dialog)
