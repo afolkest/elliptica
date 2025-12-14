@@ -1322,11 +1322,7 @@ class PostprocessingPanel:
         self.app.display_pipeline.refresh_display()
 
     def _apply_smear_update(self) -> None:
-        """Apply pending smear update (called after debounce delay)."""
-        if self.smear_pending_value is None:
-            return
-
-        self.smear_pending_value = None
+        """Apply smear refresh (state already updated in on_smear_sigma)."""
         self.app.display_pipeline.refresh_display()
 
     def check_clip_debounce(self) -> None:
@@ -1350,6 +1346,8 @@ class PostprocessingPanel:
         # Only apply if enough time has passed since the last slider movement
         if current_time - self.smear_last_update_time >= self.smear_debounce_delay:
             self._apply_smear_update()
+            self.smear_last_update_time = current_time
+            self.smear_pending_value = None
 
     # ------------------------------------------------------------------
     # Expression editor callbacks
