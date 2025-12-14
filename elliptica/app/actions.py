@@ -5,12 +5,9 @@ from __future__ import annotations
 import numpy as np
 from scipy.ndimage import zoom
 
-from elliptica.pipeline import perform_render
 from elliptica.types import Conductor
-from elliptica.app.core import AppState, RenderCache, ConductorColorSettings
+from elliptica.app.core import AppState, ConductorColorSettings
 from elliptica.postprocess.masks import derive_interior
-from elliptica.postprocess.color import build_base_rgb
-from elliptica.gpu import GPUContext
 from elliptica import defaults
 
 MAX_CONDUCTOR_DIM = 32768
@@ -224,102 +221,6 @@ def scale_conductor(state: AppState, idx: int, scale_delta: float) -> bool:
     return True
 
 
-def ensure_render(state: AppState) -> bool:
-    """Run the render pipeline if required.
-
-    Returns True on success, False if render failed (e.g., resolution too large).
-    """
-    if not state.render_dirty and state.render_cache:
-        return True
-
-    settings = state.render_settings
-    result = perform_render(
-        state.project,
-        settings.multiplier,
-        settings.supersample,
-        settings.num_passes,
-        settings.margin,
-        settings.noise_seed,
-        settings.noise_sigma,
-        state.project.streamlength_factor,
-        settings.use_mask,
-        settings.edge_gain_strength,
-        settings.edge_gain_power,
-        settings.solve_scale,
-    )
-    if result is None:
-        return False
-
-    # Free old GPU tensors before creating new cache
-    if state.render_cache and GPUContext.is_available():
-        old_cache = state.render_cache
-        if (old_cache.result_gpu is not None or
-            old_cache.ex_gpu is not None or
-            old_cache.ey_gpu is not None or
-            old_cache.conductor_masks_gpu is not None or
-            old_cache.interior_masks_gpu is not None):
-            # Clear all GPU tensors
-            old_cache.result_gpu = None
-            old_cache.ex_gpu = None
-            old_cache.ey_gpu = None
-            old_cache.conductor_masks_gpu = None
-            old_cache.interior_masks_gpu = None
-            GPUContext.empty_cache()
-
-    # Use pre-computed conductor masks from RenderResult (avoids redundant rasterization)
-    conductor_masks = result.conductor_masks_canvas
-    interior_masks = result.interior_masks_canvas
-
-    # Precompute LIC percentiles for smear normalization (CPU-only, not GPU friendly)
-    # These are used by apply_conductor_smear to normalize blurred textures
-    lic_percentiles = None
-    if any(c.smear_enabled for c in state.project.conductors):
-        vmin = float(np.percentile(result.array, 0.5))
-        vmax = float(np.percentile(result.array, 99.5))
-        lic_percentiles = (vmin, vmax)
-
-    # Cache everything at full render resolution
-    state.render_cache = RenderCache(
-        result=result,
-        multiplier=settings.multiplier,
-        supersample=settings.supersample,
-        base_rgb=None,  # Will be built on-demand
-        conductor_masks=conductor_masks,
-        interior_masks=interior_masks,
-        lic_percentiles=lic_percentiles,
-    )
-
-    # Upload render result to GPU for fast postprocessing
-    if GPUContext.is_available():
-        state.render_cache.result_gpu = GPUContext.to_gpu(result.array)
-        if result.ex is not None:
-            state.render_cache.ex_gpu = GPUContext.to_gpu(result.ex)
-        if result.ey is not None:
-            state.render_cache.ey_gpu = GPUContext.to_gpu(result.ey)
-
-        # Upload conductor masks to GPU (avoids repeated CPU→GPU transfers on every display update)
-        if conductor_masks is not None:
-            state.render_cache.conductor_masks_gpu = []
-            for mask in conductor_masks:
-                if mask is not None:
-                    state.render_cache.conductor_masks_gpu.append(GPUContext.to_gpu(mask))
-                else:
-                    state.render_cache.conductor_masks_gpu.append(None)
-
-        if interior_masks is not None:
-            state.render_cache.interior_masks_gpu = []
-            for mask in interior_masks:
-                if mask is not None:
-                    state.render_cache.interior_masks_gpu.append(GPUContext.to_gpu(mask))
-                else:
-                    state.render_cache.interior_masks_gpu.append(None)
-
-    state.field_dirty = False
-    state.render_dirty = False
-    state.view_mode = "render"
-    return True
-
-
 def set_color_enabled(state: AppState, enabled: bool) -> None:
     """Toggle colorization on/off."""
     if state.display_settings.color_enabled != enabled:
@@ -332,27 +233,6 @@ def set_palette(state: AppState, palette: str) -> None:
     if state.display_settings.palette != palette:
         state.display_settings.palette = palette
         state.invalidate_base_rgb()
-
-
-def ensure_base_rgb(state: AppState) -> bool:
-    """Build base_rgb from display_array if needed.
-
-    Returns True on success, False if no render available.
-    """
-    cache = state.render_cache
-    if cache is None or cache.result is None:
-        return False
-
-    if cache.base_rgb is None:
-        # Use GPU tensor if available (much faster!)
-        # Work at full render resolution
-        cache.base_rgb = build_base_rgb(
-            cache.result.array,
-            state.display_settings.to_color_params(),
-            display_array_gpu=cache.result_gpu,
-        )
-
-    return True
 
 
 def set_region_style_enabled(state: AppState, conductor_id: int, region: str, enabled: bool) -> bool:
