@@ -19,7 +19,7 @@ from elliptica.types import Project, Conductor
 from elliptica.pipeline import RenderResult
 from elliptica import defaults
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "2.0"
 
 
 def save_project(state: AppState, filepath: str) -> None:
@@ -28,9 +28,9 @@ def save_project(state: AppState, filepath: str) -> None:
     Format:
         myproject.elliptica (ZIP containing:)
         ├── metadata.json          # All scalar/string data + schema version
-        ├── conductor_0_mask.png
-        ├── conductor_0_interior.png
-        ├── conductor_0_original_mask.png
+        ├── boundary_0_mask.png
+        ├── boundary_0_interior.png
+        ├── boundary_0_original_mask.png
         └── ...
 
     Args:
@@ -43,108 +43,113 @@ def save_project(state: AppState, filepath: str) -> None:
         filepath = filepath.with_suffix('.elliptica')
 
     # Build metadata dictionary
-    print(f"DEBUG save_project: pde_type={state.project.pde_type!r}")
     metadata = {
         'schema_version': SCHEMA_VERSION,
         'created_at': datetime.now().isoformat(),
         'project': _project_to_dict(state.project),
         'render_settings': _render_settings_to_dict(state.render_settings),
         'display_settings': _display_settings_to_dict(state.display_settings),
-        'conductors': [],
-        'conductor_color_settings': {},
+        'boundary_objects': [],
+        'boundary_color_settings': {},
     }
 
     # Create ZIP archive
     with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Save each conductor and its masks
-        for i, conductor in enumerate(state.project.conductors):
-            conductor_meta = _conductor_to_dict(conductor, i)
-            metadata['conductors'].append(conductor_meta)
+        # Save each boundary object and its masks
+        for i, boundary in enumerate(state.project.conductors):
+            boundary_meta = _boundary_object_to_dict(boundary, i)
+            metadata['boundary_objects'].append(boundary_meta)
 
             # Save mask PNGs
-            _save_mask_to_zip(zf, conductor.mask, conductor_meta['masks']['mask']['file'])
-            if conductor.interior_mask is not None:
-                _save_mask_to_zip(zf, conductor.interior_mask, conductor_meta['masks']['interior_mask']['file'])
-            if conductor.original_mask is not None:
-                _save_mask_to_zip(zf, conductor.original_mask, conductor_meta['masks']['original_mask']['file'])
-            if conductor.original_interior_mask is not None:
-                _save_mask_to_zip(zf, conductor.original_interior_mask, conductor_meta['masks']['original_interior_mask']['file'])
+            _save_mask_to_zip(zf, boundary.mask, boundary_meta['masks']['mask']['file'])
+            if boundary.interior_mask is not None:
+                _save_mask_to_zip(zf, boundary.interior_mask, boundary_meta['masks']['interior_mask']['file'])
+            if boundary.original_mask is not None:
+                _save_mask_to_zip(zf, boundary.original_mask, boundary_meta['masks']['original_mask']['file'])
+            if boundary.original_interior_mask is not None:
+                _save_mask_to_zip(zf, boundary.original_interior_mask, boundary_meta['masks']['original_interior_mask']['file'])
 
-        # Save conductor color settings
-        for conductor_id, color_settings in state.conductor_color_settings.items():
-            metadata['conductor_color_settings'][str(conductor_id)] = _color_settings_to_dict(color_settings)
+        # Save boundary color settings
+        for boundary_id, color_settings in state.conductor_color_settings.items():
+            metadata['boundary_color_settings'][str(boundary_id)] = _color_settings_to_dict(color_settings)
 
         # Write metadata JSON
         zf.writestr('metadata.json', json.dumps(metadata, indent=2))
 
 
+class ProjectLoadError(Exception):
+    """Error loading project file."""
+    pass
+
+
 def load_project(filepath: str) -> AppState:
-    """Load project state from a .elliptica or .flowcol ZIP archive.
+    """Load project state from a .elliptica ZIP archive.
 
     Args:
-        filepath: Path to .elliptica or .flowcol file
+        filepath: Path to .elliptica file
 
     Returns:
         Reconstructed AppState
 
     Raises:
-        ValueError: If schema version is unsupported
+        ProjectLoadError: If file is corrupt, wrong version, or missing data
         FileNotFoundError: If file doesn't exist
     """
     filepath = Path(filepath)
     if not filepath.exists():
         raise FileNotFoundError(f"Project file not found: {filepath}")
 
-    with zipfile.ZipFile(filepath, 'r') as zf:
-        # Load metadata
-        metadata = json.loads(zf.read('metadata.json'))
+    try:
+        with zipfile.ZipFile(filepath, 'r') as zf:
+            # Load metadata
+            try:
+                metadata = json.loads(zf.read('metadata.json'))
+            except (KeyError, json.JSONDecodeError) as e:
+                raise ProjectLoadError(f"Corrupt or missing metadata.json: {e}")
 
-        # Check schema version
-        schema_version = metadata.get('schema_version', '1.0')
-        if schema_version != SCHEMA_VERSION:
-            # Future: add migration logic here
-            raise ValueError(f"Unsupported schema version: {schema_version}. Expected {SCHEMA_VERSION}")
+            # Check schema version
+            schema_version = metadata.get('schema_version', '1.0')
+            if schema_version != SCHEMA_VERSION:
+                raise ProjectLoadError(
+                    f"Schema version {schema_version} not supported. "
+                    f"Expected {SCHEMA_VERSION}. Run migration script: python -m elliptica.migrate {filepath}"
+                )
 
-        # Reconstruct project
-        project = _dict_to_project(metadata['project'])
+            # Reconstruct project
+            project = _dict_to_project(metadata['project'])
 
-        # Load conductors
-        for conductor_meta in metadata['conductors']:
-            # Load masks from ZIP
-            masks = {}
-            for mask_name, mask_info in conductor_meta['masks'].items():
-                if mask_info is not None:
-                    masks[mask_name] = _load_mask_from_zip(zf, mask_info['file'])
+            # Load boundary objects
+            for boundary_meta in metadata['boundary_objects']:
+                # Load masks from ZIP
+                masks = {}
+                for mask_name, mask_info in boundary_meta['masks'].items():
+                    if mask_info is not None:
+                        try:
+                            masks[mask_name] = _load_mask_from_zip(zf, mask_info['file'])
+                        except KeyError:
+                            raise ProjectLoadError(f"Missing mask file: {mask_info['file']}")
+                        except Exception as e:
+                            raise ProjectLoadError(f"Corrupt mask file {mask_info['file']}: {e}")
 
-            conductor = _dict_to_conductor(conductor_meta, masks)
-            project.conductors.append(conductor)
+                boundary = _dict_to_boundary_object(boundary_meta, masks)
+                project.conductors.append(boundary)
 
-        # Reconstruct state
-        state = AppState(
-            project=project,
-            render_settings=_dict_to_render_settings(metadata['render_settings']),
-            display_settings=_dict_to_display_settings(metadata['display_settings']),
-        )
+            # Reconstruct state
+            state = AppState(
+                project=project,
+                render_settings=_dict_to_render_settings(metadata['render_settings']),
+                display_settings=_dict_to_display_settings(metadata['display_settings']),
+            )
 
-        # Load conductor color settings
-        for conductor_id_str, color_settings_dict in metadata.get('conductor_color_settings', {}).items():
-            conductor_id = int(conductor_id_str)
-            state.conductor_color_settings[conductor_id] = _dict_to_color_settings(color_settings_dict)
+            # Load boundary color settings
+            for boundary_id_str, color_settings_dict in metadata.get('boundary_color_settings', {}).items():
+                boundary_id = int(boundary_id_str)
+                state.conductor_color_settings[boundary_id] = _dict_to_color_settings(color_settings_dict)
 
-        # Migrate old conductor smear settings to per-region settings
-        # (backward compatibility with projects saved before per-region smear)
-        for conductor in project.conductors:
-            if conductor.id is not None and hasattr(conductor, 'smear_enabled') and conductor.smear_enabled:
-                # Old smear applied to conductor surface mask
-                if conductor.id not in state.conductor_color_settings:
-                    state.conductor_color_settings[conductor.id] = ConductorColorSettings()
-                settings = state.conductor_color_settings[conductor.id]
-                # Only migrate if region doesn't already have smear settings
-                if not settings.surface.smear_enabled:
-                    settings.surface.smear_enabled = True
-                    settings.surface.smear_sigma = getattr(conductor, 'smear_sigma', defaults.DEFAULT_SMEAR_SIGMA)
+            return state
 
-        return state
+    except zipfile.BadZipFile:
+        raise ProjectLoadError(f"Not a valid ZIP file: {filepath}")
 
 
 # ============================================================================
@@ -156,13 +161,14 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
     return {
         'canvas_resolution': list(project.canvas_resolution),
         'streamlength_factor': project.streamlength_factor,
-        'next_conductor_id': project.next_conductor_id,
+        'next_boundary_id': project.next_conductor_id,
         'boundary_top': project.boundary_top,
         'boundary_bottom': project.boundary_bottom,
         'boundary_left': project.boundary_left,
         'boundary_right': project.boundary_right,
-        'pde_type': getattr(project, 'pde_type', 'poisson'),
-        'pde_bc': getattr(project, 'pde_bc', {}),
+        'pde_type': project.pde_type,
+        'pde_params': project.pde_params,
+        'pde_bc': project.pde_bc,
     }
 
 
@@ -171,109 +177,84 @@ def _dict_to_project(data: dict[str, Any]) -> Project:
     return Project(
         conductors=[],  # Will be populated separately
         canvas_resolution=tuple(data['canvas_resolution']),
-        streamlength_factor=data.get('streamlength_factor', defaults.DEFAULT_STREAMLENGTH_FACTOR),
-        next_conductor_id=data.get('next_conductor_id', 0),
-        boundary_top=data.get('boundary_top', 0),
-        boundary_bottom=data.get('boundary_bottom', 0),
-        boundary_left=data.get('boundary_left', 0),
-        boundary_right=data.get('boundary_right', 0),
-        pde_type=data.get('pde_type', 'poisson'),
-        pde_bc=data.get('pde_bc', {}),
+        streamlength_factor=data['streamlength_factor'],
+        next_conductor_id=data['next_boundary_id'],
+        boundary_top=data['boundary_top'],
+        boundary_bottom=data['boundary_bottom'],
+        boundary_left=data['boundary_left'],
+        boundary_right=data['boundary_right'],
+        pde_type=data['pde_type'],
+        pde_params=data['pde_params'],
+        pde_bc=data['pde_bc'],
     )
 
 
-def _conductor_to_dict(conductor: Conductor, index: int) -> dict[str, Any]:
-    """Convert Conductor to JSON-serializable dict (without numpy arrays)."""
-    mask_h, mask_w = conductor.mask.shape
+def _boundary_object_to_dict(boundary: Conductor, index: int) -> dict[str, Any]:
+    """Convert BoundaryObject to JSON-serializable dict (without numpy arrays)."""
+    mask_h, mask_w = boundary.mask.shape
 
     masks_meta = {
         'mask': {
-            'file': f'conductor_{index}_mask.png',
+            'file': f'boundary_{index}_mask.png',
             'shape': [mask_h, mask_w],
             'encoding': 'uint16_png',
         }
     }
 
     # Optional masks
-    if conductor.interior_mask is not None:
+    if boundary.interior_mask is not None:
         masks_meta['interior_mask'] = {
-            'file': f'conductor_{index}_interior.png',
-            'shape': list(conductor.interior_mask.shape),
+            'file': f'boundary_{index}_interior.png',
+            'shape': list(boundary.interior_mask.shape),
             'encoding': 'uint16_png',
         }
     else:
         masks_meta['interior_mask'] = None
 
-    if conductor.original_mask is not None:
+    if boundary.original_mask is not None:
         masks_meta['original_mask'] = {
-            'file': f'conductor_{index}_original_mask.png',
-            'shape': list(conductor.original_mask.shape),
+            'file': f'boundary_{index}_original_mask.png',
+            'shape': list(boundary.original_mask.shape),
             'encoding': 'uint16_png',
         }
     else:
         masks_meta['original_mask'] = None
 
-    if conductor.original_interior_mask is not None:
+    if boundary.original_interior_mask is not None:
         masks_meta['original_interior_mask'] = {
-            'file': f'conductor_{index}_original_interior.png',
-            'shape': list(conductor.original_interior_mask.shape),
+            'file': f'boundary_{index}_original_interior.png',
+            'shape': list(boundary.original_interior_mask.shape),
             'encoding': 'uint16_png',
         }
     else:
         masks_meta['original_interior_mask'] = None
 
     return {
-        'voltage': conductor.voltage,
-        'position': list(conductor.position),
-        'scale_factor': conductor.scale_factor,
-        'edge_smooth_sigma': conductor.edge_smooth_sigma,
-        'smear_enabled': conductor.smear_enabled,
-        'smear_sigma': conductor.smear_sigma,
-        'id': conductor.id,
+        'params': boundary.params,
+        'position': list(boundary.position),
+        'scale_factor': boundary.scale_factor,
+        'edge_smooth_sigma': boundary.edge_smooth_sigma,
+        'smear_enabled': boundary.smear_enabled,
+        'smear_sigma': boundary.smear_sigma,
+        'id': boundary.id,
         'masks': masks_meta,
     }
 
 
-def _dict_to_conductor(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Conductor:
-    """Reconstruct Conductor from dict + loaded masks."""
-    # Migrate old blur_sigma/blur_is_fractional to edge_smooth_sigma for backward compatibility
-    if 'edge_smooth_sigma' in data:
-        edge_smooth_sigma = data['edge_smooth_sigma']
-    elif 'blur_sigma' in data:
-        # Legacy migration
-        blur_sigma = data.get('blur_sigma', 0.0)
-        blur_is_fractional = data.get('blur_is_fractional', False)
-        if blur_is_fractional:
-            # Convert from fraction to pixels (assuming 1000px reference)
-            edge_smooth_sigma = min(blur_sigma * 1000.0, 5.0)
-        else:
-            # Clamp pixel value to new 0-5 range
-            edge_smooth_sigma = min(blur_sigma, 5.0)
-    else:
-        edge_smooth_sigma = 1.5
-
-    # Migrate old absolute pixel smear_sigma to fractional (backward compatibility)
-    smear_sigma_raw = data.get('smear_sigma', 0.002)
-    if smear_sigma_raw > 0.1:
-        # Old format: absolute pixels (range was 0.1-10.0)
-        # Convert to fractional: assume 1024px canvas reference
-        smear_sigma = smear_sigma_raw / 1024.0
-    else:
-        # New format: already fractional
-        smear_sigma = smear_sigma_raw
-
+def _dict_to_boundary_object(data: dict[str, Any], masks: dict[str, np.ndarray]) -> Conductor:
+    """Reconstruct BoundaryObject from dict + loaded masks."""
     return Conductor(
         mask=masks['mask'],
-        voltage=data.get('voltage', 0.5),
-        position=tuple(data.get('position', [0.0, 0.0])),
+        params=data['params'],
+        position=tuple(data['position']),
         interior_mask=masks.get('interior_mask'),
         original_mask=masks.get('original_mask'),
         original_interior_mask=masks.get('original_interior_mask'),
-        scale_factor=data.get('scale_factor', 1.0),
-        edge_smooth_sigma=edge_smooth_sigma,
-        smear_enabled=data.get('smear_enabled', False),
-        smear_sigma=smear_sigma,
-        id=data.get('id'),
+        scale_factor=data['scale_factor'],
+        edge_smooth_sigma=data['edge_smooth_sigma'],
+        smear_enabled=data['smear_enabled'],
+        smear_sigma=data['smear_sigma'],
+        id=data['id'],
     )
 
 
@@ -295,22 +276,17 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
 
 def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
     """Reconstruct RenderSettings from dict."""
-    # Support both old 'poisson_scale' and new 'solve_scale' keys for backwards compatibility
-    solve_scale_raw = data.get('solve_scale', data.get('poisson_scale', defaults.DEFAULT_SOLVE_SCALE))
     return RenderSettings(
-        multiplier=data.get('multiplier', defaults.RENDER_RESOLUTION_CHOICES[0]),
-        supersample=data.get('supersample', defaults.SUPERSAMPLE_CHOICES[0]),
-        num_passes=data.get('num_passes', defaults.DEFAULT_RENDER_PASSES),
-        margin=data.get('margin', defaults.DEFAULT_PADDING_MARGIN),
-        noise_seed=data.get('noise_seed', defaults.DEFAULT_NOISE_SEED),
-        noise_sigma=data.get('noise_sigma', defaults.DEFAULT_NOISE_SIGMA),
-        use_mask=data.get('use_mask', defaults.DEFAULT_USE_MASK),
-        edge_gain_strength=data.get('edge_gain_strength', defaults.DEFAULT_EDGE_GAIN_STRENGTH),
-        edge_gain_power=data.get('edge_gain_power', defaults.DEFAULT_EDGE_GAIN_POWER),
-        solve_scale=max(
-            defaults.MIN_SOLVE_SCALE,
-            min(defaults.MAX_SOLVE_SCALE, solve_scale_raw),
-        ),
+        multiplier=data['multiplier'],
+        supersample=data['supersample'],
+        num_passes=data['num_passes'],
+        margin=data['margin'],
+        noise_seed=data['noise_seed'],
+        noise_sigma=data['noise_sigma'],
+        use_mask=data['use_mask'],
+        edge_gain_strength=data['edge_gain_strength'],
+        edge_gain_power=data['edge_gain_power'],
+        solve_scale=data['solve_scale'],
     )
 
 
@@ -332,15 +308,15 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
 def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
     """Reconstruct DisplaySettings from dict."""
     return DisplaySettings(
-        downsample_sigma=data.get('downsample_sigma', defaults.DEFAULT_DOWNSAMPLE_SIGMA),
-        clip_percent=data.get('clip_percent', defaults.DEFAULT_CLIP_PERCENT),
-        brightness=data.get('brightness', defaults.DEFAULT_BRIGHTNESS),
-        contrast=data.get('contrast', defaults.DEFAULT_CONTRAST),
-        gamma=data.get('gamma', defaults.DEFAULT_GAMMA),
-        color_enabled=data.get('color_enabled', defaults.DEFAULT_COLOR_ENABLED),
-        palette=data.get('palette', defaults.DEFAULT_COLOR_PALETTE),
-        lightness_expr=data.get('lightness_expr'),
-        saturation=data.get('saturation', 1.0),
+        downsample_sigma=data['downsample_sigma'],
+        clip_percent=data['clip_percent'],
+        brightness=data['brightness'],
+        contrast=data['contrast'],
+        gamma=data['gamma'],
+        color_enabled=data['color_enabled'],
+        palette=data['palette'],
+        lightness_expr=data['lightness_expr'],
+        saturation=data['saturation'],
     )
 
 
@@ -355,8 +331,8 @@ def _color_settings_to_dict(settings: ConductorColorSettings) -> dict[str, Any]:
 def _dict_to_color_settings(data: dict[str, Any]) -> ConductorColorSettings:
     """Reconstruct ConductorColorSettings from dict."""
     return ConductorColorSettings(
-        surface=_dict_to_region_style(data.get('surface', {})),
-        interior=_dict_to_region_style(data.get('interior', {})),
+        surface=_dict_to_region_style(data['surface']),
+        interior=_dict_to_region_style(data['interior']),
     )
 
 
@@ -379,16 +355,16 @@ def _region_style_to_dict(style: RegionStyle) -> dict[str, Any]:
 def _dict_to_region_style(data: dict[str, Any]) -> RegionStyle:
     """Reconstruct RegionStyle from dict."""
     return RegionStyle(
-        enabled=data.get('enabled', False),
-        use_palette=data.get('use_palette', True),
-        palette=data.get('palette', defaults.DEFAULT_COLOR_PALETTE),
-        solid_color=tuple(data.get('solid_color', [0.5, 0.5, 0.5])),
-        brightness=data.get('brightness'),  # None by default (backward compatible)
-        contrast=data.get('contrast'),      # None by default (backward compatible)
-        gamma=data.get('gamma'),            # None by default (backward compatible)
-        lightness_expr=data.get('lightness_expr'),  # None by default (backward compatible)
-        smear_enabled=data.get('smear_enabled', False),
-        smear_sigma=data.get('smear_sigma', defaults.DEFAULT_SMEAR_SIGMA),
+        enabled=data['enabled'],
+        use_palette=data['use_palette'],
+        palette=data['palette'],
+        solid_color=tuple(data['solid_color']),
+        brightness=data['brightness'],  # May be None
+        contrast=data['contrast'],      # May be None
+        gamma=data['gamma'],            # May be None
+        lightness_expr=data['lightness_expr'],  # May be None
+        smear_enabled=data['smear_enabled'],
+        smear_sigma=data['smear_sigma'],
     )
 
 
