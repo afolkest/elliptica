@@ -22,6 +22,7 @@ from elliptica.serialization import load_project, load_render_cache
 from elliptica.render import add_palette, USER_PALETTES_PATH
 from elliptica.gpu import GPUContext
 from elliptica.gpu.pipeline import build_base_rgb_gpu
+from elliptica.gpu.ops import percentile_clip_gpu
 from elliptica.colorspace.gamut import max_chroma_fast, gamut_map_to_srgb
 from elliptica import defaults
 
@@ -94,6 +95,22 @@ class OklchPalettePreview:
         self.gamma = 1.0
         self.clip_percent = 1.5
         self.chroma_boost = 2.0
+
+        # Caches for palette and intensity processing
+        self._palette_cache_key: Optional[tuple] = None
+        self._lut_cache: dict[int, np.ndarray] = {}
+        self._lut_tensor_cache: Optional[torch.Tensor] = None
+        self._lut_tensor_cache_key: Optional[tuple] = None
+        self._normalized_intensity_cache: Optional[np.ndarray] = None
+        self._normalized_intensity_clip_percent: Optional[float] = None
+        self._normalized_intensity_source_id: Optional[int] = None
+        self._processed_intensity_cache: Optional[np.ndarray] = None
+        self._processed_intensity_params: Optional[tuple] = None
+        self._processed_intensity_source_id: Optional[int] = None
+        self._normalized_tensor_cache: Optional[torch.Tensor] = None
+        self._normalized_tensor_clip_percent: Optional[float] = None
+        self._normalized_tensor_shape: Optional[tuple[int, int]] = None
+        self._normalized_tensor_device: Optional[torch.device] = None
 
         # Persistence
         self.palettes_path = USER_PALETTES_PATH.with_name("oklch_palettes.json")
@@ -187,10 +204,10 @@ class OklchPalettePreview:
     def _downsample_lic(self, lic: np.ndarray, width: int, height: int) -> np.ndarray:
         """Resize LIC array to preview resolution."""
         resample = Image.Resampling.BILINEAR if hasattr(Image, "Resampling") else Image.BILINEAR
-        lic_uint8 = np.clip(lic * 255.0, 0, 255).astype(np.uint8)
-        img = Image.fromarray(lic_uint8, mode="L")
+        lic_float = lic.astype(np.float32, copy=False)
+        img = Image.fromarray(lic_float, mode="F")
         img = img.resize((width, height), resample=resample)
-        return np.asarray(img, dtype=np.float32) / 255.0
+        return np.asarray(img, dtype=np.float32)
 
     def _get_lic_source(self) -> tuple[np.ndarray, Optional[torch.Tensor]]:
         """Return the LIC data used for previews."""
@@ -283,6 +300,26 @@ class OklchPalettePreview:
     # Gradient interpolation & LUT
     # ---------------------------------------------------------------
 
+    def _get_palette_cache_key(self) -> tuple:
+        return (
+            float(self.chroma_boost),
+            tuple((float(s["pos"]), float(s["L"]), float(s["C"]), float(s["H"])) for s in self.stops),
+        )
+
+    def _get_lut(self, size: int = 256) -> np.ndarray:
+        key = self._get_palette_cache_key()
+        if self._palette_cache_key != key:
+            self._palette_cache_key = key
+            self._lut_cache.clear()
+            self._lut_tensor_cache = None
+            self._lut_tensor_cache_key = None
+
+        lut = self._lut_cache.get(size)
+        if lut is None:
+            lut = self._build_lut(size=size)
+            self._lut_cache[size] = lut
+        return lut
+
     def _interpolate_oklch(self, t: float) -> tuple[float, float, float]:
         """Interpolate gradient at position t (0-1) in OKLCH space."""
         if not self.stops:
@@ -348,46 +385,119 @@ class OklchPalettePreview:
     # Apply palette to image
     # ---------------------------------------------------------------
 
-    def _process_intensity_cpu(self, lic: np.ndarray) -> np.ndarray:
-        """Apply clip/brightness/contrast/gamma to LIC for histogram and CPU color."""
-        arr = lic.copy()
-        clip_percent = self.clip_percent
-        if clip_percent > 0:
-            lower = clip_percent / 100.0
-            upper = 1.0 - lower
-            vmin, vmax = np.percentile(arr, [lower * 100, upper * 100])
+    def _normalize_unit(self, arr: np.ndarray) -> np.ndarray:
+        arr_min = float(arr.min())
+        arr_max = float(arr.max())
+        if arr_max > arr_min:
+            return (arr - arr_min) / (arr_max - arr_min)
+        return np.zeros_like(arr, dtype=np.float32)
+
+    def _get_normalized_intensity_cpu(self, lic: np.ndarray) -> np.ndarray:
+        clip_percent = float(self.clip_percent)
+        source_id = id(lic)
+        if (
+            self._normalized_intensity_cache is not None
+            and self._normalized_intensity_clip_percent is not None
+            and abs(self._normalized_intensity_clip_percent - clip_percent) < 1e-6
+            and self._normalized_intensity_source_id == source_id
+        ):
+            return self._normalized_intensity_cache
+
+        arr = lic.astype(np.float32, copy=False)
+        if clip_percent > 0.0:
+            vmin = float(np.percentile(arr, clip_percent))
+            vmax = float(np.percentile(arr, 100.0 - clip_percent))
             if vmax > vmin:
-                arr = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+                norm = (arr - vmin) / (vmax - vmin)
             else:
-                arr = np.clip(arr, 0.0, 1.0)
+                norm = self._normalize_unit(arr)
+        else:
+            norm = self._normalize_unit(arr)
+
+        norm = np.clip(norm, 0.0, 1.0).astype(np.float32, copy=False)
+
+        self._normalized_intensity_cache = norm
+        self._normalized_intensity_clip_percent = clip_percent
+        self._normalized_intensity_source_id = source_id
+        self._processed_intensity_params = None
+        return norm
+
+    def _process_intensity_cpu(self, lic: np.ndarray) -> tuple[np.ndarray, bool]:
+        """Apply clip/brightness/contrast/gamma to LIC for histogram and CPU color."""
+        base = self._get_normalized_intensity_cpu(lic)
+        params = (float(self.clip_percent), float(self.brightness), float(self.contrast), float(self.gamma))
+        source_id = self._normalized_intensity_source_id
+        if (
+            self._processed_intensity_cache is not None
+            and self._processed_intensity_params == params
+            and self._processed_intensity_source_id == source_id
+        ):
+            return self._processed_intensity_cache, False
+
+        if self._processed_intensity_cache is None or self._processed_intensity_cache.shape != base.shape:
+            self._processed_intensity_cache = np.empty_like(base, dtype=np.float32)
+
+        arr = self._processed_intensity_cache
+        np.copyto(arr, base)
 
         if self.contrast != 1.0:
-            arr = (arr - 0.5) * self.contrast + 0.5
-            arr = np.clip(arr, 0.0, 1.0)
+            arr -= 0.5
+            arr *= self.contrast
+            arr += 0.5
+            np.clip(arr, 0.0, 1.0, out=arr)
 
         if self.brightness != 0.0:
-            arr = arr + self.brightness
-            arr = np.clip(arr, 0.0, 1.0)
+            arr += self.brightness
+            np.clip(arr, 0.0, 1.0, out=arr)
 
-        if self.gamma != 1.0:
-            arr = np.power(arr, self.gamma)
-            arr = np.clip(arr, 0.0, 1.0)
+        gamma = max(float(self.gamma), 1e-3)
+        if gamma != 1.0:
+            np.power(arr, gamma, out=arr)
+            np.clip(arr, 0.0, 1.0, out=arr)
 
-        return arr
+        self._processed_intensity_params = params
+        self._processed_intensity_source_id = source_id
+        return arr, True
 
-    def _apply_palette(self) -> tuple[np.ndarray, np.ndarray]:
+    def _get_normalized_tensor(self, lic_tensor: torch.Tensor) -> torch.Tensor:
+        clip_percent = float(self.clip_percent)
+        shape = tuple(lic_tensor.shape)
+        device = lic_tensor.device
+        if (
+            self._normalized_tensor_cache is not None
+            and self._normalized_tensor_clip_percent is not None
+            and abs(self._normalized_tensor_clip_percent - clip_percent) < 1e-6
+            and self._normalized_tensor_shape == shape
+            and self._normalized_tensor_device == device
+        ):
+            return self._normalized_tensor_cache
+
+        normalized, _, _ = percentile_clip_gpu(lic_tensor, clip_percent)
+        self._normalized_tensor_cache = normalized
+        self._normalized_tensor_clip_percent = clip_percent
+        self._normalized_tensor_shape = shape
+        self._normalized_tensor_device = device
+        return normalized
+
+    def _apply_palette(self) -> tuple[np.ndarray, np.ndarray, bool]:
         """Apply current gradient to LIC array.
 
         Returns:
-            (RGB uint8 image, processed intensity array in [0,1])
+            (RGB float image in [0,1], processed intensity array in [0,1], intensity_changed)
         """
-        lut_numpy = self._build_lut(size=256)
+        lut_numpy = self._get_lut(size=256)
 
         lic_array, lic_tensor = self._get_lic_source()
-        processed_intensity = self._process_intensity_cpu(lic_array)
+        processed_intensity, intensity_changed = self._process_intensity_cpu(lic_array)
 
         if self.use_gpu and lic_tensor is not None:
-            lut_tensor = GPUContext.to_gpu(lut_numpy)
+            lut_tensor = self._lut_tensor_cache
+            if lut_tensor is None or self._lut_tensor_cache_key != self._palette_cache_key:
+                lut_tensor = GPUContext.to_gpu(lut_numpy)
+                self._lut_tensor_cache = lut_tensor
+                self._lut_tensor_cache_key = self._palette_cache_key
+
+            normalized_tensor = self._get_normalized_tensor(lic_tensor)
             rgb_tensor = build_base_rgb_gpu(
                 lic_tensor,
                 clip_percent=self.clip_percent,
@@ -396,6 +506,7 @@ class OklchPalettePreview:
                 gamma=self.gamma,
                 color_enabled=True,
                 lut=lut_tensor,
+                normalized_tensor=normalized_tensor,
             )
             rgb_tensor = torch.clamp(rgb_tensor, 0.0, 1.0)
             rgb_array = GPUContext.to_cpu(rgb_tensor)
@@ -405,7 +516,7 @@ class OklchPalettePreview:
             indices = np.clip(indices, 0, len(lut) - 1)
             rgb_array = lut[indices]
 
-        return (rgb_array * 255).astype(np.uint8), processed_intensity
+        return rgb_array.astype(np.float32, copy=False), processed_intensity, intensity_changed
 
     # ---------------------------------------------------------------
     # Texture generation
@@ -413,7 +524,7 @@ class OklchPalettePreview:
 
     def _generate_gradient_texture(self) -> np.ndarray:
         """Generate gradient bar texture."""
-        lut = self._build_lut(size=self.gradient_width)
+        lut = self._get_lut(size=self.gradient_width)
         height = 28
         rgba = np.ones((height, self.gradient_width, 4), dtype=np.float32)
         rgba[:, :, :3] = lut[np.newaxis, :, :]
@@ -523,13 +634,13 @@ class OklchPalettePreview:
 
     def _update_image_texture(self):
         """Update the main preview image and histogram."""
-        rgb_uint8, processed_intensity = self._apply_palette()
-        height, width = rgb_uint8.shape[:2]
+        rgb_float, processed_intensity, intensity_changed = self._apply_palette()
+        height, width = rgb_float.shape[:2]
 
         if self._rgba_buffer is None or self._rgba_buffer.shape[:2] != (height, width):
             self._rgba_buffer = np.empty((height, width, 4), dtype=np.float32)
 
-        self._rgba_buffer[:, :, :3] = rgb_uint8.astype(np.float32) / 255.0
+        self._rgba_buffer[:, :, :3] = rgb_float
         self._rgba_buffer[:, :, 3] = 1.0
         data = self._rgba_buffer.ravel()
 
@@ -540,7 +651,8 @@ class OklchPalettePreview:
         else:
             dpg.set_value(self.image_texture_id, data)
 
-        self._update_histogram_from_processed(processed_intensity)
+        if intensity_changed:
+            self._update_histogram_from_processed(processed_intensity)
 
     def _update_histogram_from_processed(self, processed: np.ndarray):
         """Compute histogram from processed intensity and refresh drawlist."""
@@ -1027,7 +1139,7 @@ class OklchPalettePreview:
         self.saved_palettes[name] = stops_data
         self._save_palettes()
 
-        lut = self._build_lut(size=16)
+        lut = self._get_lut(size=16)
         add_palette(name, lut.tolist())
 
         print(f"Saved palette '{name}'")
