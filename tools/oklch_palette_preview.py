@@ -189,20 +189,10 @@ class OklchPalettePreview:
         self.display_width = max(1, int(self.width * scale))
         self.display_height = max(1, int(self.height * scale))
 
-        if scale < 1.0:
-            self.lic_preview_array = self._downsample_lic(
-                self.lic_array,
-                self.display_width,
-                self.display_height,
-            )
-        else:
-            self.lic_preview_array = self.lic_array
-
-        if self.use_gpu and self.lic_preview_array is not None:
-            if scale < 1.0:
-                self.lic_preview_tensor = GPUContext.to_gpu(self.lic_preview_array)
-            else:
-                self.lic_preview_tensor = self.lic_tensor
+        # Keep full-res processing; only scale the on-screen display size.
+        self.use_preview = False
+        self.lic_preview_array = None
+        self.lic_preview_tensor = None
 
     def _downsample_lic(self, lic: np.ndarray, width: int, height: int) -> np.ndarray:
         """Resize LIC array to preview resolution."""
