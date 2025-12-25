@@ -1,6 +1,7 @@
 """Postprocessing panel controller for Elliptica UI - sliders, color, and region properties."""
 
 import time
+import numpy as np
 from typing import Optional, Literal, TYPE_CHECKING
 
 from elliptica import defaults
@@ -46,6 +47,20 @@ class PostprocessingPanel:
         # Widget IDs for lightness expression (palette mode)
         self.lightness_expr_checkbox_id: Optional[int] = None
         self.lightness_expr_input_id: Optional[int] = None
+
+        # Palette preview + histogram UI
+        self.palette_preview_width = 320
+        self.palette_preview_height = 22
+        self.palette_hist_height = 60
+        self.palette_hist_bins = 128
+        self.global_palette_preview_button_id: Optional[int] = None
+        self.region_palette_preview_button_id: Optional[int] = None
+        self.global_hist_drawlist_id: Optional[int] = None
+        self.region_hist_drawlist_id: Optional[int] = None
+        self.hist_values: Optional[np.ndarray] = None
+        self.hist_pending_update: bool = False
+        self.hist_last_update_time: float = 0.0
+        self.hist_debounce_delay: float = 0.1  # 100ms throttle
 
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
@@ -378,6 +393,9 @@ class PostprocessingPanel:
                     clamped=True,
                 )
 
+                self._update_palette_preview_buttons()
+                self._refresh_histogram()
+
                 dpg.add_spacer(height=8)
 
             # Expressions mode container (hidden by default)
@@ -421,14 +439,16 @@ class PostprocessingPanel:
         LABEL_TEXT = (150, 150, 150)
         dpg.add_text("Palette", parent=parent, color=LABEL_TEXT)
 
-        # Button shows current palette name directly
+        # Palette preview button (gradient + label)
         initial_label = self.app.state.display_settings.palette if self.app.state.display_settings.color_enabled else "Grayscale"
-        global_palette_button = dpg.add_button(
+        global_palette_button = dpg.add_colormap_button(
             label=initial_label,
-            width=200,
+            width=self.palette_preview_width,
+            height=self.palette_preview_height,
             tag="global_palette_button",
             parent=parent,
         )
+        self.global_palette_preview_button_id = global_palette_button
 
         # Popup menu for global palette selection
         with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
@@ -470,6 +490,15 @@ class PostprocessingPanel:
                             user_data=palette_name
                         )
 
+        dpg.add_spacer(height=6, parent=parent)
+        dpg.add_text("Intensity (post clip/contrast/gamma)", parent=parent, color=LABEL_TEXT)
+        self.global_hist_drawlist_id = dpg.add_drawlist(
+            width=self.palette_preview_width,
+            height=self.palette_hist_height,
+            tag="global_hist_drawlist",
+            parent=parent,
+        )
+
     def _build_region_palette_ui(self, parent, palette_colormaps: dict) -> None:
         """Build region palette selection UI with popup menu.
 
@@ -487,13 +516,15 @@ class PostprocessingPanel:
         LABEL_TEXT = (150, 150, 150)
         dpg.add_text("Region Palette", parent=parent, color=LABEL_TEXT)
 
-        # Button shows current selection directly
-        region_palette_button = dpg.add_button(
+        # Palette preview button (gradient + label)
+        region_palette_button = dpg.add_colormap_button(
             label="Global",
-            width=200,
+            width=self.palette_preview_width,
+            height=self.palette_preview_height,
             tag="region_palette_button",
             parent=parent,
         )
+        self.region_palette_preview_button_id = region_palette_button
 
         # Popup menu for region palette selection
         with dpg.popup(region_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="region_palette_popup"):
@@ -522,6 +553,15 @@ class PostprocessingPanel:
                         tag=f"region_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
                     )
                     dpg.bind_colormap(btn, colormap_tag)
+
+        dpg.add_spacer(height=6, parent=parent)
+        dpg.add_text("Intensity (post clip/contrast/gamma)", parent=parent, color=LABEL_TEXT)
+        self.region_hist_drawlist_id = dpg.add_drawlist(
+            width=self.palette_preview_width,
+            height=self.palette_hist_height,
+            tag="region_hist_drawlist",
+            parent=parent,
+        )
 
     def _build_expression_editor_ui(self, parent) -> None:
         """Build the expression editor UI for OKLCH color mapping.
@@ -670,6 +710,189 @@ class PostprocessingPanel:
         # Trigger update
         self._update_color_config_from_expressions()
 
+    def _get_palette_preview_state(self, for_region: bool) -> tuple[str, Optional[str]]:
+        """Return label + colormap tag for the palette preview button."""
+        texture_manager = self.app.display_pipeline.texture_manager
+        grayscale_tag = texture_manager.grayscale_colormap_tag
+
+        with self.app.state_lock:
+            if for_region:
+                region_style = self._get_current_region_style_unlocked()
+                if region_style and region_style.enabled and region_style.use_palette:
+                    palette_name = region_style.palette
+                    return palette_name, texture_manager.palette_colormaps.get(palette_name) or grayscale_tag
+
+                if self.app.state.display_settings.color_enabled:
+                    palette_name = self.app.state.display_settings.palette
+                    return palette_name, texture_manager.palette_colormaps.get(palette_name) or grayscale_tag
+
+                return "Grayscale", grayscale_tag
+
+            if self.app.state.display_settings.color_enabled:
+                palette_name = self.app.state.display_settings.palette
+                return palette_name, texture_manager.palette_colormaps.get(palette_name) or grayscale_tag
+
+            return "Grayscale", grayscale_tag
+
+    def _update_palette_preview_buttons(self) -> None:
+        """Refresh palette preview labels and colormap bindings."""
+        if dpg is None:
+            return
+
+        if self.global_palette_preview_button_id is not None:
+            label, tag = self._get_palette_preview_state(for_region=False)
+            if dpg.does_item_exist(self.global_palette_preview_button_id):
+                dpg.configure_item(self.global_palette_preview_button_id, label=label)
+                if tag is not None:
+                    dpg.bind_colormap(self.global_palette_preview_button_id, tag)
+
+        if self.region_palette_preview_button_id is not None:
+            label, tag = self._get_palette_preview_state(for_region=True)
+            if dpg.does_item_exist(self.region_palette_preview_button_id):
+                dpg.configure_item(self.region_palette_preview_button_id, label=label)
+                if tag is not None:
+                    dpg.bind_colormap(self.region_palette_preview_button_id, tag)
+
+    def _normalize_unit(self, arr: np.ndarray) -> np.ndarray:
+        arr_min = float(arr.min())
+        arr_max = float(arr.max())
+        if arr_max > arr_min:
+            return (arr - arr_min) / (arr_max - arr_min)
+        return np.zeros_like(arr, dtype=np.float32)
+
+    def _downsample_histogram_source(self, arr: np.ndarray, max_samples: int = 200000) -> np.ndarray:
+        if arr.size <= max_samples:
+            return arr.astype(np.float32, copy=False)
+        step = max(1, int(np.sqrt(arr.size / max_samples)))
+        return arr[::step, ::step].astype(np.float32, copy=False)
+
+    def _compute_histogram_values(self) -> Optional[np.ndarray]:
+        """Compute histogram for post-processed intensity (global clip/contrast/gamma)."""
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            if cache is None or cache.result is None:
+                return None
+
+            source = cache.result.array
+            clip_percent = float(self.app.state.display_settings.clip_percent)
+            brightness = float(self.app.state.display_settings.brightness)
+            contrast = float(self.app.state.display_settings.contrast)
+            gamma = float(self.app.state.display_settings.gamma)
+
+            cached_percentiles = None
+            if cache.lic_percentiles is not None:
+                cached_clip = cache.lic_percentiles_clip_percent
+                if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
+                    cached_percentiles = cache.lic_percentiles
+
+        sample = self._downsample_histogram_source(source)
+
+        if clip_percent > 0.0:
+            if cached_percentiles is not None:
+                vmin, vmax = cached_percentiles
+            else:
+                vmin = float(np.percentile(sample, clip_percent))
+                vmax = float(np.percentile(sample, 100.0 - clip_percent))
+        else:
+            vmin = float(sample.min())
+            vmax = float(sample.max())
+
+        if vmax > vmin:
+            norm = (sample - vmin) / (vmax - vmin)
+        else:
+            norm = self._normalize_unit(sample)
+        norm = np.clip(norm, 0.0, 1.0)
+
+        adjusted = norm
+        if contrast != 1.0:
+            adjusted = (adjusted - 0.5) * contrast + 0.5
+            adjusted = np.clip(adjusted, 0.0, 1.0)
+        if brightness != 0.0:
+            adjusted = np.clip(adjusted + brightness, 0.0, 1.0)
+        if gamma != 1.0:
+            adjusted = np.clip(adjusted ** gamma, 0.0, 1.0)
+
+        counts, _ = np.histogram(adjusted, bins=self.palette_hist_bins, range=(0.0, 1.0))
+        counts = counts.astype(np.float32)
+        if counts.max() > 0:
+            counts /= counts.max()
+        if counts.size >= 3:
+            kernel = np.array([0.2, 0.6, 0.2], dtype=np.float32)
+            counts = np.convolve(counts, kernel, mode="same")
+            if counts.max() > 0:
+                counts /= counts.max()
+        return counts
+
+    def _update_histogram_drawlist(self, drawlist_id: Optional[int], values: Optional[np.ndarray]) -> None:
+        if dpg is None or drawlist_id is None:
+            return
+
+        if not dpg.does_item_exist(drawlist_id):
+            return
+
+        dpg.delete_item(drawlist_id, children_only=True)
+
+        if values is None:
+            return
+
+        width = float(self.palette_preview_width)
+        height = float(self.palette_hist_height)
+        padding = 6.0
+        bar_top = 0.0
+        bar_bottom = height - 2.0
+        inner_width = max(1.0, width - 2.0 * padding)
+        bin_w = inner_width / float(len(values))
+
+        dpg.draw_rectangle(
+            (0, bar_top),
+            (width, bar_bottom),
+            color=(80, 80, 80, 180),
+            thickness=1,
+            parent=drawlist_id,
+        )
+
+        for i, v in enumerate(values):
+            x0 = padding + i * bin_w
+            x1 = x0 + bin_w
+            y1 = bar_bottom
+            y0 = bar_bottom - (v * (height - 4.0))
+            dpg.draw_rectangle(
+                (x0, y0),
+                (x1, y1),
+                fill=(170, 175, 190, 180),
+                color=(0, 0, 0, 0),
+                parent=drawlist_id,
+            )
+
+    def _refresh_histogram(self) -> None:
+        if dpg is None:
+            return
+
+        self.hist_values = self._compute_histogram_values()
+        self._update_histogram_drawlist(self.global_hist_drawlist_id, self.hist_values)
+        self._update_histogram_drawlist(self.region_hist_drawlist_id, self.hist_values)
+        self.hist_last_update_time = time.time()
+        self.hist_pending_update = False
+
+    def _request_histogram_update(self, force: bool = False) -> None:
+        if dpg is None:
+            return
+
+        now = time.time()
+        if force or (now - self.hist_last_update_time) >= self.hist_debounce_delay:
+            self._refresh_histogram()
+            return
+
+        self.hist_pending_update = True
+
+    def check_histogram_debounce(self) -> None:
+        if not self.hist_pending_update:
+            return
+
+        now = time.time()
+        if (now - self.hist_last_update_time) >= self.hist_debounce_delay:
+            self._refresh_histogram()
+
     def update_context_ui(self) -> None:
         """Update UI based on current selection context (global vs boundary)."""
         if dpg is None:
@@ -702,12 +925,7 @@ class PostprocessingPanel:
             # Check if override is enabled (controlled by palette selection)
             has_override = self._has_override_enabled()
 
-            # Update region palette button label (no graying - always clickable)
             region_style = self._get_current_region_style()
-            if region_style and region_style.enabled:
-                dpg.configure_item("region_palette_button", label=region_style.palette)
-            else:
-                dpg.configure_item("region_palette_button", label="Global")
 
             # Update lightness expression controls for region mode
             # Show Global/Custom toggle (independent of palette override)
@@ -812,6 +1030,9 @@ class PostprocessingPanel:
             # Hide effects section
             dpg.configure_item("effects_header", show=False)
 
+        self._update_palette_preview_buttons()
+        self._request_histogram_update()
+
     def update_region_properties_panel(self) -> None:
         """Update region properties panel based on current selection.
 
@@ -877,6 +1098,8 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
+        if not has_override:
+            self._request_histogram_update()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
         """Handle contrast slider change (real-time with GPU acceleration)."""
@@ -894,6 +1117,8 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
+        if not has_override:
+            self._request_histogram_update()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
         """Handle gamma slider change (real-time with GPU acceleration)."""
@@ -911,6 +1136,8 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
+        if not has_override:
+            self._request_histogram_update()
 
     def on_saturation_change(self, sender=None, app_data=None) -> None:
         """Handle saturation slider change (post-colorization chroma multiplier)."""
@@ -1104,8 +1331,7 @@ class PostprocessingPanel:
         with self.app.state_lock:
             actions.set_color_enabled(self.app.state, False)
 
-        # Update button label to show current selection
-        dpg.configure_item("global_palette_button", label="Grayscale")
+        self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
@@ -1121,8 +1347,7 @@ class PostprocessingPanel:
             actions.set_color_enabled(self.app.state, True)
             actions.set_palette(self.app.state, palette_name)
 
-        # Update button label to show current selection
-        dpg.configure_item("global_palette_button", label=palette_name)
+        self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
 
         self.app.display_pipeline.refresh_display()
@@ -1143,8 +1368,6 @@ class PostprocessingPanel:
                 actions.set_region_contrast(self.app.state, selected.id, region_type, None)
                 actions.set_region_gamma(self.app.state, selected.id, region_type, None)
 
-        # Update button label to show current selection
-        dpg.configure_item("region_palette_button", label="Global")
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
@@ -1170,8 +1393,6 @@ class PostprocessingPanel:
                 actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
                 actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
 
-        # Update button label to show current selection
-        dpg.configure_item("region_palette_button", label=palette_name)
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
@@ -1258,6 +1479,7 @@ class PostprocessingPanel:
 
         # Rebuild the palette popup menu
         self._rebuild_palette_popup()
+        self._update_palette_preview_buttons()
 
         # Close the confirmation modal
         dpg.configure_item(self.delete_confirmation_modal_id, show=False)
@@ -1339,6 +1561,7 @@ class PostprocessingPanel:
     def _apply_clip_update(self, value: float) -> None:
         """Apply clip percent refresh (state already updated in on_clip_slider)."""
         self.app.display_pipeline.refresh_display()
+        self._request_histogram_update(force=True)
 
     def _apply_smear_update(self) -> None:
         """Apply smear refresh (state already updated in on_smear_sigma)."""
