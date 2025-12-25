@@ -68,7 +68,10 @@ class OklchPalettePreview:
         # OKLCH picker dimensions
         self.slice_width = 360
         self.slice_height = 100
-        self.c_max_display = 0.37
+        self.c_max_absolute = 0.5
+        self.use_relative_chroma = True
+        self.c_max_display = self._get_c_display_max()
+        self.chroma_interp_mix = 1.0
 
         # Precompute slice grids
         self._h_grid = np.linspace(0, 360, self.slice_width, endpoint=False, dtype=np.float32)
@@ -88,6 +91,7 @@ class OklchPalettePreview:
         self.gradient_drawlist_id = None
         self.slice_drawlist_id = None
         self.slice_drag_active = False
+        self.slider_block_theme = None
 
         # Display settings
         self.brightness = defaults.DEFAULT_BRIGHTNESS
@@ -233,9 +237,14 @@ class OklchPalettePreview:
 
     def _init_default_gradient(self):
         """Initialize with a two-stop gradient."""
+        c0 = 0.08
+        c1 = 0.06
+        if self.use_relative_chroma:
+            c0 = self._chroma_abs_to_rel(0.20, 270.0, c0)
+            c1 = self._chroma_abs_to_rel(0.92, 60.0, c1)
         self.stops = [
-            {"id": 0, "pos": 0.0, "L": 0.20, "C": 0.08, "H": 270.0},
-            {"id": 1, "pos": 1.0, "L": 0.92, "C": 0.06, "H": 60.0},
+            {"id": 0, "pos": 0.0, "L": 0.20, "C": c0, "H": 270.0},
+            {"id": 1, "pos": 1.0, "L": 0.92, "C": c1, "H": 60.0},
         ]
         self._next_stop_id = 2
         self.selected_stop_id = 0
@@ -260,9 +269,10 @@ class OklchPalettePreview:
     # ---------------------------------------------------------------
 
     def _oklch_to_rgb_clamped(self, L: float, C: float, H: float) -> tuple[float, float, float]:
+        C_abs = self._chroma_to_abs(L, H, C)
         rgb = gamut_map_to_srgb(
             np.array(L, dtype=np.float32),
-            np.array(C, dtype=np.float32),
+            np.array(C_abs, dtype=np.float32),
             np.array(H, dtype=np.float32),
             method='compress',
         )
@@ -280,7 +290,62 @@ class OklchPalettePreview:
         ))
 
     def _is_in_gamut(self, L: float, C: float, H: float) -> bool:
-        return C <= self._get_max_chroma(L, H)
+        if self.use_relative_chroma:
+            return C <= 1.0 + 1e-6
+        return C <= self._get_max_chroma(L, H) + 1e-6
+
+    def _get_c_display_max(self) -> float:
+        return 1.0 if self.use_relative_chroma else self.c_max_absolute
+
+    def _rebuild_slice_grids(self) -> None:
+        self.c_max_display = self._get_c_display_max()
+        self._c_grid = np.linspace(0, self.c_max_display, self.slice_height, dtype=np.float32)
+        self._H_mesh, self._C_mesh = np.meshgrid(self._h_grid, self._c_grid)
+
+    def _chroma_rel_to_abs(self, L: float, H: float, C_rel: float) -> float:
+        max_c = self._get_max_chroma(L, H)
+        if max_c <= 0.0:
+            return 0.0
+        return float(np.clip(C_rel, 0.0, 1.0) * max_c)
+
+    def _chroma_rel_to_abs_array(
+        self,
+        L_arr: np.ndarray,
+        H_arr: np.ndarray,
+        C_rel_arr: np.ndarray,
+    ) -> np.ndarray:
+        max_c = max_chroma_fast(L_arr, H_arr)
+        return np.clip(C_rel_arr, 0.0, 1.0) * max_c
+
+    def _chroma_abs_to_rel(self, L: float, H: float, C_abs: float) -> float:
+        max_c = self._get_max_chroma(L, H)
+        if max_c <= 0.0:
+            return 0.0
+        return float(np.clip(C_abs / max_c, 0.0, 1.0))
+
+    def _get_stop_chroma_rel_abs(self, stop: dict) -> tuple[float, float]:
+        if self.use_relative_chroma:
+            c_rel = float(stop["C"])
+            c_abs = self._chroma_rel_to_abs(stop["L"], stop["H"], c_rel)
+        else:
+            c_abs = float(stop["C"])
+            c_rel = self._chroma_abs_to_rel(stop["L"], stop["H"], c_abs)
+        return c_rel, c_abs
+
+    def _chroma_to_abs(self, L: float, H: float, C: float) -> float:
+        if self.use_relative_chroma:
+            return self._chroma_rel_to_abs(L, H, C)
+        return float(max(C, 0.0))
+
+    def _chroma_to_abs_array(
+        self,
+        L_arr: np.ndarray,
+        H_arr: np.ndarray,
+        C_arr: np.ndarray,
+    ) -> np.ndarray:
+        if self.use_relative_chroma:
+            return self._chroma_rel_to_abs_array(L_arr, H_arr, C_arr)
+        return np.clip(C_arr, 0.0, None)
 
     # ---------------------------------------------------------------
     # Gradient interpolation & LUT
@@ -288,6 +353,7 @@ class OklchPalettePreview:
 
     def _get_palette_cache_key(self) -> tuple:
         return (
+            float(self.chroma_interp_mix),
             tuple((float(s["pos"]), float(s["L"]), float(s["C"]), float(s["H"])) for s in self.stops),
         )
 
@@ -330,7 +396,6 @@ class OklchPalettePreview:
                 frac = (t - s0["pos"]) / (s1["pos"] - s0["pos"])
 
                 L = s0["L"] + frac * (s1["L"] - s0["L"])
-                C = s0["C"] + frac * (s1["C"] - s0["C"])
 
                 # Hue interpolation with wraparound
                 h0, h1 = s0["H"], s1["H"]
@@ -341,6 +406,19 @@ class OklchPalettePreview:
                     dh += 360
                 H = (h0 + frac * dh) % 360
 
+                c_rel0, c_abs0 = self._get_stop_chroma_rel_abs(s0)
+                c_rel1, c_abs1 = self._get_stop_chroma_rel_abs(s1)
+                c_rel = c_rel0 + frac * (c_rel1 - c_rel0)
+                c_abs_rel = self._chroma_rel_to_abs(L, H, c_rel)
+                c_abs = c_abs0 + frac * (c_abs1 - c_abs0)
+                mix = float(np.clip(self.chroma_interp_mix, 0.0, 1.0))
+                c_abs_mix = c_abs * (1.0 - mix) + c_abs_rel * mix
+
+                if self.use_relative_chroma:
+                    C = self._chroma_abs_to_rel(L, H, c_abs_mix)
+                else:
+                    C = c_abs_mix
+
                 return (L, C, H)
 
         s = self.stops[-1]
@@ -350,17 +428,80 @@ class OklchPalettePreview:
         """Build RGB LUT from current gradient."""
         positions = np.linspace(0.0, 1.0, size, dtype=np.float32)
 
-        L_arr = np.empty(size, dtype=np.float32)
-        C_arr = np.empty(size, dtype=np.float32)
-        H_arr = np.empty(size, dtype=np.float32)
+        if not self.stops:
+            return np.zeros((size, 3), dtype=np.float32)
 
-        for i, t in enumerate(positions):
-            L, C, H = self._interpolate_oklch(float(t))
-            L_arr[i] = L
-            C_arr[i] = C
-            H_arr[i] = H
+        if len(self.stops) == 1:
+            stop = self.stops[0]
+            L_arr = np.full(size, float(stop["L"]), dtype=np.float32)
+            H_arr = np.full(size, float(stop["H"]), dtype=np.float32)
+            c_rel, c_abs = self._get_stop_chroma_rel_abs(stop)
+            C_rel_arr = np.full(size, float(c_rel), dtype=np.float32)
+            C_abs_arr = np.full(size, float(c_abs), dtype=np.float32)
+        else:
+            stops = self.stops
+            stop_count = len(stops)
+            stop_c_rel = np.empty(stop_count, dtype=np.float32)
+            stop_c_abs = np.empty(stop_count, dtype=np.float32)
 
-        rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='compress')
+            for i, stop in enumerate(stops):
+                c_rel, c_abs = self._get_stop_chroma_rel_abs(stop)
+                stop_c_rel[i] = c_rel
+                stop_c_abs[i] = c_abs
+
+            L_arr = np.full(size, float(stops[0]["L"]), dtype=np.float32)
+            H_arr = np.full(size, float(stops[0]["H"]), dtype=np.float32)
+            C_rel_arr = np.full(size, float(stop_c_rel[0]), dtype=np.float32)
+            C_abs_arr = np.full(size, float(stop_c_abs[0]), dtype=np.float32)
+
+            for i in range(stop_count - 1):
+                s0, s1 = stops[i], stops[i + 1]
+                p0, p1 = float(s0["pos"]), float(s1["pos"])
+                if p1 <= p0:
+                    continue
+
+                mask = (positions >= p0) & (positions <= p1)
+                if not np.any(mask):
+                    continue
+
+                frac = (positions[mask] - p0) / (p1 - p0)
+
+                L_arr[mask] = s0["L"] + frac * (s1["L"] - s0["L"])
+
+                h0, h1 = s0["H"], s1["H"]
+                dh = h1 - h0
+                if dh > 180:
+                    dh -= 360
+                elif dh < -180:
+                    dh += 360
+                H_arr[mask] = (h0 + frac * dh) % 360
+
+                C_rel_arr[mask] = stop_c_rel[i] + frac * (stop_c_rel[i + 1] - stop_c_rel[i])
+                C_abs_arr[mask] = stop_c_abs[i] + frac * (stop_c_abs[i + 1] - stop_c_abs[i])
+
+            last = stops[-1]
+            last_pos = float(last["pos"])
+            tail_mask = positions > last_pos
+            if np.any(tail_mask):
+                c_rel, c_abs = self._get_stop_chroma_rel_abs(last)
+                L_arr[tail_mask] = float(last["L"])
+                H_arr[tail_mask] = float(last["H"])
+                C_rel_arr[tail_mask] = float(c_rel)
+                C_abs_arr[tail_mask] = float(c_abs)
+
+        mix = float(np.clip(self.chroma_interp_mix, 0.0, 1.0))
+        if mix <= 0.0:
+            C_abs = np.clip(C_abs_arr, 0.0, None)
+        elif mix >= 1.0:
+            max_c = max_chroma_fast(L_arr, H_arr)
+            C_abs = np.clip(C_rel_arr, 0.0, 1.0) * max_c
+        else:
+            max_c = max_chroma_fast(L_arr, H_arr)
+            C_abs_rel = np.clip(C_rel_arr, 0.0, 1.0) * max_c
+            C_abs = (1.0 - mix) * C_abs_arr + mix * C_abs_rel
+            C_abs = np.clip(C_abs, 0.0, None)
+
+        rgb = gamut_map_to_srgb(L_arr, C_abs, H_arr, method='compress')
         return np.clip(rgb, 0.0, 1.0)
 
     # ---------------------------------------------------------------
@@ -517,6 +658,13 @@ class OklchPalettePreview:
         L_arr = np.full_like(self._C_mesh, L)
         max_c = max_chroma_fast(L_arr, self._H_mesh)
 
+        if self.use_relative_chroma:
+            C_abs = self._C_mesh * max_c
+            rgb = gamut_map_to_srgb(L_arr, C_abs, self._H_mesh, method='clip')
+            rgba = np.ones((self.slice_height, self.slice_width, 4), dtype=np.float32)
+            rgba[..., :3] = np.clip(rgb, 0.0, 1.0)
+            return rgba
+
         rgb = gamut_map_to_srgb(L_arr, self._C_mesh, self._H_mesh, method='clip')
 
         rgba = np.ones((self.slice_height, self.slice_width, 4), dtype=np.float32)
@@ -534,10 +682,21 @@ class OklchPalettePreview:
         height = 14
 
         L_arr = np.linspace(0, 1, width, dtype=np.float32)
-        C_arr = np.full(width, C, dtype=np.float32)
         H_arr = np.full(width, H, dtype=np.float32)
 
         max_c = max_chroma_fast(L_arr, H_arr)
+        if self.use_relative_chroma:
+            C_rel = float(np.clip(C, 0.0, 1.0))
+            C_arr = max_c * C_rel
+
+            rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='clip')
+            rgb = np.clip(rgb, 0.0, 1.0)
+
+            rgba = np.ones((height, width, 4), dtype=np.float32)
+            rgba[:, :, :3] = rgb[np.newaxis, :, :]
+            return rgba
+
+        C_arr = np.full(width, float(np.clip(C, 0.0, self.c_max_absolute)), dtype=np.float32)
         in_gamut = C_arr <= max_c
 
         rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='clip')
@@ -777,7 +936,7 @@ class OklchPalettePreview:
             return
 
         x = stop["H"]
-        y = (stop["C"] / self.c_max_display) * self.slice_height
+        y = np.clip(stop["C"] / self.c_max_display, 0.0, 1.0) * self.slice_height
 
         color = (255, 255, 255, 200)
         dpg.draw_line((0, y), (self.slice_width, y), color=color, thickness=1,
@@ -786,24 +945,27 @@ class OklchPalettePreview:
                      parent=self.slice_drawlist_id)
         dpg.draw_circle((x, y), 4, color=color, thickness=2, parent=self.slice_drawlist_id)
 
-        # Draw gamut boundary
-        stop_L = stop["L"]
-        gamut_points = []
-        for h_idx, h in enumerate(self._h_grid):
-            max_c = float(max_chroma_fast(
-                np.array(stop_L, dtype=np.float32),
-                np.array(h, dtype=np.float32),
-            ))
-            y_boundary = (max_c / self.c_max_display) * self.slice_height
-            gamut_points.append((h_idx, min(y_boundary, self.slice_height)))
-
-        if len(gamut_points) > 1:
-            dpg.draw_polyline(gamut_points, color=(255, 255, 255, 120), thickness=1,
-                             parent=self.slice_drawlist_id)
-
     # ---------------------------------------------------------------
     # UI sync
     # ---------------------------------------------------------------
+
+    def _sync_chroma_controls(self, stop: Optional[dict] = None):
+        if not dpg.does_item_exist("c_slider"):
+            return
+
+        max_value = self._get_c_display_max()
+        format_str = "%.3f"
+        dpg.configure_item("c_slider", max_value=max_value, format=format_str)
+
+        if stop is not None:
+            c_val = float(np.clip(stop["C"], 0.0, max_value))
+            dpg.set_value("c_slider", c_val)
+
+        if dpg.does_item_exist("chroma_mode_toggle"):
+            dpg.set_value("chroma_mode_toggle", self.use_relative_chroma)
+        if dpg.does_item_exist("chroma_interp_button"):
+            label = "Interp: Rel" if self.chroma_interp_mix >= 0.5 else "Interp: Abs"
+            dpg.configure_item("chroma_interp_button", label=label)
 
     def _sync_ui_from_stop(self):
         stop = self._get_selected_stop()
@@ -811,16 +973,20 @@ class OklchPalettePreview:
             dpg.configure_item("l_slider", enabled=False)
             dpg.configure_item("c_slider", enabled=False)
             dpg.configure_item("h_slider", enabled=False)
+            if dpg.does_item_exist("chroma_mode_toggle"):
+                dpg.configure_item("chroma_mode_toggle", enabled=False)
             dpg.set_value("stop_info_text", "No stop selected")
             return
 
         dpg.configure_item("l_slider", enabled=True)
         dpg.configure_item("c_slider", enabled=True)
         dpg.configure_item("h_slider", enabled=True)
+        if dpg.does_item_exist("chroma_mode_toggle"):
+            dpg.configure_item("chroma_mode_toggle", enabled=True)
 
         dpg.set_value("l_slider", stop["L"])
-        dpg.set_value("c_slider", stop["C"])
         dpg.set_value("h_slider", stop["H"])
+        self._sync_chroma_controls(stop)
 
         idx = self._get_stop_index(stop["id"])
         r, g, b = self._oklch_to_rgb255(stop["L"], stop["C"], stop["H"])
@@ -999,7 +1165,7 @@ class OklchPalettePreview:
             return
 
         new_h = float(np.clip(local_x, 0, 359.9))
-        new_c = float(np.clip((local_y / self.slice_height) * self.c_max_display, 0, self.c_max_display))
+        new_c = float(np.clip((local_y / self.slice_height) * self.c_max_display, 0.0, 1.0))
 
         stop["H"] = new_h
         stop["C"] = new_c
@@ -1020,7 +1186,7 @@ class OklchPalettePreview:
         stop = self._get_selected_stop()
         if stop is None:
             return
-        stop["C"] = value
+        stop["C"] = float(np.clip(value, 0.0, self._get_c_display_max()))
         self._mark_dirty(full=True)
 
     def _on_h_change(self, sender, value):
@@ -1028,6 +1194,30 @@ class OklchPalettePreview:
         if stop is None:
             return
         stop["H"] = value
+        self._mark_dirty(full=True)
+
+    def _on_chroma_mode_change(self, sender, value):
+        new_relative = bool(value)
+        if new_relative == self.use_relative_chroma:
+            return
+
+        if new_relative:
+            for stop in self.stops:
+                stop["C"] = self._chroma_abs_to_rel(stop["L"], stop["H"], stop["C"])
+        else:
+            for stop in self.stops:
+                stop["C"] = self._chroma_rel_to_abs(stop["L"], stop["H"], stop["C"])
+
+        self.use_relative_chroma = new_relative
+        self._rebuild_slice_grids()
+        self._sync_chroma_controls(self._get_selected_stop())
+        self._mark_dirty(full=True)
+
+    def _on_chroma_interp_toggle(self, sender, app_data=None):
+        self.chroma_interp_mix = 0.0 if self.chroma_interp_mix >= 0.5 else 1.0
+        if dpg.does_item_exist("chroma_interp_button"):
+            label = "Interp: Rel" if self.chroma_interp_mix >= 0.5 else "Interp: Abs"
+            dpg.configure_item("chroma_interp_button", label=label)
         self._mark_dirty(full=True)
 
     def _on_brightness_change(self, sender, value):
@@ -1089,6 +1279,13 @@ class OklchPalettePreview:
         stop = self._get_selected_stop()
         if stop is None:
             return
+        if self.use_relative_chroma:
+            if stop["C"] > 1.0:
+                stop["C"] = 1.0
+                dpg.set_value("c_slider", 1.0)
+                self._mark_dirty(full=True)
+            return
+
         max_c = self._get_max_chroma(stop["L"], stop["H"])
         if stop["C"] > max_c:
             stop["C"] = max_c
@@ -1106,7 +1303,16 @@ class OklchPalettePreview:
             return
 
         stops_data = [
-            {"pos": s["pos"], "L": s["L"], "C": s["C"], "H": s["H"]}
+            {
+                "pos": s["pos"],
+                "L": s["L"],
+                "C": (
+                    self._chroma_rel_to_abs(s["L"], s["H"], s["C"])
+                    if self.use_relative_chroma
+                    else s["C"]
+                ),
+                "H": s["H"],
+            }
             for s in self.stops
         ]
         self.saved_palettes[name] = stops_data
@@ -1131,7 +1337,11 @@ class OklchPalettePreview:
                 "id": self._next_stop_id,
                 "pos": s["pos"],
                 "L": s["L"],
-                "C": s["C"],
+                "C": (
+                    self._chroma_abs_to_rel(s["L"], s["H"], s["C"])
+                    if self.use_relative_chroma
+                    else s["C"]
+                ),
                 "H": s["H"],
             })
             self._next_stop_id += 1
@@ -1154,6 +1364,16 @@ class OklchPalettePreview:
         dpg.create_context()
 
         self.texture_registry = dpg.add_texture_registry()
+
+        if self.slider_block_theme is None:
+            self.slider_block_theme = dpg.add_theme()
+            with dpg.theme_component(dpg.mvAll, parent=self.slider_block_theme):
+                dpg.add_theme_style(
+                    dpg.mvStyleVar_ItemSpacing,
+                    8,
+                    2,
+                    category=dpg.mvThemeCat_Core,
+                )
 
         # Initialize textures
         self._update_gradient_texture()
@@ -1244,6 +1464,12 @@ class OklchPalettePreview:
                     )
                     self._update_histogram_drawlist()
 
+                    dpg.add_spacer(height=2)
+                    dpg.add_button(
+                        label="Interp: Rel", width=130,
+                        callback=self._on_chroma_interp_toggle, tag="chroma_interp_button",
+                    )
+
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
                     dpg.add_spacer(height=8)
@@ -1251,7 +1477,7 @@ class OklchPalettePreview:
                     with dpg.group(horizontal=True):
                         # Left: C x H slice
                         with dpg.group():
-                            dpg.add_text("Chroma x Hue (at current L)")
+                            dpg.add_text("Chroma x Hue")
                             self.slice_drawlist_id = dpg.add_drawlist(
                                 width=self.slice_width,
                                 height=self.slice_height,
@@ -1268,40 +1494,37 @@ class OklchPalettePreview:
 
                     dpg.add_spacer(height=8)
 
-                    # L slider
-                    dpg.add_text("Lightness (L)")
-                    dpg.add_image(self.l_gradient_texture_id, width=360, height=14)
-                    dpg.add_slider_float(
-                        label="", default_value=0.5,
-                        min_value=0.0, max_value=1.0, format="%.3f", width=360,
-                        callback=self._on_l_change, tag="l_slider",
-                    )
+                    # L/C/H sliders (tight spacing)
+                    with dpg.group(tag="slider_block"):
+                        dpg.add_image(self.l_gradient_texture_id, width=360, height=14)
+                        dpg.add_slider_float(
+                            label="Lightness", default_value=0.5,
+                            min_value=0.0, max_value=1.0, format="%.3f", width=360,
+                            callback=self._on_l_change, tag="l_slider",
+                        )
 
-                    dpg.add_spacer(height=5)
+                        with dpg.group(horizontal=True):
+                            dpg.add_slider_float(
+                                label="Chroma", default_value=0.0,
+                                min_value=0.0, max_value=self.c_max_display, format="%.3f", width=360,
+                                callback=self._on_c_change, tag="c_slider",
+                            )
+                            dpg.add_spacer(width=6)
+                            dpg.add_checkbox(
+                                label="Relative", default_value=self.use_relative_chroma,
+                                callback=self._on_chroma_mode_change, tag="chroma_mode_toggle",
+                            )
 
-                    # C slider
-                    dpg.add_slider_float(
-                        label="Chroma", default_value=0.0,
-                        min_value=0.0, max_value=self.c_max_display, format="%.3f", width=360,
-                        callback=self._on_c_change, tag="c_slider",
-                    )
+                        dpg.add_slider_float(
+                            label="Hue", default_value=0.0,
+                            min_value=0.0, max_value=360.0, format="%.1f", width=360,
+                            callback=self._on_h_change, tag="h_slider",
+                        )
 
-                    # H slider
-                    dpg.add_slider_float(
-                        label="Hue", default_value=0.0,
-                        min_value=0.0, max_value=360.0, format="%.1f", width=360,
-                        callback=self._on_h_change, tag="h_slider",
-                    )
+                    if self.slider_block_theme is not None:
+                        dpg.bind_item_theme("slider_block", self.slider_block_theme)
 
-                    dpg.add_spacer(height=8)
-
-                    with dpg.group(horizontal=True):
-                        dpg.add_button(label="Clamp Gamut", width=100,
-                                      callback=lambda: self._on_clamp_to_gamut())
-                        dpg.add_button(label="Delete Stop", width=100,
-                                      callback=lambda: self._on_delete_stop())
-                        dpg.add_button(label="Add Stop", width=100,
-                                      callback=lambda: self._on_add_stop())
+                    dpg.add_spacer(height=4)
 
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
