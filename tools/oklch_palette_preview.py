@@ -94,7 +94,6 @@ class OklchPalettePreview:
         self.contrast = 1.0
         self.gamma = 1.0
         self.clip_percent = 1.5
-        self.chroma_boost = 2.0
 
         # Caches for palette and intensity processing
         self._palette_cache_key: Optional[tuple] = None
@@ -261,7 +260,6 @@ class OklchPalettePreview:
     # ---------------------------------------------------------------
 
     def _oklch_to_rgb_clamped(self, L: float, C: float, H: float) -> tuple[float, float, float]:
-        C = self._boost_chroma_scalar(C)
         rgb = gamut_map_to_srgb(
             np.array(L, dtype=np.float32),
             np.array(C, dtype=np.float32),
@@ -274,18 +272,6 @@ class OklchPalettePreview:
     def _oklch_to_rgb255(self, L: float, C: float, H: float) -> tuple[int, int, int]:
         r, g, b = self._oklch_to_rgb_clamped(L, C, H)
         return (int(r * 255), int(g * 255), int(b * 255))
-
-    def _boost_chroma_scalar(self, C: float) -> float:
-        """Apply global chroma boost for palette preview."""
-        if self.chroma_boost == 1.0:
-            return C
-        return max(0.0, C * self.chroma_boost)
-
-    def _boost_chroma_array(self, C: np.ndarray) -> np.ndarray:
-        """Vectorized chroma boost for LUT generation."""
-        if self.chroma_boost == 1.0:
-            return C
-        return np.clip(C * self.chroma_boost, 0.0, None)
 
     def _get_max_chroma(self, L: float, H: float) -> float:
         return float(max_chroma_fast(
@@ -302,7 +288,6 @@ class OklchPalettePreview:
 
     def _get_palette_cache_key(self) -> tuple:
         return (
-            float(self.chroma_boost),
             tuple((float(s["pos"]), float(s["L"]), float(s["C"]), float(s["H"])) for s in self.stops),
         )
 
@@ -374,9 +359,6 @@ class OklchPalettePreview:
             L_arr[i] = L
             C_arr[i] = C
             H_arr[i] = H
-
-        if self.chroma_boost != 1.0:
-            C_arr = self._boost_chroma_array(C_arr)
 
         rgb = gamut_map_to_srgb(L_arr, C_arr, H_arr, method='compress')
         return np.clip(rgb, 0.0, 1.0)
@@ -550,8 +532,6 @@ class OklchPalettePreview:
         """Generate L gradient bar."""
         width = 360
         height = 14
-
-        C = self._boost_chroma_scalar(C)
 
         L_arr = np.linspace(0, 1, width, dtype=np.float32)
         C_arr = np.full(width, C, dtype=np.float32)
@@ -844,8 +824,7 @@ class OklchPalettePreview:
 
         idx = self._get_stop_index(stop["id"])
         r, g, b = self._oklch_to_rgb255(stop["L"], stop["C"], stop["H"])
-        boosted_c = self._boost_chroma_scalar(stop["C"])
-        in_gamut = self._is_in_gamut(stop["L"], boosted_c, stop["H"])
+        in_gamut = self._is_in_gamut(stop["L"], stop["C"], stop["H"])
         gamut_str = "" if in_gamut else " [!]"
 
         dpg.set_value("stop_info_text",
@@ -1063,10 +1042,6 @@ class OklchPalettePreview:
         self.gamma = value
         self._mark_dirty(full=True)
 
-    def _on_chroma_boost_change(self, sender, value):
-        self.chroma_boost = max(0.0, value)
-        self._mark_dirty(full=True)
-
     def _on_clip_change(self, sender, value):
         self.clip_percent = max(0.0, value)
         self._mark_dirty(full=True)
@@ -1115,8 +1090,6 @@ class OklchPalettePreview:
         if stop is None:
             return
         max_c = self._get_max_chroma(stop["L"], stop["H"])
-        if self.chroma_boost > 0:
-            max_c = max_c / self.chroma_boost
         if stop["C"] > max_c:
             stop["C"] = max_c
             dpg.set_value("c_slider", max_c)
@@ -1171,65 +1144,6 @@ class OklchPalettePreview:
     def _on_new_palette(self):
         self._init_default_gradient()
         dpg.set_value("palette_name_input", "")
-        self._mark_dirty(full=True)
-
-    # ---------------------------------------------------------------
-    # Presets
-    # ---------------------------------------------------------------
-
-    def _load_preset(self, preset_name: str):
-        presets = {
-            "Grayscale": [
-                {"pos": 0.0, "L": 0.0, "C": 0.0, "H": 0.0},
-                {"pos": 1.0, "L": 1.0, "C": 0.0, "H": 0.0},
-            ],
-            "Warm": [
-                {"pos": 0.0, "L": 0.15, "C": 0.08, "H": 30.0},
-                {"pos": 0.5, "L": 0.65, "C": 0.15, "H": 50.0},
-                {"pos": 1.0, "L": 0.95, "C": 0.10, "H": 80.0},
-            ],
-            "Cool": [
-                {"pos": 0.0, "L": 0.10, "C": 0.10, "H": 250.0},
-                {"pos": 0.5, "L": 0.55, "C": 0.12, "H": 220.0},
-                {"pos": 1.0, "L": 0.95, "C": 0.05, "H": 200.0},
-            ],
-            "Sunset": [
-                {"pos": 0.0, "L": 0.15, "C": 0.12, "H": 300.0},
-                {"pos": 0.33, "L": 0.50, "C": 0.20, "H": 30.0},
-                {"pos": 0.66, "L": 0.70, "C": 0.18, "H": 60.0},
-                {"pos": 1.0, "L": 0.95, "C": 0.08, "H": 90.0},
-            ],
-            "Ocean": [
-                {"pos": 0.0, "L": 0.10, "C": 0.10, "H": 240.0},
-                {"pos": 0.5, "L": 0.50, "C": 0.15, "H": 200.0},
-                {"pos": 1.0, "L": 0.90, "C": 0.08, "H": 180.0},
-            ],
-            "Magma": [
-                {"pos": 0.0, "L": 0.05, "C": 0.02, "H": 300.0},
-                {"pos": 0.25, "L": 0.25, "C": 0.12, "H": 330.0},
-                {"pos": 0.5, "L": 0.50, "C": 0.18, "H": 30.0},
-                {"pos": 0.75, "L": 0.75, "C": 0.14, "H": 60.0},
-                {"pos": 1.0, "L": 0.98, "C": 0.02, "H": 90.0},
-            ],
-        }
-
-        if preset_name not in presets:
-            return
-
-        self.stops.clear()
-        self._next_stop_id = 0
-        for s in presets[preset_name]:
-            self.stops.append({
-                "id": self._next_stop_id,
-                "pos": s["pos"],
-                "L": s["L"],
-                "C": s["C"],
-                "H": s["H"],
-            })
-            self._next_stop_id += 1
-
-        self._sort_stops()
-        self.selected_stop_id = self.stops[0]["id"] if self.stops else None
         self._mark_dirty(full=True)
 
     # ---------------------------------------------------------------
@@ -1381,15 +1295,6 @@ class OklchPalettePreview:
 
                     dpg.add_spacer(height=8)
 
-                    dpg.add_text("Chroma Boost", color=(140, 140, 140))
-                    dpg.add_slider_float(
-                        label="", default_value=self.chroma_boost,
-                        min_value=0.5, max_value=3.0, format="%.2f", width=200,
-                        callback=self._on_chroma_boost_change,
-                    )
-
-                    dpg.add_spacer(height=8)
-
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="Clamp Gamut", width=100,
                                       callback=lambda: self._on_clamp_to_gamut())
@@ -1397,21 +1302,6 @@ class OklchPalettePreview:
                                       callback=lambda: self._on_delete_stop())
                         dpg.add_button(label="Add Stop", width=100,
                                       callback=lambda: self._on_add_stop())
-
-                    dpg.add_spacer(height=10)
-                    dpg.add_separator()
-                    dpg.add_spacer(height=8)
-
-                    # Presets
-                    dpg.add_text("Presets", color=(150, 150, 150))
-                    with dpg.group(horizontal=True):
-                        for preset in ["Grayscale", "Warm", "Cool"]:
-                            dpg.add_button(label=preset, width=90,
-                                          callback=lambda s, a, u=preset: self._load_preset(u))
-                    with dpg.group(horizontal=True):
-                        for preset in ["Sunset", "Ocean", "Magma"]:
-                            dpg.add_button(label=preset, width=90,
-                                          callback=lambda s, a, u=preset: self._load_preset(u))
 
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
