@@ -61,6 +61,7 @@ class TextureManager:
         self.texture_registry_id: Optional[int] = None
         self.colormap_registry_id: Optional[int] = None
         self.palette_colormaps: Dict[str, int] = {}  # palette_name -> colormap_tag
+        self.grayscale_colormap_tag: Optional[str] = None
         self.render_texture_id: Optional[int] = None
         self.render_texture_size: Optional[Tuple[int, int]] = None
         self.boundary_textures: Dict[int, int] = {}  # boundary_idx -> texture_id
@@ -84,6 +85,15 @@ class TextureManager:
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
             self.palette_colormaps[palette_name] = tag
 
+        # Add grayscale colormap for preview use
+        self.grayscale_colormap_tag = "colormap_grayscale"
+        dpg.add_colormap(
+            [[0, 0, 0, 255], [255, 255, 255, 255]],
+            qualitative=False,
+            tag=self.grayscale_colormap_tag,
+            parent=self.colormap_registry_id,
+        )
+
     def rebuild_colormaps(self) -> None:
         """Rebuild all colormaps after palette changes."""
         if dpg is None:
@@ -102,6 +112,14 @@ class TextureManager:
             tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
             self.palette_colormaps[palette_name] = tag
+
+        self.grayscale_colormap_tag = "colormap_grayscale"
+        dpg.add_colormap(
+            [[0, 0, 0, 255], [255, 255, 255, 255]],
+            qualitative=False,
+            tag=self.grayscale_colormap_tag,
+            parent=self.colormap_registry_id,
+        )
 
     def ensure_boundary_texture(self, idx: int, mask: np.ndarray, boundary_colors: list) -> int:
         """Create or update boundary texture, returns texture ID.
