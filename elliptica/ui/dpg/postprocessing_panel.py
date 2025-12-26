@@ -2,6 +2,7 @@
 
 import time
 import numpy as np
+from PIL import Image
 from typing import Optional, Literal, TYPE_CHECKING
 
 from elliptica import defaults
@@ -53,6 +54,8 @@ class PostprocessingPanel:
         self.palette_preview_height = 22
         self.palette_hist_height = 60
         self.palette_hist_bins = 128
+        self.hist_max_samples = 1_000_000
+        self.hist_target_shape = (512, 512)
         self.global_palette_preview_button_id: Optional[int] = None
         self.region_palette_preview_button_id: Optional[int] = None
         self.global_hist_drawlist_id: Optional[int] = None
@@ -60,7 +63,7 @@ class PostprocessingPanel:
         self.hist_values: Optional[np.ndarray] = None
         self.hist_pending_update: bool = False
         self.hist_last_update_time: float = 0.0
-        self.hist_debounce_delay: float = 0.1  # 100ms throttle
+        self.hist_debounce_delay: float = 0.05  # 50ms throttle
 
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
@@ -760,11 +763,21 @@ class PostprocessingPanel:
             return (arr - arr_min) / (arr_max - arr_min)
         return np.zeros_like(arr, dtype=np.float32)
 
-    def _downsample_histogram_source(self, arr: np.ndarray, max_samples: int = 200000) -> np.ndarray:
-        if arr.size <= max_samples:
+    def _downsample_histogram_source(self, arr: np.ndarray) -> np.ndarray:
+        target_h, target_w = self.hist_target_shape
+        if arr.shape[0] == target_h and arr.shape[1] == target_w:
             return arr.astype(np.float32, copy=False)
-        step = max(1, int(np.sqrt(arr.size / max_samples)))
-        return arr[::step, ::step].astype(np.float32, copy=False)
+        try:
+            resample = Image.Resampling.BILINEAR if hasattr(Image, "Resampling") else Image.BILINEAR
+            img = Image.fromarray(arr.astype(np.float32, copy=False), mode="F")
+            resized = img.resize((target_w, target_h), resample=resample)
+            return np.asarray(resized, dtype=np.float32)
+        except Exception:
+            max_samples = int(self.hist_max_samples)
+            if arr.size <= max_samples:
+                return arr.astype(np.float32, copy=False)
+            step = max(1, int(np.sqrt(arr.size / max_samples)))
+            return arr[::step, ::step].astype(np.float32, copy=False)
 
     def _compute_histogram_values(self) -> Optional[np.ndarray]:
         """Compute histogram for post-processed intensity (global clip/contrast/gamma)."""
