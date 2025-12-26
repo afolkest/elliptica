@@ -37,7 +37,8 @@ DEFAULT_DOWNSAMPLE_SIGMA: float = 0.6
 MAX_DOWNSAMPLE_SIGMA: float = 2.0
 
 # Display postprocessing defaults
-DEFAULT_CLIP_PERCENT: float = 0.5
+DEFAULT_CLIP_LOW_PERCENT: float = 0.5
+DEFAULT_CLIP_HIGH_PERCENT: float = 0.5
 MAX_CLIP_PERCENT: float = 2.0
 DEFAULT_BRIGHTNESS: float = 0.0
 MIN_BRIGHTNESS: float = -0.9

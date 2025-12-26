@@ -483,7 +483,8 @@ def colorize_array(
     brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
-    clip_percent: float = 0.5,
+    clip_low_percent: float = 0.5,
+    clip_high_percent: float = 0.5,
 ) -> np.ndarray:
     """Map scalar field to RGB using the provided LUT.
 
@@ -493,17 +494,24 @@ def colorize_array(
         brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast adjustment (1.0 = no change)
         gamma: Gamma correction (1.0 = no change)
-        clip_percent: Percentile clipping (e.g., 0.5 clips bottom 0.5% and top 0.5%).
-                     Use 0.0 for min/max normalization. Default 0.5 matches gauss_law_morph.
+        clip_low_percent: Percentile clipping from low end (e.g., 0.5 clips bottom 0.5%).
+        clip_high_percent: Percentile clipping from high end (e.g., 0.5 clips top 0.5%).
+                          Use 0.0/0.0 for min/max normalization.
     """
     arr = arr.astype(np.float32, copy=False)
 
-    # Use percentile normalization if clip_percent > 0, matching gauss_law_morph behavior
-    if clip_percent > 0.0:
-        vmin = float(np.percentile(arr, clip_percent))
-        vmax = float(np.percentile(arr, 100.0 - clip_percent))
-        if vmax > vmin:
-            norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+    low = max(float(clip_low_percent), 0.0)
+    high = max(float(clip_high_percent), 0.0)
+    if low > 0.0 or high > 0.0:
+        lower = max(0.0, min(low, 100.0))
+        upper = max(0.0, min(100.0 - high, 100.0))
+        if upper > lower:
+            vmin = float(np.percentile(arr, lower))
+            vmax = float(np.percentile(arr, upper))
+            if vmax > vmin:
+                norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+            else:
+                norm = _normalize_unit(arr)
         else:
             norm = _normalize_unit(arr)
     else:
@@ -527,17 +535,25 @@ def _apply_display_transforms(
     brightness: float = 0.0,
     contrast: float = 1.0,
     gamma: float = 1.0,
-    clip_percent: float = 0.5,
+    clip_low_percent: float = 0.5,
+    clip_high_percent: float = 0.5,
 ) -> np.ndarray:
     """Apply clip/brightness/contrast/gamma transforms to normalize array to [0,1]."""
     arr = arr.astype(np.float32, copy=False)
 
     # Percentile-based normalization (clipping)
-    if clip_percent > 0.0:
-        vmin = float(np.percentile(arr, clip_percent))
-        vmax = float(np.percentile(arr, 100.0 - clip_percent))
-        if vmax > vmin:
-            norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+    low = max(float(clip_low_percent), 0.0)
+    high = max(float(clip_high_percent), 0.0)
+    if low > 0.0 or high > 0.0:
+        lower = max(0.0, min(low, 100.0))
+        upper = max(0.0, min(100.0 - high, 100.0))
+        if upper > lower:
+            vmin = float(np.percentile(arr, lower))
+            vmax = float(np.percentile(arr, upper))
+            if vmax > vmin:
+                norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+            else:
+                norm = _normalize_unit(arr)
         else:
             norm = _normalize_unit(arr)
     else:
@@ -566,20 +582,34 @@ def array_to_pil(
     palette: str | None = None,
     contrast: float = 1.0,
     gamma: float = 1.0,
-    clip_percent: float = 0.5,
+    clip_low_percent: float = 0.5,
+    clip_high_percent: float = 0.5,
 ) -> Image.Image:
     """Convert scalar array to PIL Image, optionally colorized.
 
     Framework-agnostic version for Streamlit, headless rendering, etc.
 
-    Note: Default clip_percent=0.5 matches gauss_law_morph behavior.
+    Note: Default clip (0.5/0.5) matches gauss_law_morph behavior.
     """
     if use_color:
-        rgb = colorize_array(arr, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
+        rgb = colorize_array(
+            arr,
+            palette=palette,
+            contrast=contrast,
+            gamma=gamma,
+            clip_low_percent=clip_low_percent,
+            clip_high_percent=clip_high_percent,
+        )
         return Image.fromarray(rgb, mode='RGB')
     else:
         # Apply display transforms even in grayscale mode
-        norm = _apply_display_transforms(arr, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
+        norm = _apply_display_transforms(
+            arr,
+            contrast=contrast,
+            gamma=gamma,
+            clip_low_percent=clip_low_percent,
+            clip_high_percent=clip_high_percent,
+        )
         img = (norm * 255.0).astype(np.uint8)
         return Image.fromarray(img, mode='L').convert('RGB')
 
@@ -593,7 +623,8 @@ def save_render(
     palette: str | None = None,
     contrast: float = 1.0,
     gamma: float = 1.0,
-    clip_percent: float = 0.5,
+    clip_low_percent: float = 0.5,
+    clip_high_percent: float = 0.5,
 ) -> RenderInfo:
     """Save render to file and return RenderInfo."""
     renders_dir = Path("renders")
@@ -603,7 +634,15 @@ def save_render(
     filename = f"lic_{multiplier}x_{timestamp}.png"
     filepath = renders_dir / filename
 
-    pil_img = array_to_pil(arr, use_color=use_color, palette=palette, contrast=contrast, gamma=gamma, clip_percent=clip_percent)
+    pil_img = array_to_pil(
+        arr,
+        use_color=use_color,
+        palette=palette,
+        contrast=contrast,
+        gamma=gamma,
+        clip_low_percent=clip_low_percent,
+        clip_high_percent=clip_high_percent,
+    )
     pil_img.save(filepath)
 
     render_info = RenderInfo(multiplier=multiplier, filepath=str(filepath), timestamp=timestamp)

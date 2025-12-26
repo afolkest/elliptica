@@ -294,7 +294,8 @@ def _display_settings_to_dict(settings: DisplaySettings) -> dict[str, Any]:
     """Convert DisplaySettings to dict."""
     return {
         'downsample_sigma': settings.downsample_sigma,
-        'clip_percent': settings.clip_percent,
+        'clip_low_percent': settings.clip_low_percent,
+        'clip_high_percent': settings.clip_high_percent,
         'brightness': settings.brightness,
         'contrast': settings.contrast,
         'gamma': settings.gamma,
@@ -309,7 +310,8 @@ def _dict_to_display_settings(data: dict[str, Any]) -> DisplaySettings:
     """Reconstruct DisplaySettings from dict."""
     return DisplaySettings(
         downsample_sigma=data['downsample_sigma'],
-        clip_percent=data['clip_percent'],
+        clip_low_percent=data['clip_low_percent'],
+        clip_high_percent=data['clip_high_percent'],
         brightness=data['brightness'],
         contrast=data['contrast'],
         gamma=data['gamma'],

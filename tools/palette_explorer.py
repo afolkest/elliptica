@@ -228,7 +228,8 @@ class PaletteExplorer:
             from elliptica import defaults
             rgb_tensor = build_base_rgb_gpu(
                 self.lic_tensor,
-                clip_percent=defaults.DEFAULT_CLIP_PERCENT,
+                clip_low_percent=defaults.DEFAULT_CLIP_LOW_PERCENT,
+                clip_high_percent=defaults.DEFAULT_CLIP_HIGH_PERCENT,
                 brightness=self.brightness,
                 contrast=self.contrast,
                 gamma=self.gamma,
@@ -247,13 +248,17 @@ class PaletteExplorer:
 
             # Percentile clipping (match GPU path)
             from elliptica import defaults
-            clip_percent = defaults.DEFAULT_CLIP_PERCENT
-            if clip_percent > 0:
-                lower = clip_percent / 100.0
-                upper = 1.0 - lower
-                vmin, vmax = np.percentile(lic, [lower * 100, upper * 100])
-                if vmax > vmin:
-                    lic = np.clip((lic - vmin) / (vmax - vmin), 0.0, 1.0)
+            clip_low = defaults.DEFAULT_CLIP_LOW_PERCENT
+            clip_high = defaults.DEFAULT_CLIP_HIGH_PERCENT
+            if clip_low > 0 or clip_high > 0:
+                lower = max(0.0, min(clip_low, 100.0))
+                upper = max(0.0, min(100.0 - clip_high, 100.0))
+                if upper > lower:
+                    vmin, vmax = np.percentile(lic, [lower, upper])
+                    if vmax > vmin:
+                        lic = np.clip((lic - vmin) / (vmax - vmin), 0.0, 1.0)
+                    else:
+                        lic = np.clip(lic, 0.0, 1.0)
                 else:
                     lic = np.clip(lic, 0.0, 1.0)
 

@@ -29,7 +29,8 @@ class PostprocessingPanel:
         self.app = app
 
         # Widget IDs for postprocessing sliders
-        self.postprocess_clip_slider_id: Optional[int] = None
+        self.postprocess_clip_low_slider_id: Optional[int] = None
+        self.postprocess_clip_high_slider_id: Optional[int] = None
         self.postprocess_brightness_slider_id: Optional[int] = None
         self.postprocess_contrast_slider_id: Optional[int] = None
         self.postprocess_gamma_slider_id: Optional[int] = None
@@ -79,8 +80,8 @@ class PostprocessingPanel:
         self.smear_last_update_time: float = 0.0
         self.smear_debounce_delay: float = 0.3  # 300ms delay
 
-        # Debouncing for expensive clip% updates (percentile computation at high res)
-        self.clip_pending_value: Optional[float] = None
+        # Debouncing for expensive clip updates (percentile computation at high res)
+        self.clip_pending_range: Optional[tuple[float, float]] = None
         self.clip_last_update_time: float = 0.0
         self.clip_debounce_delay: float = 0.3  # 300ms delay
 
@@ -305,15 +306,25 @@ class PostprocessingPanel:
                 # Sliders (fixed position)
                 dpg.add_spacer(height=10)
 
-                self.postprocess_clip_slider_id = dpg.add_slider_float(
-                    label="Clip % (global)",
-                    default_value=self.app.state.display_settings.clip_percent,
+                self.postprocess_clip_low_slider_id = dpg.add_slider_float(
+                    label="Clip low %",
+                    default_value=self.app.state.display_settings.clip_low_percent,
                     min_value=0.0,
                     max_value=defaults.MAX_CLIP_PERCENT,
                     format="%.2f%%",
-                    callback=self.on_clip_slider,
+                    callback=self.on_clip_low_slider,
                     width=200,
-                    tag="clip_slider",
+                    tag="clip_low_slider",
+                )
+                self.postprocess_clip_high_slider_id = dpg.add_slider_float(
+                    label="Clip high %",
+                    default_value=self.app.state.display_settings.clip_high_percent,
+                    min_value=0.0,
+                    max_value=defaults.MAX_CLIP_PERCENT,
+                    format="%.2f%%",
+                    callback=self.on_clip_high_slider,
+                    width=200,
+                    tag="clip_high_slider",
                 )
 
                 self.postprocess_brightness_slider_id = dpg.add_slider_float(
@@ -787,25 +798,34 @@ class PostprocessingPanel:
                 return None
 
             source = cache.result.array
-            clip_percent = float(self.app.state.display_settings.clip_percent)
+            clip_low = float(self.app.state.display_settings.clip_low_percent)
+            clip_high = float(self.app.state.display_settings.clip_high_percent)
             brightness = float(self.app.state.display_settings.brightness)
             contrast = float(self.app.state.display_settings.contrast)
             gamma = float(self.app.state.display_settings.gamma)
 
             cached_percentiles = None
             if cache.lic_percentiles is not None:
-                cached_clip = cache.lic_percentiles_clip_percent
-                if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
-                    cached_percentiles = cache.lic_percentiles
+                cached_clip = cache.lic_percentiles_clip_range
+                if cached_clip is not None:
+                    cached_low, cached_high = cached_clip
+                    if abs(cached_low - clip_low) < 0.01 and abs(cached_high - clip_high) < 0.01:
+                        cached_percentiles = cache.lic_percentiles
 
         sample = self._downsample_histogram_source(source)
 
-        if clip_percent > 0.0:
-            if cached_percentiles is not None:
-                vmin, vmax = cached_percentiles
+        if clip_low > 0.0 or clip_high > 0.0:
+            lower = max(0.0, min(clip_low, 100.0))
+            upper = max(0.0, min(100.0 - clip_high, 100.0))
+            if upper > lower:
+                if cached_percentiles is not None:
+                    vmin, vmax = cached_percentiles
+                else:
+                    vmin = float(np.percentile(sample, lower))
+                    vmax = float(np.percentile(sample, upper))
             else:
-                vmin = float(np.percentile(sample, clip_percent))
-                vmax = float(np.percentile(sample, 100.0 - clip_percent))
+                vmin = float(sample.min())
+                vmax = float(sample.max())
         else:
             vmin = float(sample.min())
             vmax = float(sample.max())
@@ -968,9 +988,11 @@ class PostprocessingPanel:
                 dpg.set_value("lightness_expr_input", global_expr)
                 self._set_input_grayed("lightness_expr_input", True)
 
-            # Clip% always shows global, grayed in boundary mode
-            self._set_slider_grayed("clip_slider", True)
-            dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
+            # Clip sliders always show global, grayed in boundary mode
+            self._set_slider_grayed("clip_low_slider", True)
+            self._set_slider_grayed("clip_high_slider", True)
+            dpg.set_value("clip_low_slider", self.app.state.display_settings.clip_low_percent)
+            dpg.set_value("clip_high_slider", self.app.state.display_settings.clip_high_percent)
 
             # Configure B/C/G sliders - grayed until override enabled
             self._set_slider_grayed("brightness_slider", not has_override)
@@ -1014,9 +1036,11 @@ class PostprocessingPanel:
             dpg.configure_item("global_palette_group", show=True)
             dpg.configure_item("region_palette_group", show=False)
 
-            # Clip% normal in global mode
-            self._set_slider_grayed("clip_slider", False)
-            dpg.set_value("clip_slider", self.app.state.display_settings.clip_percent)
+            # Clip sliders normal in global mode
+            self._set_slider_grayed("clip_low_slider", False)
+            self._set_slider_grayed("clip_high_slider", False)
+            dpg.set_value("clip_low_slider", self.app.state.display_settings.clip_low_percent)
+            dpg.set_value("clip_high_slider", self.app.state.display_settings.clip_high_percent)
 
             # B/C/G sliders normal, showing global values
             self._set_slider_grayed("brightness_slider", False)
@@ -1055,7 +1079,7 @@ class PostprocessingPanel:
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
         self.smear_pending_value = None
-        self.clip_pending_value = None
+        self.clip_pending_range = None
         self.expr_pending_update = False  # Clear expression editor debounce too
         self.update_context_ui()
 
@@ -1078,21 +1102,40 @@ class PostprocessingPanel:
     # Postprocessing slider callbacks
     # ------------------------------------------------------------------
 
-    def on_clip_slider(self, sender=None, app_data=None) -> None:
-        """Handle clip percent slider change with debouncing (percentile computation is expensive at high res)."""
+    def on_clip_low_slider(self, sender=None, app_data=None) -> None:
+        """Handle low clip slider change with debouncing (percentile computation is expensive at high res)."""
         if dpg is None:
             return
 
-        # Clip% always edits global (disabled in boundary mode anyway)
         value = float(app_data)
 
         # IMMEDIATELY update state so other refreshes use the correct value
         with self.app.state_lock:
-            self.app.state.display_settings.clip_percent = value
+            self.app.state.display_settings.clip_low_percent = value
+            clip_low = self.app.state.display_settings.clip_low_percent
+            clip_high = self.app.state.display_settings.clip_high_percent
             self.app.state.invalidate_base_rgb()
 
         # Mark pending to trigger refresh after debounce delay
-        self.clip_pending_value = value
+        self.clip_pending_range = (clip_low, clip_high)
+        self.clip_last_update_time = time.time()
+
+    def on_clip_high_slider(self, sender=None, app_data=None) -> None:
+        """Handle high clip slider change with debouncing (percentile computation is expensive at high res)."""
+        if dpg is None:
+            return
+
+        value = float(app_data)
+
+        # IMMEDIATELY update state so other refreshes use the correct value
+        with self.app.state_lock:
+            self.app.state.display_settings.clip_high_percent = value
+            clip_low = self.app.state.display_settings.clip_low_percent
+            clip_high = self.app.state.display_settings.clip_high_percent
+            self.app.state.invalidate_base_rgb()
+
+        # Mark pending to trigger refresh after debounce delay
+        self.clip_pending_range = (clip_low, clip_high)
         self.clip_last_update_time = time.time()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
@@ -1571,8 +1614,8 @@ class PostprocessingPanel:
         # Record the time of THIS slider change (not the last render)
         self.smear_last_update_time = time.time()
 
-    def _apply_clip_update(self, value: float) -> None:
-        """Apply clip percent refresh (state already updated in on_clip_slider)."""
+    def _apply_clip_update(self) -> None:
+        """Apply clip refresh (state already updated in slider callbacks)."""
         self.app.display_pipeline.refresh_display()
         self._request_histogram_update(force=True)
 
@@ -1582,15 +1625,15 @@ class PostprocessingPanel:
 
     def check_clip_debounce(self) -> None:
         """Check if clip update should be applied (called every frame)."""
-        if self.clip_pending_value is None:
+        if self.clip_pending_range is None:
             return
 
         current_time = time.time()
         # Only apply if enough time has passed since the last slider movement
         if current_time - self.clip_last_update_time >= self.clip_debounce_delay:
-            self._apply_clip_update(self.clip_pending_value)
+            self._apply_clip_update()
             self.clip_last_update_time = current_time
-            self.clip_pending_value = None
+            self.clip_pending_range = None
 
     def check_smear_debounce(self) -> None:
         """Check if smear update should be applied (called every frame)."""

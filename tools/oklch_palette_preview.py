@@ -585,7 +585,7 @@ class OklchPalettePreview:
         ):
             return self._normalized_tensor_cache
 
-        normalized, _, _ = percentile_clip_gpu(lic_tensor, clip_percent)
+        normalized, _, _ = percentile_clip_gpu(lic_tensor, clip_percent, clip_percent)
         self._normalized_tensor_cache = normalized
         self._normalized_tensor_clip_percent = clip_percent
         self._normalized_tensor_shape = shape
@@ -613,7 +613,8 @@ class OklchPalettePreview:
             normalized_tensor = self._get_normalized_tensor(lic_tensor)
             rgb_tensor = build_base_rgb_gpu(
                 lic_tensor,
-                clip_percent=self.clip_percent,
+                clip_low_percent=self.clip_percent,
+                clip_high_percent=self.clip_percent,
                 brightness=self.brightness,
                 contrast=self.contrast,
                 gamma=self.gamma,

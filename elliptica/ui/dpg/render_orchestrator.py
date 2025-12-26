@@ -8,6 +8,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 from elliptica.app.core import RenderCache
+from elliptica import defaults
 from elliptica.pipeline import perform_render
 from elliptica.render import downsample_lic
 from elliptica.serialization import compute_project_fingerprint
@@ -87,8 +88,8 @@ class RenderOrchestrator:
 
             # Precompute LIC percentiles (used for both smear normalization and postprocessing)
             # ALWAYS compute during render to avoid 6s delays later during postprocessing!
-            vmin = float(np.percentile(result.array, 0.5))
-            vmax = float(np.percentile(result.array, 99.5))
+            vmin = float(np.percentile(result.array, defaults.DEFAULT_CLIP_LOW_PERCENT))
+            vmax = float(np.percentile(result.array, 100.0 - defaults.DEFAULT_CLIP_HIGH_PERCENT))
             lic_percentiles = (vmin, vmax)
 
             # Create render cache (everything at full resolution)

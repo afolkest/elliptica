@@ -185,14 +185,17 @@ class TextureManager:
                 # DearPyGUI will scale it for display
                 from elliptica.gpu.postprocess import apply_full_postprocess_hybrid
 
-                clip_percent = self.app.state.display_settings.clip_percent
+                clip_low = self.app.state.display_settings.clip_low_percent
+                clip_high = self.app.state.display_settings.clip_high_percent
 
                 # Only reuse cached percentiles if they were computed for the same clip%.
                 lic_percentiles = None
                 if cache.lic_percentiles is not None:
-                    cached_clip = cache.lic_percentiles_clip_percent
-                    if cached_clip is not None and abs(cached_clip - clip_percent) < 0.01:
-                        lic_percentiles = cache.lic_percentiles
+                    cached_clip = cache.lic_percentiles_clip_range
+                    if cached_clip is not None:
+                        cached_low, cached_high = cached_clip
+                        if abs(cached_low - clip_low) < 0.01 and abs(cached_high - clip_high) < 0.01:
+                            lic_percentiles = cache.lic_percentiles
 
                 # Get or compute resized solution tensors (cached to avoid non-determinism)
                 solution_gpu = None
@@ -226,7 +229,8 @@ class TextureManager:
                         boundaries=self.app.state.project.boundary_objects,
                         render_shape=cache.result.array.shape,  # Full resolution shape
                         canvas_resolution=self.app.state.project.canvas_resolution,
-                        clip_percent=clip_percent,
+                        clip_low_percent=clip_low,
+                        clip_high_percent=clip_high,
                         brightness=self.app.state.display_settings.brightness,
                         contrast=self.app.state.display_settings.contrast,
                         gamma=self.app.state.display_settings.gamma,
@@ -245,9 +249,9 @@ class TextureManager:
                         saturation=self.app.state.display_settings.saturation,
                     )
 
-                    # Update cache so future refreshes reuse the correct clip percent bounds.
+                    # Update cache so future refreshes reuse the correct clip bounds.
                     cache.lic_percentiles = used_percentiles
-                    cache.lic_percentiles_clip_percent = clip_percent
+                    cache.lic_percentiles_clip_range = (clip_low, clip_high)
 
                     # Fast path: convert RGB→RGBA directly (no PIL roundtrip!)
                     width, height, data = _rgb_array_to_texture_data(final_rgb)
