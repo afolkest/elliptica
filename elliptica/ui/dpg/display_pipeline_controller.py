@@ -82,7 +82,8 @@ class DisplayPipelineController:
 
             # Snapshot settings (these are simple values, safe to copy)
             settings_snapshot = {
-                'clip_percent': self.app.state.display_settings.clip_percent,
+                'clip_low_percent': self.app.state.display_settings.clip_low_percent,
+                'clip_high_percent': self.app.state.display_settings.clip_high_percent,
                 'brightness': self.app.state.display_settings.brightness,
                 'contrast': self.app.state.display_settings.contrast,
                 'gamma': self.app.state.display_settings.gamma,
@@ -102,9 +103,14 @@ class DisplayPipelineController:
             # Get cached percentiles if valid
             lic_percentiles = None
             if cache.lic_percentiles is not None:
-                cached_clip = cache.lic_percentiles_clip_percent
-                if cached_clip is not None and abs(cached_clip - settings_snapshot['clip_percent']) < 0.01:
-                    lic_percentiles = cache.lic_percentiles
+                cached_clip = cache.lic_percentiles_clip_range
+                if cached_clip is not None:
+                    cached_low, cached_high = cached_clip
+                    if (
+                        abs(cached_low - settings_snapshot['clip_low_percent']) < 0.01 and
+                        abs(cached_high - settings_snapshot['clip_high_percent']) < 0.01
+                    ):
+                        lic_percentiles = cache.lic_percentiles
 
             # References to GPU tensors (safe - they're not modified during postprocess)
             scalar_array = cache.result.array
@@ -156,7 +162,8 @@ class DisplayPipelineController:
                     boundaries=boundaries_snapshot,
                     render_shape=render_shape,
                     canvas_resolution=settings_snapshot['canvas_resolution'],
-                    clip_percent=settings_snapshot['clip_percent'],
+                    clip_low_percent=settings_snapshot['clip_low_percent'],
+                    clip_high_percent=settings_snapshot['clip_high_percent'],
                     brightness=settings_snapshot['brightness'],
                     contrast=settings_snapshot['contrast'],
                     gamma=settings_snapshot['gamma'],
@@ -174,7 +181,8 @@ class DisplayPipelineController:
                     solution_gpu=solution_gpu,
                     saturation=settings_snapshot['saturation'],
                 )
-                return ('success', final_rgb, used_percentiles, settings_snapshot['clip_percent'])
+                clip_range = (settings_snapshot['clip_low_percent'], settings_snapshot['clip_high_percent'])
+                return ('success', final_rgb, used_percentiles, clip_range)
             except ExprError as e:
                 return ('expr_error', str(e))
             except Exception as e:
@@ -198,14 +206,14 @@ class DisplayPipelineController:
         self.postprocess_future = None
 
         if result[0] == 'success':
-            _, final_rgb, used_percentiles, clip_percent = result
+            _, final_rgb, used_percentiles, clip_range = result
 
             # Update cache with computed percentiles
             with self.app.state_lock:
                 cache = self.app.state.render_cache
                 if cache is not None:
                     cache.lic_percentiles = used_percentiles
-                    cache.lic_percentiles_clip_percent = clip_percent
+                    cache.lic_percentiles_clip_range = clip_range
 
             # Update texture (must be on main thread)
             self.texture_manager.update_texture_from_rgb(final_rgb)

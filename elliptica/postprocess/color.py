@@ -18,7 +18,8 @@ class ColorParams:
     This type lives in the backend (elliptica/postprocess/) to avoid UI coupling.
     UI layer converts DisplaySettings -> ColorParams at the boundary.
     """
-    clip_percent: float
+    clip_low_percent: float
+    clip_high_percent: float
     brightness: float
     contrast: float
     gamma: float
@@ -31,7 +32,7 @@ def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_
 
     Args:
         scalar_array: Grayscale LIC array (float32)
-        color_params: ColorParams with color_enabled, palette, gamma, contrast, clip_percent, brightness
+        color_params: ColorParams with color_enabled, palette, gamma, contrast, clip range, brightness
         display_array_gpu: Optional GPU tensor to use instead of scalar_array (faster!)
 
     Returns:
@@ -54,7 +55,8 @@ def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_
 
         rgb_gpu = build_base_rgb_gpu(
             display_array_gpu,
-            color_params.clip_percent,
+            color_params.clip_low_percent,
+            color_params.clip_high_percent,
             color_params.brightness,
             color_params.contrast,
             color_params.gamma,
@@ -82,11 +84,18 @@ def build_base_rgb(scalar_array: np.ndarray, color_params: ColorParams, display_
         arr = scalar_array.astype(np.float32, copy=False)
 
         # Clip/normalize to [0, 1]
-        if color_params.clip_percent > 0.0:
-            vmin = float(np.percentile(arr, color_params.clip_percent))
-            vmax = float(np.percentile(arr, 100.0 - color_params.clip_percent))
-            if vmax > vmin:
-                norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+        low = max(float(color_params.clip_low_percent), 0.0)
+        high = max(float(color_params.clip_high_percent), 0.0)
+        if low > 0.0 or high > 0.0:
+            lower = max(0.0, min(low, 100.0))
+            upper = max(0.0, min(100.0 - high, 100.0))
+            if upper > lower:
+                vmin = float(np.percentile(arr, lower))
+                vmax = float(np.percentile(arr, upper))
+                if vmax > vmin:
+                    norm = np.clip((arr - vmin) / (vmax - vmin), 0.0, 1.0)
+                else:
+                    norm = _normalize_unit(arr)
             else:
                 norm = _normalize_unit(arr)
         else:

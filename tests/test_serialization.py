@@ -142,7 +142,8 @@ def test_roundtrip_all_settings():
     # Custom display settings
     state.display_settings = DisplaySettings(
         downsample_sigma=0.7,
-        clip_percent=0.03,
+        clip_low_percent=0.03,
+        clip_high_percent=0.03,
         contrast=1.5,
         gamma=1.2,
         color_enabled=True,
@@ -172,7 +173,8 @@ def test_roundtrip_all_settings():
         # Verify display settings
         ds = loaded_state.display_settings
         assert ds.downsample_sigma == 0.7
-        assert ds.clip_percent == 0.03
+        assert ds.clip_low_percent == 0.03
+        assert ds.clip_high_percent == 0.03
         assert ds.contrast == 1.5
         assert ds.gamma == 1.2
         assert ds.color_enabled is True

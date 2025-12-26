@@ -104,7 +104,8 @@ def apply_region_overlays_gpu(
     interior_masks: list[torch.Tensor],
     boundary_color_settings: dict,
     boundaries: list,
-    clip_percent: float,
+    clip_low_percent: float,
+    clip_high_percent: float,
     brightness: float,
     contrast: float,
     gamma: float,
@@ -124,7 +125,8 @@ def apply_region_overlays_gpu(
         interior_masks: List of interior mask tensors on GPU
         boundary_color_settings: dict[boundary_id -> BoundaryColorSettings]
         boundaries: List of BoundaryObject objects
-        clip_percent: Percentile clipping for colorization
+        clip_low_percent: Percentile clipping from low end for colorization
+        clip_high_percent: Percentile clipping from high end for colorization
         brightness: Brightness adjustment
         contrast: Contrast adjustment
         gamma: Gamma correction
@@ -179,7 +181,8 @@ def apply_region_overlays_gpu(
         cache_key = (palette_name, region_brightness, region_contrast, region_gamma)
         palette_cache[cache_key] = build_base_rgb_gpu(
             scalar_tensor,
-            clip_percent,
+            clip_low_percent,
+            clip_high_percent,
             region_brightness,  # Per-region brightness
             region_contrast,    # Per-region contrast
             region_gamma,       # Per-region gamma

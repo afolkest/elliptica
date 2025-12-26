@@ -463,7 +463,8 @@ class ImageExportController:
                 boundaries=project.boundary_objects,
                 render_shape=result.array.shape,
                 canvas_resolution=(canvas_w, canvas_h),
-                clip_percent=settings.clip_percent,
+                clip_low_percent=settings.clip_low_percent,
+                clip_high_percent=settings.clip_high_percent,
                 brightness=settings.brightness,
                 contrast=settings.contrast,
                 gamma=settings.gamma,
@@ -704,10 +705,17 @@ class ImageExportController:
         # Compute percentiles for smear (if needed at export resolution)
         lic_percentiles = None
         if any(b.smear_enabled for b in project.boundary_objects):
-            clip_percent = float(settings.clip_percent)
-            if clip_percent > 0.0:
-                vmin = float(np.percentile(lic_array, clip_percent))
-                vmax = float(np.percentile(lic_array, 100.0 - clip_percent))
+            clip_low = float(settings.clip_low_percent)
+            clip_high = float(settings.clip_high_percent)
+            if clip_low > 0.0 or clip_high > 0.0:
+                lower = max(0.0, min(clip_low, 100.0))
+                upper = max(0.0, min(100.0 - clip_high, 100.0))
+                if upper > lower:
+                    vmin = float(np.percentile(lic_array, lower))
+                    vmax = float(np.percentile(lic_array, upper))
+                else:
+                    vmin = float(np.min(lic_array))
+                    vmax = float(np.max(lic_array))
             else:
                 vmin = float(np.min(lic_array))
                 vmax = float(np.max(lic_array))
@@ -738,7 +746,8 @@ class ImageExportController:
             boundaries=project.boundary_objects,
             render_shape=lic_array.shape,
             canvas_resolution=canvas_resolution,
-            clip_percent=settings.clip_percent,
+            clip_low_percent=settings.clip_low_percent,
+            clip_high_percent=settings.clip_high_percent,
             brightness=settings.brightness,
             contrast=settings.contrast,
             gamma=settings.gamma,

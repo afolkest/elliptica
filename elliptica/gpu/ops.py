@@ -64,27 +64,39 @@ def gaussian_blur_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
     return blurred_4d.squeeze(0).squeeze(0)
 
 
-def percentile_clip_gpu(tensor: torch.Tensor, clip_percent: float) -> Tuple[torch.Tensor, float, float]:
+def percentile_clip_gpu(
+    tensor: torch.Tensor,
+    clip_low_percent: float,
+    clip_high_percent: float,
+) -> Tuple[torch.Tensor, float, float]:
     """Clip and normalize tensor using percentile bounds.
 
     Args:
         tensor: 2D tensor (H, W) on GPU
-        clip_percent: Percentage to clip at both ends (e.g., 2.0 for 2%-98%)
+        clip_low_percent: Percentage to clip from the low end (e.g., 0.5 for 0.5%)
+        clip_high_percent: Percentage to clip from the high end (e.g., 0.5 for 99.5%)
 
     Returns:
         Tuple of (normalized tensor in [0,1], vmin, vmax)
     """
-    if clip_percent <= 0:
+    low = max(float(clip_low_percent), 0.0)
+    high = max(float(clip_high_percent), 0.0)
+
+    if low <= 0.0 and high <= 0.0:
         vmin = tensor.min().item()
         vmax = tensor.max().item()
     else:
         # torch.quantile expects percentiles in [0, 1]
-        lower = clip_percent / 100.0
-        upper = 1.0 - lower
-        quantiles = torch.tensor([lower, upper], device=tensor.device, dtype=tensor.dtype)
-        vmin_tensor, vmax_tensor = quantile_safe(tensor.flatten(), quantiles)
-        vmin = vmin_tensor.item()
-        vmax = vmax_tensor.item()
+        lower = max(0.0, min(low / 100.0, 1.0))
+        upper = max(0.0, min(1.0 - (high / 100.0), 1.0))
+        if upper <= lower:
+            vmin = tensor.min().item()
+            vmax = tensor.max().item()
+        else:
+            quantiles = torch.tensor([lower, upper], device=tensor.device, dtype=tensor.dtype)
+            vmin_tensor, vmax_tensor = quantile_safe(tensor.flatten(), quantiles)
+            vmin = vmin_tensor.item()
+            vmax = vmax_tensor.item()
 
     if vmax > vmin:
         normalized = torch.clamp((tensor - vmin) / (vmax - vmin), 0.0, 1.0)

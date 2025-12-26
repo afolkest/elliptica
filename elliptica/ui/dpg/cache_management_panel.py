@@ -1,6 +1,8 @@
 """Cache management panel controller for Elliptica UI."""
-from elliptica.postprocess.masks import rasterize_boundary_masks
 from typing import Optional, TYPE_CHECKING
+
+from elliptica import defaults
+from elliptica.postprocess.masks import rasterize_boundary_masks
 
 from elliptica.serialization import compute_project_fingerprint
 
@@ -193,10 +195,13 @@ class CacheManagementPanel:
             # ALWAYS compute if missing - don't check smear_enabled, user may enable it later
 
             if cache.lic_percentiles is None:
-                vmin = float(np.percentile(cache.result.array, 0.5))
-                vmax = float(np.percentile(cache.result.array, 99.5))
+                vmin = float(np.percentile(cache.result.array, defaults.DEFAULT_CLIP_LOW_PERCENT))
+                vmax = float(np.percentile(cache.result.array, 100.0 - defaults.DEFAULT_CLIP_HIGH_PERCENT))
                 cache.lic_percentiles = (vmin, vmax)
-                cache.lic_percentiles_clip_percent = 0.5
+                cache.lic_percentiles_clip_range = (
+                    defaults.DEFAULT_CLIP_LOW_PERCENT,
+                    defaults.DEFAULT_CLIP_HIGH_PERCENT,
+                )
 
             # Upload to GPU for fast postprocessing (if available)
             try:

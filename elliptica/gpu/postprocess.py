@@ -112,7 +112,8 @@ def apply_full_postprocess_gpu(
     boundaries: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
-    clip_percent: float,
+    clip_low_percent: float,
+    clip_high_percent: float,
     brightness: float,
     contrast: float,
     gamma: float,
@@ -146,7 +147,8 @@ def apply_full_postprocess_gpu(
         boundaries: List of BoundaryObject objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
-        clip_percent: Percentile clipping
+        clip_low_percent: Percentile clipping from low end
+        clip_high_percent: Percentile clipping from high end
         brightness: Brightness adjustment
         contrast: Contrast adjustment
         gamma: Gamma correction
@@ -166,24 +168,29 @@ def apply_full_postprocess_gpu(
             - Final RGB tensor (H, W, 3) in [0, 1] on GPU
             - Tuple (vmin, vmax) percentiles actually used for normalization
     """
-    # OPTIMIZATION: Reuse cached percentiles when they match the requested clip%.
+    # OPTIMIZATION: Reuse cached percentiles when they match the requested clip range.
     # Percentile computation can be quite expensive at large resolutions.
     from elliptica.gpu.ops import percentile_clip_gpu
 
-    # Determine whether we already have percentiles that match the requested clip%.
-    cached_clip = getattr(scalar_tensor, '_lic_cached_clip_percent', None)
+    # Determine whether we already have percentiles that match the requested clip range.
+    cached_clip = getattr(scalar_tensor, '_lic_cached_clip_range', None)
     cached_percentiles_attr = getattr(scalar_tensor, '_lic_cached_percentiles', None)
-    percentiles_match_attr = (
-        cached_clip is not None and
-        cached_percentiles_attr is not None and
-        abs(float(cached_clip) - float(clip_percent)) < 0.01
-    )
+    percentiles_match_attr = False
+    if cached_clip is not None and cached_percentiles_attr is not None:
+        try:
+            cached_low, cached_high = cached_clip
+            percentiles_match_attr = (
+                abs(float(cached_low) - float(clip_low_percent)) < 0.01 and
+                abs(float(cached_high) - float(clip_high_percent)) < 0.01
+            )
+        except (TypeError, ValueError):
+            percentiles_match_attr = False
 
     cached_percentiles: Tuple[float, float] | None = None
     if percentiles_match_attr:
         cached_percentiles = cached_percentiles_attr  # type: ignore[assignment]
     elif lic_percentiles is not None:
-        # Caller-provided percentiles are assumed to match clip_percent (caller verifies this).
+        # Caller-provided percentiles are assumed to match clip range (caller verifies this).
         cached_percentiles = lic_percentiles
 
     if cached_percentiles is not None:
@@ -194,12 +201,16 @@ def apply_full_postprocess_gpu(
             normalized_tensor = torch.zeros_like(scalar_tensor)
         used_percentiles = (vmin, vmax)
     else:
-        # Slow path: compute fresh percentiles for this clip%.
-        normalized_tensor, vmin, vmax = percentile_clip_gpu(scalar_tensor, clip_percent)
+        # Slow path: compute fresh percentiles for this clip range.
+        normalized_tensor, vmin, vmax = percentile_clip_gpu(
+            scalar_tensor,
+            clip_low_percent,
+            clip_high_percent,
+        )
         used_percentiles = (vmin, vmax)
 
-    # Persist the latest clip% and percentile bounds directly on the tensor for future reuse.
-    scalar_tensor._lic_cached_clip_percent = float(clip_percent)
+    # Persist the latest clip range and percentile bounds directly on the tensor for future reuse.
+    scalar_tensor._lic_cached_clip_range = (float(clip_low_percent), float(clip_high_percent))
     scalar_tensor._lic_cached_percentiles = used_percentiles
 
     # === ColorConfig path: expression-based OKLCH coloring ===
@@ -244,7 +255,8 @@ def apply_full_postprocess_gpu(
 
     base_rgb = build_base_rgb_gpu(
         scalar_tensor,
-        clip_percent,
+        clip_low_percent,
+        clip_high_percent,
         brightness,
         contrast,
         gamma,
@@ -300,7 +312,8 @@ def apply_full_postprocess_gpu(
             interior_masks_gpu,
             boundary_color_settings,
             boundaries,
-            clip_percent,
+            clip_low_percent,
+            clip_high_percent,
             brightness,
             contrast,
             gamma,
@@ -353,7 +366,8 @@ def apply_full_postprocess_hybrid(
     boundaries: list,
     render_shape: Tuple[int, int],
     canvas_resolution: Tuple[int, int],
-    clip_percent: float,
+    clip_low_percent: float,
+    clip_high_percent: float,
     brightness: float,
     contrast: float,
     gamma: float,
@@ -381,7 +395,8 @@ def apply_full_postprocess_hybrid(
         boundaries: List of BoundaryObject objects
         render_shape: (height, width) of render resolution
         canvas_resolution: (width, height) of canvas
-        clip_percent: Percentile clipping
+        clip_low_percent: Percentile clipping from low end
+        clip_high_percent: Percentile clipping from high end
         brightness: Brightness adjustment
         contrast: Contrast adjustment
         gamma: Gamma correction
@@ -415,7 +430,8 @@ def apply_full_postprocess_hybrid(
                 boundaries,
                 render_shape,
                 canvas_resolution,
-                clip_percent,
+                clip_low_percent,
+                clip_high_percent,
                 brightness,
                 contrast,
                 gamma,
@@ -465,7 +481,8 @@ def apply_full_postprocess_hybrid(
                 boundaries,
                 render_shape,
                 canvas_resolution,
-                clip_percent,
+                clip_low_percent,
+                clip_high_percent,
                 brightness,
                 contrast,
                 gamma,
@@ -498,7 +515,8 @@ def apply_full_postprocess_hybrid(
             boundaries,
             render_shape,
             canvas_resolution,
-            clip_percent,
+            clip_low_percent,
+            clip_high_percent,
             brightness,
             contrast,
             gamma,

@@ -58,7 +58,8 @@ def downsample_lic_gpu(
 
 def build_base_rgb_gpu(
     tensor: torch.Tensor,
-    clip_percent: float,
+    clip_low_percent: float,
+    clip_high_percent: float,
     brightness: float,
     contrast: float,
     gamma: float,
@@ -70,7 +71,8 @@ def build_base_rgb_gpu(
 
     Args:
         tensor: Input grayscale tensor (H, W) on GPU
-        clip_percent: Percentile clipping (e.g., 2.0 for 2%-98%)
+        clip_low_percent: Percentile clipping from low end (e.g., 0.5 for 0.5%)
+        clip_high_percent: Percentile clipping from high end (e.g., 0.5 for 99.5%)
         brightness: Brightness adjustment (0.0 = no change, additive)
         contrast: Contrast multiplier
         gamma: Gamma exponent
@@ -85,7 +87,7 @@ def build_base_rgb_gpu(
     if normalized_tensor is not None:
         normalized = normalized_tensor
     else:
-        normalized, _, _ = percentile_clip_gpu(tensor, clip_percent)
+        normalized, _, _ = percentile_clip_gpu(tensor, clip_low_percent, clip_high_percent)
 
     # Apply brightness, contrast and gamma
     adjusted = apply_contrast_gamma_gpu(normalized, brightness, contrast, gamma)

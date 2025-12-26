@@ -87,7 +87,8 @@ class DisplaySettings:
     """Display/postprocessing parameters applied to cached render."""
 
     downsample_sigma: float = defaults.DEFAULT_DOWNSAMPLE_SIGMA
-    clip_percent: float = defaults.DEFAULT_CLIP_PERCENT
+    clip_low_percent: float = defaults.DEFAULT_CLIP_LOW_PERCENT
+    clip_high_percent: float = defaults.DEFAULT_CLIP_HIGH_PERCENT
     brightness: float = defaults.DEFAULT_BRIGHTNESS
     contrast: float = defaults.DEFAULT_CONTRAST
     gamma: float = defaults.DEFAULT_GAMMA
@@ -99,7 +100,8 @@ class DisplaySettings:
     def to_color_params(self):
         """Convert to pure ColorParams for backend functions."""
         return ColorParams(
-            clip_percent=self.clip_percent,
+            clip_low_percent=self.clip_low_percent,
+            clip_high_percent=self.clip_high_percent,
             brightness=self.brightness,
             contrast=self.contrast,
             gamma=self.gamma,
@@ -151,7 +153,10 @@ class RenderCache:
         self.solution_gpu_resized: Optional[dict[str, torch.Tensor]] = None  # Solution fields resized to LIC resolution
 
         self.lic_percentiles = lic_percentiles  # Precomputed (vmin, vmax) for smear normalization
-        self.lic_percentiles_clip_percent: float | None = 0.5 if lic_percentiles is not None else None  # Clip% used for cached percentiles
+        self.lic_percentiles_clip_range: tuple[float, float] | None = (
+            (defaults.DEFAULT_CLIP_LOW_PERCENT, defaults.DEFAULT_CLIP_HIGH_PERCENT)
+            if lic_percentiles is not None else None
+        )  # Clip range used for cached percentiles
 
         # GPU mask tensors (cached to avoid repeated CPU→GPU transfers)
         self.boundary_masks_gpu = boundary_masks_gpu
