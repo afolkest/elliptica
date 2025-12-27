@@ -6,6 +6,7 @@ from scipy.ndimage import gaussian_filter, zoom
 from elliptica.types import RenderInfo, Project
 from elliptica.lic import convolve, get_cosine_kernel
 from elliptica import defaults
+from elliptica.colorspace.oklch_palette import build_oklch_lut
 
 COLOR_PALETTES: dict[str, np.ndarray] = {
     "Ink & Gold": np.array(
@@ -235,11 +236,63 @@ COLOR_PALETTES: dict[str, np.ndarray] = {
 }
 
 DEFAULT_COLOR_PALETTE_NAME = "Ink Wash"
+PALETTE_SCHEMA_VERSION = 2
+OKLCH_DEFAULT_RELATIVE_CHROMA = True
+OKLCH_DEFAULT_INTERP_MIX = 1.0
+OKLCH_COLORMAP_LUT_SIZE = 16
 
 
-def _build_palette_lut(colors: np.ndarray, size: int = 256) -> np.ndarray:
-    """Linearly interpolate palette stops into a lookup table."""
-    positions = np.linspace(0.0, 1.0, len(colors), dtype=np.float32)
+def _rgb_colors_to_stops(colors: np.ndarray) -> list[dict]:
+    colors = np.asarray(colors, dtype=np.float32)
+    if colors.size == 0:
+        return []
+    if colors.ndim != 2 or colors.shape[1] != 3:
+        raise ValueError("RGB colors must have shape (N, 3)")
+
+    count = colors.shape[0]
+    if count == 1:
+        positions = np.array([0.0], dtype=np.float32)
+    else:
+        positions = np.linspace(0.0, 1.0, count, dtype=np.float32)
+
+    stops = []
+    for pos, color in zip(positions, colors):
+        stops.append({
+            "pos": float(pos),
+            "r": float(color[0]),
+            "g": float(color[1]),
+            "b": float(color[2]),
+        })
+    return stops
+
+
+def _rgb_stops_to_colors(stops: list[dict]) -> np.ndarray:
+    if not stops:
+        return np.zeros((0, 3), dtype=np.float32)
+    stops_sorted = sorted(stops, key=lambda s: float(s["pos"]))
+    return np.array(
+        [[float(s["r"]), float(s["g"]), float(s["b"])] for s in stops_sorted],
+        dtype=np.float32,
+    )
+
+
+def _build_rgb_lut_from_stops(stops: list[dict], size: int = 256) -> np.ndarray:
+    if size <= 0:
+        raise ValueError("LUT size must be positive")
+    if not stops:
+        return np.zeros((size, 3), dtype=np.float32)
+
+    stops_sorted = sorted(stops, key=lambda s: float(s["pos"]))
+    positions = np.array([float(s["pos"]) for s in stops_sorted], dtype=np.float32)
+    colors = np.array(
+        [[float(s["r"]), float(s["g"]), float(s["b"])] for s in stops_sorted],
+        dtype=np.float32,
+    )
+    positions = np.clip(positions, 0.0, 1.0)
+
+    if len(stops_sorted) == 1:
+        return np.tile(colors[0], (size, 1))
+
     samples = np.linspace(0.0, 1.0, size, dtype=np.float32)
     lut = np.empty((size, 3), dtype=np.float32)
     for channel in range(3):
@@ -247,12 +300,55 @@ def _build_palette_lut(colors: np.ndarray, size: int = 256) -> np.ndarray:
     return lut
 
 
+def _palette_spec_is_deleted(spec: dict | None) -> bool:
+    if spec is None or not isinstance(spec, dict):
+        return True
+    return bool(spec.get("deleted", False))
+
+
+def _palette_spec_to_lut(spec: dict, size: int = 256) -> np.ndarray:
+    space = spec.get("space", "rgb")
+    if space == "oklch":
+        return build_oklch_lut(
+            spec.get("stops", []),
+            size=size,
+            relative_chroma=bool(spec.get("relative_chroma", OKLCH_DEFAULT_RELATIVE_CHROMA)),
+            interp_mix=float(spec.get("interp_mix", OKLCH_DEFAULT_INTERP_MIX)),
+        )
+    return _build_rgb_lut_from_stops(spec.get("stops", []), size=size)
+
+
+def _palette_spec_to_colormap_colors(spec: dict) -> np.ndarray:
+    space = spec.get("space", "rgb")
+    if space == "rgb":
+        return _rgb_stops_to_colors(spec.get("stops", []))
+    return _palette_spec_to_lut(spec, size=OKLCH_COLORMAP_LUT_SIZE)
+
+
+def _rgb_palette_spec_from_colors(colors: np.ndarray) -> dict:
+    return {
+        "space": "rgb",
+        "stops": _rgb_colors_to_stops(colors),
+    }
+
+
+def _write_palette_backup() -> None:
+    bak_path = USER_PALETTES_PATH.with_suffix(USER_PALETTES_PATH.suffix + ".bak")
+    if bak_path.exists():
+        return
+    try:
+        import shutil
+        shutil.copyfile(USER_PALETTES_PATH, bak_path)
+    except FileNotFoundError:
+        pass
+
+
 # User palette persistence
 USER_PALETTES_PATH = Path(__file__).parent / "palettes_user.json"
 
 
-def _load_user_palettes() -> dict[str, np.ndarray]:
-    """Load user palette library from JSON (additions/overrides)."""
+def _load_user_palette_specs() -> dict[str, dict]:
+    """Load user palette specs from JSON (additions/overrides)."""
     if not USER_PALETTES_PATH.exists():
         return {}
 
@@ -260,44 +356,85 @@ def _load_user_palettes() -> dict[str, np.ndarray]:
     with open(USER_PALETTES_PATH) as f:
         data = json.load(f)
 
-    # Convert lists back to numpy arrays
-    return {name: np.array(colors, dtype=np.float32) for name, colors in data.items()}
+    if isinstance(data, dict) and "palettes" in data:
+        palettes = data.get("palettes", {})
+        return palettes if isinstance(palettes, dict) else {}
+
+    if not isinstance(data, dict):
+        return {}
+
+    # Legacy format: {name: [[r,g,b], ...]}
+    migrated: dict[str, dict] = {}
+    for name, colors in data.items():
+        if colors is None:
+            migrated[name] = {"deleted": True}
+            continue
+        arr = np.asarray(colors, dtype=np.float32)
+        if arr.size == 0:
+            migrated[name] = {"deleted": True}
+            continue
+        migrated[name] = _rgb_palette_spec_from_colors(arr)
+
+    _write_palette_backup()
+    _save_user_palette_specs(migrated)
+    return migrated
 
 
-def _save_user_palettes(palettes: dict[str, np.ndarray]):
-    """Save user palette library to JSON."""
+def _save_user_palette_specs(palettes: dict[str, dict]):
+    """Save user palette specs to JSON."""
     import json
-    # Convert numpy arrays to lists for JSON serialization
-    data = {name: colors.tolist() for name, colors in palettes.items()}
+    data = {
+        "version": PALETTE_SCHEMA_VERSION,
+        "palettes": palettes,
+    }
     with open(USER_PALETTES_PATH, 'w') as f:
         json.dump(data, f, indent=2)
 
 
-def _build_runtime_palettes() -> dict[str, np.ndarray]:
-    """Build runtime palette dict: defaults + user overrides - user deletions."""
-    user_palettes = _load_user_palettes()
+def _build_default_palette_specs() -> dict[str, dict]:
+    specs: dict[str, dict] = {}
+    for name, colors in COLOR_PALETTES.items():
+        specs[name] = _rgb_palette_spec_from_colors(colors)
+    return specs
 
-    # Start with defaults
-    merged = dict(COLOR_PALETTES)
 
-    # Apply user additions/overrides (deleted palettes marked with None)
-    for name, colors in user_palettes.items():
-        if colors is None or (isinstance(colors, np.ndarray) and colors.size == 0):
-            # User deleted this palette
+def _build_runtime_palette_specs() -> dict[str, dict]:
+    """Build runtime palette specs: defaults + user overrides - user deletions."""
+    user_palettes = _load_user_palette_specs()
+    merged = _build_default_palette_specs()
+
+    for name, spec in user_palettes.items():
+        if _palette_spec_is_deleted(spec):
             merged.pop(name, None)
         else:
-            # User added/overrode this palette
-            merged[name] = colors
-
+            merged[name] = spec
     return merged
 
 
-# Runtime palettes (defaults + user modifications)
-_RUNTIME_PALETTES = _build_runtime_palettes()
+def _build_runtime_palettes(palette_specs: dict[str, dict]) -> dict[str, np.ndarray]:
+    palettes: dict[str, np.ndarray] = {}
+    for name, spec in palette_specs.items():
+        if _palette_spec_is_deleted(spec):
+            continue
+        colors = _palette_spec_to_colormap_colors(spec)
+        if colors.size == 0:
+            continue
+        palettes[name] = colors
+    return palettes
 
-PALETTE_LUTS: dict[str, np.ndarray] = {
-    name: _build_palette_lut(colors) for name, colors in _RUNTIME_PALETTES.items()
-}
+
+def _build_palette_luts(palette_specs: dict[str, dict]) -> dict[str, np.ndarray]:
+    luts: dict[str, np.ndarray] = {}
+    for name, spec in palette_specs.items():
+        if _palette_spec_is_deleted(spec):
+            continue
+        luts[name] = _palette_spec_to_lut(spec)
+    return luts
+
+
+_RUNTIME_PALETTE_SPECS = _build_runtime_palette_specs()
+_RUNTIME_PALETTES = _build_runtime_palettes(_RUNTIME_PALETTE_SPECS)
+PALETTE_LUTS: dict[str, np.ndarray] = _build_palette_luts(_RUNTIME_PALETTE_SPECS)
 
 
 def list_color_palettes() -> tuple[str, ...]:
@@ -314,7 +451,31 @@ def _get_palette_lut(name: str | None) -> np.ndarray:
     if PALETTE_LUTS:
         return next(iter(PALETTE_LUTS.values()))
     # If no palettes at all, create a simple grayscale fallback
-    return _build_palette_lut(np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32))
+    grayscale = np.array([[0, 0, 0], [1, 1, 1]], dtype=np.float32)
+    return _build_rgb_lut_from_stops(_rgb_colors_to_stops(grayscale))
+
+
+def set_palette_spec(name: str, spec: dict) -> None:
+    """Add or update a palette spec in the user library."""
+    global _RUNTIME_PALETTE_SPECS, _RUNTIME_PALETTES, PALETTE_LUTS
+
+    user_palettes = _load_user_palette_specs()
+    user_palettes[name] = spec
+    _save_user_palette_specs(user_palettes)
+
+    if _palette_spec_is_deleted(spec):
+        _RUNTIME_PALETTE_SPECS.pop(name, None)
+        _RUNTIME_PALETTES.pop(name, None)
+        PALETTE_LUTS.pop(name, None)
+        return
+
+    _RUNTIME_PALETTE_SPECS[name] = spec
+    colors = _palette_spec_to_colormap_colors(spec)
+    if colors.size == 0:
+        _RUNTIME_PALETTES.pop(name, None)
+    else:
+        _RUNTIME_PALETTES[name] = colors
+    PALETTE_LUTS[name] = _palette_spec_to_lut(spec)
 
 
 def delete_palette(name: str):
@@ -323,42 +484,15 @@ def delete_palette(name: str):
     Note: You can delete default palettes, but they'll reappear if you delete
     the palettes_user.json file. The app will gracefully handle missing defaults.
     """
-    global _RUNTIME_PALETTES, PALETTE_LUTS
-
-    # Load current user palettes
-    user_palettes = _load_user_palettes()
-
-    # Mark as deleted (store empty array as tombstone)
-    user_palettes[name] = np.array([], dtype=np.float32)
-
-    # Save to disk
-    _save_user_palettes(user_palettes)
-
-    # Update runtime state
-    _RUNTIME_PALETTES.pop(name, None)
-    PALETTE_LUTS.pop(name, None)
+    set_palette_spec(name, {"deleted": True})
 
 
 def add_palette(name: str, colors: list[tuple[float, float, float]] | np.ndarray):
     """Add or update a palette in user library."""
-    global _RUNTIME_PALETTES, PALETTE_LUTS
-
-    # Convert to numpy array if needed
     if not isinstance(colors, np.ndarray):
         colors = np.array(colors, dtype=np.float32)
-
-    # Load current user palettes
-    user_palettes = _load_user_palettes()
-
-    # Add/update
-    user_palettes[name] = colors
-
-    # Save to disk
-    _save_user_palettes(user_palettes)
-
-    # Update runtime state
-    _RUNTIME_PALETTES[name] = colors
-    PALETTE_LUTS[name] = _build_palette_lut(colors)
+    spec = _rgb_palette_spec_from_colors(colors)
+    set_palette_spec(name, spec)
 
 
 def generate_noise(

@@ -43,6 +43,10 @@ from .gamut import (
     max_chroma_fast,
     get_max_chroma_lut,
 )
+from .oklch_palette import (
+    build_oklch_lut,
+    interpolate_oklch,
+)
 
 from .mapping import ColorMapping, ColorConfig
 from .pipeline import (
@@ -97,4 +101,7 @@ __all__ = [
     'max_chroma_for_lh',
     'max_chroma_fast',
     'get_max_chroma_lut',
+    # OKLCH palette utilities
+    'build_oklch_lut',
+    'interpolate_oklch',
 ]
