@@ -7,6 +7,12 @@ from typing import Optional, Literal, TYPE_CHECKING
 
 from elliptica import defaults
 from elliptica.app import actions
+from elliptica.render import (
+    delete_palette,
+    get_palette_spec,
+    list_color_palettes,
+    set_palette_spec,
+)
 
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
@@ -65,6 +71,28 @@ class PostprocessingPanel:
         self.hist_pending_update: bool = False
         self.hist_last_update_time: float = 0.0
         self.hist_debounce_delay: float = 0.05  # 50ms throttle
+
+        # Palette editor UI (shell for phase 3)
+        self.palette_editor_active: bool = False
+        self.palette_editor_palette_name: Optional[str] = None
+        self.palette_editor_for_region: bool = False
+        self.palette_editor_group_id: Optional[int] = None
+        self.palette_editor_title_id: Optional[int] = None
+        self.palette_editor_done_button_id: Optional[int] = None
+        self.palette_editor_gradient_drawlist_id: Optional[int] = None
+        self.palette_editor_slice_drawlist_id: Optional[int] = None
+        self.palette_editor_l_gradient_drawlist_id: Optional[int] = None
+        self.palette_editor_preview_button_id: Optional[int] = None
+        self.palette_editor_info_text_id: Optional[int] = None
+        self.palette_editor_l_slider_id: Optional[int] = None
+        self.palette_editor_c_slider_id: Optional[int] = None
+        self.palette_editor_h_slider_id: Optional[int] = None
+
+        self.palette_editor_width = self.palette_preview_width
+        self.palette_editor_gradient_height = 60
+        self.palette_editor_slice_height = 110
+        self.palette_editor_lbar_height = 16
+        self.palette_editor_preview_size = 60
 
         # Color mode: "palette" or "expressions"
         self.color_mode: str = "palette"
@@ -303,6 +331,9 @@ class PostprocessingPanel:
                 with dpg.group(tag="region_palette_group", show=False):
                     self._build_region_palette_ui("region_palette_group", palette_colormaps)
 
+                # Inline palette editor (hidden until Edit is activated)
+                self._build_palette_editor_ui("palette_mode_group")
+
                 # Sliders (fixed position)
                 dpg.add_spacer(height=10)
 
@@ -446,7 +477,6 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        from elliptica.render import list_color_palettes
         palette_names = list(list_color_palettes())
 
         # Palette label and button showing current selection
@@ -466,6 +496,24 @@ class PostprocessingPanel:
 
         # Popup menu for global palette selection
         with dpg.popup(global_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="global_palette_popup"):
+            dpg.add_text("Palette actions:")
+            dpg.add_button(
+                label="Edit current",
+                width=350,
+                height=30,
+                callback=self.on_palette_edit,
+                user_data=False,
+                tag="global_palette_edit_btn",
+            )
+            dpg.add_button(
+                label="Duplicate current",
+                width=350,
+                height=30,
+                callback=self.on_palette_duplicate,
+                user_data=False,
+                tag="global_palette_duplicate_btn",
+            )
+            dpg.add_separator()
             dpg.add_text("Select a palette (right-click to delete):")
             dpg.add_separator()
 
@@ -523,7 +571,6 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        from elliptica.render import list_color_palettes
         palette_names = list(list_color_palettes())
 
         # Region palette label and button showing current selection
@@ -542,6 +589,24 @@ class PostprocessingPanel:
 
         # Popup menu for region palette selection
         with dpg.popup(region_palette_button, mousebutton=dpg.mvMouseButton_Left, tag="region_palette_popup"):
+            dpg.add_text("Palette actions:")
+            dpg.add_button(
+                label="Edit current",
+                width=350,
+                height=30,
+                callback=self.on_palette_edit,
+                user_data=True,
+                tag="region_palette_edit_btn",
+            )
+            dpg.add_button(
+                label="Duplicate current",
+                width=350,
+                height=30,
+                callback=self.on_palette_duplicate,
+                user_data=True,
+                tag="region_palette_duplicate_btn",
+            )
+            dpg.add_separator()
             dpg.add_text("Select palette (also enables slider override):")
             dpg.add_separator()
 
@@ -577,6 +642,126 @@ class PostprocessingPanel:
             parent=parent,
         )
 
+    def _build_palette_editor_ui(self, parent) -> None:
+        """Build the inline palette editor shell (phase 3)."""
+        if dpg is None:
+            return
+
+        with dpg.group(tag="palette_editor_group", show=False, parent=parent) as group:
+            self.palette_editor_group_id = group
+
+            with dpg.group(horizontal=True):
+                self.palette_editor_title_id = dpg.add_text(
+                    "Editing: (none)",
+                    tag="palette_editor_title",
+                    color=(150, 200, 255),
+                )
+                dpg.add_spacer(width=8)
+                self.palette_editor_done_button_id = dpg.add_button(
+                    label="Done",
+                    width=60,
+                    callback=self.on_palette_editor_done,
+                    tag="palette_editor_done_btn",
+                )
+
+            dpg.add_spacer(height=6)
+            dpg.add_separator()
+            dpg.add_spacer(height=6)
+
+            dpg.add_text("Gradient", color=(150, 150, 150))
+            self.palette_editor_gradient_drawlist_id = dpg.add_drawlist(
+                width=self.palette_editor_width,
+                height=self.palette_editor_gradient_height,
+                tag="palette_editor_gradient_drawlist",
+            )
+
+            dpg.add_spacer(height=6)
+            dpg.add_text("Chroma / Hue (C x H)", color=(150, 150, 150))
+            self.palette_editor_slice_drawlist_id = dpg.add_drawlist(
+                width=self.palette_editor_width,
+                height=self.palette_editor_slice_height,
+                tag="palette_editor_slice_drawlist",
+            )
+
+            dpg.add_spacer(height=6)
+            dpg.add_text("Lightness (L)", color=(150, 150, 150))
+            self.palette_editor_l_gradient_drawlist_id = dpg.add_drawlist(
+                width=self.palette_editor_width,
+                height=self.palette_editor_lbar_height,
+                tag="palette_editor_l_gradient_drawlist",
+            )
+
+            dpg.add_spacer(height=4)
+            self.palette_editor_l_slider_id = dpg.add_slider_float(
+                label="L",
+                default_value=0.5,
+                min_value=0.0,
+                max_value=1.0,
+                format="%.3f",
+                width=self.palette_editor_width,
+                enabled=False,
+                tag="palette_editor_l_slider",
+            )
+            self.palette_editor_c_slider_id = dpg.add_slider_float(
+                label="C",
+                default_value=0.0,
+                min_value=0.0,
+                max_value=0.4,
+                format="%.4f",
+                width=self.palette_editor_width,
+                enabled=False,
+                tag="palette_editor_c_slider",
+            )
+            self.palette_editor_h_slider_id = dpg.add_slider_float(
+                label="H",
+                default_value=0.0,
+                min_value=0.0,
+                max_value=360.0,
+                format="%.1f",
+                width=self.palette_editor_width,
+                enabled=False,
+                tag="palette_editor_h_slider",
+            )
+
+            dpg.add_spacer(height=6)
+            with dpg.group(horizontal=True):
+                self.palette_editor_preview_button_id = dpg.add_color_button(
+                    default_value=(0.3, 0.3, 0.3, 1.0),
+                    width=self.palette_editor_preview_size,
+                    height=self.palette_editor_preview_size,
+                    enabled=False,
+                    tag="palette_editor_preview",
+                )
+                dpg.add_spacer(width=8)
+                self.palette_editor_info_text_id = dpg.add_text(
+                    "Select a stop to edit.",
+                    tag="palette_editor_info_text",
+                    color=(140, 140, 140),
+                )
+
+        self._draw_palette_editor_placeholders()
+
+    def _draw_palette_editor_placeholders(self) -> None:
+        """Draw placeholder panels for the palette editor."""
+        if dpg is None:
+            return
+
+        def _draw_panel(drawlist_id: Optional[int], width: int, height: int) -> None:
+            if drawlist_id is None or not dpg.does_item_exist(drawlist_id):
+                return
+            dpg.delete_item(drawlist_id, children_only=True)
+            dpg.draw_rectangle(
+                (0, 0),
+                (width, height),
+                color=(70, 70, 70, 255),
+                fill=(25, 25, 25, 255),
+                thickness=1,
+                parent=drawlist_id,
+            )
+
+        _draw_panel(self.palette_editor_gradient_drawlist_id, self.palette_editor_width, self.palette_editor_gradient_height)
+        _draw_panel(self.palette_editor_slice_drawlist_id, self.palette_editor_width, self.palette_editor_slice_height)
+        _draw_panel(self.palette_editor_l_gradient_drawlist_id, self.palette_editor_width, self.palette_editor_lbar_height)
     def _build_expression_editor_ui(self, parent) -> None:
         """Build the expression editor UI for OKLCH color mapping.
 
@@ -766,6 +951,64 @@ class PostprocessingPanel:
                 dpg.configure_item(self.region_palette_preview_button_id, label=label)
                 if tag is not None:
                     dpg.bind_colormap(self.region_palette_preview_button_id, tag)
+
+        self._update_palette_popup_controls()
+
+    def _get_editable_palette_name(self, for_region: bool) -> Optional[str]:
+        """Return palette name if edit/duplicate is valid in this context."""
+        with self.app.state_lock:
+            if for_region:
+                region_style = self._get_current_region_style_unlocked()
+                if region_style and region_style.enabled and region_style.use_palette:
+                    return region_style.palette
+                return None
+
+            if self.app.state.display_settings.color_enabled:
+                return self.app.state.display_settings.palette
+            return None
+
+    def _update_palette_popup_controls(self) -> None:
+        """Enable/disable Edit/Duplicate based on current context."""
+        if dpg is None:
+            return
+
+        global_editable = self._get_editable_palette_name(for_region=False) is not None
+        region_editable = self._get_editable_palette_name(for_region=True) is not None
+        if self.palette_editor_active:
+            global_editable = False
+            region_editable = False
+
+        if dpg.does_item_exist("global_palette_edit_btn"):
+            dpg.configure_item("global_palette_edit_btn", enabled=global_editable)
+        if dpg.does_item_exist("global_palette_duplicate_btn"):
+            dpg.configure_item("global_palette_duplicate_btn", enabled=global_editable)
+        if dpg.does_item_exist("region_palette_edit_btn"):
+            dpg.configure_item("region_palette_edit_btn", enabled=region_editable)
+        if dpg.does_item_exist("region_palette_duplicate_btn"):
+            dpg.configure_item("region_palette_duplicate_btn", enabled=region_editable)
+
+    def _set_palette_editor_state(self, active: bool, palette_name: Optional[str] = None, for_region: bool = False) -> None:
+        """Show/hide the palette editor and sync controls."""
+        if dpg is None:
+            return
+
+        self.palette_editor_active = active
+        self.palette_editor_palette_name = palette_name if active else None
+        self.palette_editor_for_region = for_region if active else False
+
+        if self.palette_editor_group_id is not None and dpg.does_item_exist(self.palette_editor_group_id):
+            dpg.configure_item(self.palette_editor_group_id, show=active)
+
+        if self.palette_editor_title_id is not None and dpg.does_item_exist(self.palette_editor_title_id):
+            title = f"Editing: {palette_name}" if active and palette_name else "Editing: (none)"
+            dpg.set_value(self.palette_editor_title_id, title)
+
+        if self.global_palette_preview_button_id is not None and dpg.does_item_exist(self.global_palette_preview_button_id):
+            dpg.configure_item(self.global_palette_preview_button_id, enabled=not active)
+        if self.region_palette_preview_button_id is not None and dpg.does_item_exist(self.region_palette_preview_button_id):
+            dpg.configure_item(self.region_palette_preview_button_id, enabled=not active)
+
+        self._update_palette_popup_controls()
 
     def _normalize_unit(self, arr: np.ndarray) -> np.ndarray:
         arr_min = float(arr.min())
@@ -1379,9 +1622,93 @@ class PostprocessingPanel:
     # Color and palette callbacks
     # ------------------------------------------------------------------
 
+    def on_palette_edit(self, sender=None, app_data=None, user_data=None) -> None:
+        """Open the inline palette editor for the active palette."""
+        if dpg is None:
+            return
+
+        for_region = bool(user_data)
+        palette_name = self._get_editable_palette_name(for_region)
+        if palette_name is None:
+            return
+
+        self._set_palette_editor_state(True, palette_name, for_region)
+        popup_tag = "region_palette_popup" if for_region else "global_palette_popup"
+        if dpg.does_item_exist(popup_tag):
+            dpg.configure_item(popup_tag, show=False)
+
+    def on_palette_editor_done(self, sender=None, app_data=None) -> None:
+        """Exit palette edit mode."""
+        if dpg is None:
+            return
+        self._set_palette_editor_state(False)
+
+    def _generate_duplicate_palette_name(self, base: str) -> str:
+        existing = set(list_color_palettes())
+        candidate = f"{base} Copy"
+        if candidate not in existing:
+            return candidate
+        index = 2
+        while True:
+            candidate = f"{base} Copy {index}"
+            if candidate not in existing:
+                return candidate
+            index += 1
+
+    def on_palette_duplicate(self, sender=None, app_data=None, user_data=None) -> None:
+        """Duplicate the active palette and enter edit mode on the copy."""
+        if dpg is None:
+            return
+
+        for_region = bool(user_data)
+        if self.palette_editor_active:
+            return
+
+        palette_name = self._get_editable_palette_name(for_region)
+        if palette_name is None:
+            return
+
+        spec = get_palette_spec(palette_name)
+        if spec is None:
+            return
+
+        new_name = self._generate_duplicate_palette_name(palette_name)
+        set_palette_spec(new_name, spec)
+
+        self.app.display_pipeline.texture_manager.rebuild_colormaps()
+        self._rebuild_palette_popup()
+
+        with self.app.state_lock:
+            if for_region:
+                selected = self.app.state.get_selected()
+                region_type = self.app.state.selected_region_type
+                if selected and selected.id is not None:
+                    actions.set_region_palette(self.app.state, selected.id, region_type, new_name)
+                    global_b = self.app.state.display_settings.brightness
+                    global_c = self.app.state.display_settings.contrast
+                    global_g = self.app.state.display_settings.gamma
+                    actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
+                    actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
+                    actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
+            else:
+                actions.set_color_enabled(self.app.state, True)
+                actions.set_palette(self.app.state, new_name)
+
+        self.update_context_ui()
+        self._update_palette_preview_buttons()
+
+        popup_tag = "region_palette_popup" if for_region else "global_palette_popup"
+        if dpg.does_item_exist(popup_tag):
+            dpg.configure_item(popup_tag, show=False)
+
+        self._set_palette_editor_state(True, new_name, for_region)
+        self.app.display_pipeline.refresh_display()
+
     def on_global_grayscale(self, sender=None, app_data=None) -> None:
         """Handle global 'Grayscale (No Color)' button."""
         if dpg is None:
+            return
+        if self.palette_editor_active:
             return
 
         with self.app.state_lock:
@@ -1395,6 +1722,8 @@ class PostprocessingPanel:
     def on_global_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle global colormap button click."""
         if dpg is None or user_data is None:
+            return
+        if self.palette_editor_active:
             return
 
         palette_name = user_data
@@ -1411,6 +1740,8 @@ class PostprocessingPanel:
     def on_region_use_global(self, sender=None, app_data=None) -> None:
         """Handle region 'Use Global' button - disables override."""
         if dpg is None:
+            return
+        if self.palette_editor_active:
             return
 
         with self.app.state_lock:
@@ -1432,6 +1763,8 @@ class PostprocessingPanel:
     def on_region_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle region colormap button click - also enables override."""
         if dpg is None or user_data is None:
+            return
+        if self.palette_editor_active:
             return
 
         palette_name = user_data
@@ -1525,8 +1858,6 @@ class PostprocessingPanel:
         if dpg is None or self.pending_delete_palette is None:
             return
 
-        from elliptica.render import delete_palette
-
         palette_name = self.pending_delete_palette
         delete_palette(palette_name)
 
@@ -1551,7 +1882,6 @@ class PostprocessingPanel:
             dpg.delete_item("global_palette_scrolling_window", children_only=True)
 
         # Rebuild colormap buttons
-        from elliptica.render import list_color_palettes
         palette_names = list(list_color_palettes())
 
         for palette_name in palette_names:
@@ -1579,6 +1909,25 @@ class PostprocessingPanel:
                     callback=lambda s, a, u: self._open_delete_confirmation(u),
                     user_data=palette_name
                 )
+
+        # Rebuild region palette list too
+        if dpg.does_item_exist("region_palette_scrolling_window"):
+            dpg.delete_item("region_palette_scrolling_window", children_only=True)
+
+            for palette_name in palette_names:
+                colormap_tag = self.app.display_pipeline.texture_manager.palette_colormaps.get(palette_name)
+                if not colormap_tag:
+                    continue
+                btn = dpg.add_colormap_button(
+                    label=palette_name,
+                    width=350,
+                    height=25,
+                    callback=self.on_region_palette_button,
+                    user_data=palette_name,
+                    tag=f"region_palette_btn_{palette_name.replace(' ', '_').replace('&', 'and')}",
+                    parent="region_palette_scrolling_window",
+                )
+                dpg.bind_colormap(btn, colormap_tag)
 
     # ------------------------------------------------------------------
     # Smear callbacks
@@ -1662,6 +2011,9 @@ class PostprocessingPanel:
         # Show/hide the appropriate UI groups
         dpg.configure_item("palette_mode_group", show=(self.color_mode == "palette"))
         dpg.configure_item("expressions_mode_group", show=(self.color_mode == "expressions"))
+
+        if self.color_mode != "palette" and self.palette_editor_active:
+            self._set_palette_editor_state(False)
 
         # Update color_config based on mode
         with self.app.state_lock:

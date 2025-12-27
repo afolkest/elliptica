@@ -1,3 +1,4 @@
+import copy
 import numpy as np
 from collections import OrderedDict
 from PIL import Image
@@ -495,6 +496,14 @@ PALETTE_LUTS: dict[str, np.ndarray] = _build_palette_luts(_RUNTIME_PALETTE_SPECS
 def list_palette_colormap_colors() -> dict[str, np.ndarray]:
     """Return palette colors used for DPG colormaps."""
     return dict(_RUNTIME_PALETTES)
+
+
+def get_palette_spec(name: str) -> dict | None:
+    """Return a copy of the palette spec for a palette name."""
+    spec = _RUNTIME_PALETTE_SPECS.get(name)
+    if spec is None:
+        return None
+    return copy.deepcopy(spec)
 
 
 def list_color_palettes() -> tuple[str, ...]:
