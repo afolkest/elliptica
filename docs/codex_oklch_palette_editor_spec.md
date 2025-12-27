@@ -84,6 +84,35 @@ Editor requirements:
 - The main render image is updated via the display pipeline (no direct full-res updates in the editor).
 - Active palette target follows the global palette or selected region palette.
 
+### Editor entry/exit and palette switching
+- Edit entry lives inside the palette popup (global and region palette popups).
+- Selecting "Edit" closes the popup and opens the inline editor panel.
+- While editing, palette switching is locked: user must click "Done" to exit edit mode before choosing a different palette.
+- "Done" collapses the editor back to preview-only mode.
+- "Edit" is disabled for non-palette entries (e.g., Grayscale / Global).
+
+### Duplicate action
+- Add "Duplicate" to the palette popup.
+- Duplicate creates a new palette copy, selects it, and enters edit mode.
+- Naming scheme: `<Palette Name> Copy`, then `<Palette Name> Copy 2`, `<Palette Name> Copy 3`, etc if needed.
+- New palettes created via "New" (if exposed elsewhere) still use `user_palette_N`.
+
+### Editor layout (sidebar-friendly, fixed width)
+- Single-column layout to fit the existing controls sidebar width.
+- Header row: `Editing: <palette>` with a "Done" button.
+- Full-width gradient bar with stop handles (edit mode only).
+- Full-width CH slice at current L, then the L gradient strip.
+- L/C/H sliders below (full width).
+- Compact swatch + stop info block at the end.
+- No "Add stop" button; add/remove is handled directly on the gradient bar.
+
+### Editor interactions (from prototype)
+- Double-click gradient bar: add stop at cursor position.
+- Drag handle: move stop, clamped between neighbors.
+- Double-click handle: delete stop (minimum 2 stops).
+- Click/drag CH slice: set H and C.
+- L/C/H sliders: update current stop values.
+
 ## Display update policy
 DPG only accepts CPU texture data, so each refresh requires GPU -> CPU download plus `dpg.set_value`. Full-res continuous updates are too expensive.
 

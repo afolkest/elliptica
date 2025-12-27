@@ -1,5 +1,12 @@
 # OKLCH Palette Editor Implementation Checklist
 
+## Phased implementation plan
+- Phase 1: Extract OKLCH palette math into a reusable module and implement schema load/save + legacy migration in `elliptica/render.py`.
+- Phase 2: Build runtime LUTs from the new schema with a small LUT cache; rebuild DPG colormaps from the new schema.
+- Phase 3: Add the inline editor shell (single-column layout) with Edit/Done flow and Duplicate action; no full-res refresh yet.
+- Phase 4: Wire editor interactions to palette updates under `app.state_lock` and route full-res updates through the throttled display pipeline.
+- Phase 5: Performance polish (verify throttling under drag, cache behavior, and no redundant rebuilds).
+
 ## Data model and migration
 - Add a versioned palette schema in `palettes_user.json` (space + stops).
 - Implement migration for legacy palette format with a `.bak` backup.
