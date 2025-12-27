@@ -91,6 +91,7 @@ class PostprocessingPanel:
         self.palette_editor_gradient_drawlist_id: Optional[int] = None
         self.palette_editor_slice_drawlist_id: Optional[int] = None
         self.palette_editor_l_gradient_drawlist_id: Optional[int] = None
+        self.palette_editor_interp_mode_id: Optional[int] = None
         self.palette_editor_l_slider_id: Optional[int] = None
         self.palette_editor_c_slider_id: Optional[int] = None
         self.palette_editor_h_slider_id: Optional[int] = None
@@ -769,6 +770,16 @@ class PostprocessingPanel:
             )
 
             dpg.add_spacer(height=6)
+            dpg.add_text("Chroma interpolation", color=(150, 150, 150))
+            self.palette_editor_interp_mode_id = dpg.add_radio_button(
+                items=["Relative", "Absolute"],
+                default_value="Relative",
+                horizontal=True,
+                callback=self.on_palette_editor_interp_mode,
+                tag="palette_editor_interp_mode",
+            )
+
+            dpg.add_spacer(height=6)
 
         self._draw_palette_editor_placeholders()
 
@@ -1108,6 +1119,7 @@ class PostprocessingPanel:
         stops = spec.get("stops", [])
         relative_chroma = bool(spec.get("relative_chroma", True))
         interp_mix = float(spec.get("interp_mix", 1.0))
+        interp_mix = 1.0 if interp_mix >= 0.5 else 0.0
 
         self.palette_editor_relative_chroma = relative_chroma
         self.palette_editor_interp_mix = interp_mix
@@ -1151,6 +1163,17 @@ class PostprocessingPanel:
         self._palette_editor_update_c_slider_range()
         self._ensure_palette_editor_handlers()
         self._palette_editor_refresh_visuals()
+        self._palette_editor_sync_interp_mode()
+
+    def _palette_editor_interp_label(self) -> str:
+        return "Relative" if self.palette_editor_interp_mix >= 0.5 else "Absolute"
+
+    def _palette_editor_sync_interp_mode(self) -> None:
+        if dpg is None or self.palette_editor_interp_mode_id is None:
+            return
+        if not dpg.does_item_exist(self.palette_editor_interp_mode_id):
+            return
+        dpg.set_value(self.palette_editor_interp_mode_id, self._palette_editor_interp_label())
 
     def _palette_editor_build_spec(self) -> dict:
         stops = sorted(self.palette_editor_stops, key=lambda s: s["pos"])
@@ -1163,10 +1186,11 @@ class PostprocessingPanel:
             }
             for stop in stops
         ]
+        interp_mix = 1.0 if self.palette_editor_interp_mix >= 0.5 else 0.0
         return {
             "space": "oklch",
             "relative_chroma": bool(self.palette_editor_relative_chroma),
-            "interp_mix": float(self.palette_editor_interp_mix),
+            "interp_mix": float(interp_mix),
             "stops": spec_stops,
         }
 
@@ -1728,6 +1752,17 @@ class PostprocessingPanel:
         stop["H"] = float(np.mod(float(app_data), 360.0))
         self._palette_editor_refresh_visuals(skip_slider_sync=True)
         self._request_palette_editor_refresh()
+
+    def on_palette_editor_interp_mode(self, sender=None, app_data=None) -> None:
+        if dpg is None or not self.palette_editor_active or self.palette_editor_interp_mode_id is None:
+            return
+        mode = dpg.get_value(self.palette_editor_interp_mode_id)
+        if mode == "Absolute":
+            self.palette_editor_interp_mix = 0.0
+        else:
+            self.palette_editor_interp_mix = 1.0
+        self._palette_editor_refresh_visuals()
+        self._request_palette_editor_refresh(force=True)
 
     def _build_expression_editor_ui(self, parent) -> None:
         """Build the expression editor UI for OKLCH color mapping.
