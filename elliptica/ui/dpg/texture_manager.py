@@ -9,6 +9,8 @@ from PIL import Image
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
+from elliptica.render import list_palette_colormap_colors
+
 try:
     import dearpygui.dearpygui as dpg  # type: ignore
 except ImportError:
@@ -76,9 +78,8 @@ class TextureManager:
         self.texture_registry_id = dpg.add_texture_registry()
 
         # Create colormap registry and convert our palettes to DPG colormaps
-        from elliptica.render import _RUNTIME_PALETTES
         self.colormap_registry_id = dpg.add_colormap_registry()
-        for palette_name, colors_normalized in _RUNTIME_PALETTES.items():
+        for palette_name, colors_normalized in list_palette_colormap_colors().items():
             # DPG expects colors as [R, G, B, A] with values 0-255
             colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
             tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
@@ -104,10 +105,9 @@ class TextureManager:
             dpg.delete_item(self.colormap_registry_id, children_only=True)
 
         # Rebuild colormaps from current runtime palettes
-        from elliptica.render import _RUNTIME_PALETTES
         self.palette_colormaps.clear()
 
-        for palette_name, colors_normalized in _RUNTIME_PALETTES.items():
+        for palette_name, colors_normalized in list_palette_colormap_colors().items():
             colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
             tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
