@@ -1,4 +1,5 @@
 import numpy as np
+from collections import OrderedDict
 from PIL import Image
 from pathlib import Path
 from datetime import datetime
@@ -240,6 +241,8 @@ PALETTE_SCHEMA_VERSION = 2
 OKLCH_DEFAULT_RELATIVE_CHROMA = True
 OKLCH_DEFAULT_INTERP_MIX = 1.0
 OKLCH_COLORMAP_LUT_SIZE = 16
+_PALETTE_LUT_CACHE_MAX = 32
+_PALETTE_LUT_CACHE: "OrderedDict[tuple, np.ndarray]" = OrderedDict()
 
 
 def _rgb_colors_to_stops(colors: np.ndarray) -> list[dict]:
@@ -306,16 +309,68 @@ def _palette_spec_is_deleted(spec: dict | None) -> bool:
     return bool(spec.get("deleted", False))
 
 
+def _palette_spec_cache_key(spec: dict, size: int) -> tuple:
+    space = spec.get("space", "rgb")
+    stops = spec.get("stops", [])
+    if space == "oklch":
+        relative_chroma = bool(spec.get("relative_chroma", OKLCH_DEFAULT_RELATIVE_CHROMA))
+        interp_mix = float(spec.get("interp_mix", OKLCH_DEFAULT_INTERP_MIX))
+        stop_key = tuple(sorted(
+            (
+                float(s["pos"]),
+                float(s["L"]),
+                float(s["C"]),
+                float(s["H"]),
+            )
+            for s in stops
+        ))
+        return ("oklch", size, relative_chroma, interp_mix, stop_key)
+
+    stop_key = tuple(sorted(
+        (
+            float(s["pos"]),
+            float(s["r"]),
+            float(s["g"]),
+            float(s["b"]),
+        )
+        for s in stops
+    ))
+    return ("rgb", size, stop_key)
+
+
+def _get_cached_palette_lut(cache_key: tuple) -> np.ndarray | None:
+    lut = _PALETTE_LUT_CACHE.get(cache_key)
+    if lut is not None:
+        _PALETTE_LUT_CACHE.move_to_end(cache_key)
+    return lut
+
+
+def _set_cached_palette_lut(cache_key: tuple, lut: np.ndarray) -> None:
+    _PALETTE_LUT_CACHE[cache_key] = lut
+    _PALETTE_LUT_CACHE.move_to_end(cache_key)
+    if len(_PALETTE_LUT_CACHE) > _PALETTE_LUT_CACHE_MAX:
+        _PALETTE_LUT_CACHE.popitem(last=False)
+
+
 def _palette_spec_to_lut(spec: dict, size: int = 256) -> np.ndarray:
+    cache_key = _palette_spec_cache_key(spec, size)
+    cached = _get_cached_palette_lut(cache_key)
+    if cached is not None:
+        return cached
+
     space = spec.get("space", "rgb")
     if space == "oklch":
-        return build_oklch_lut(
+        lut = build_oklch_lut(
             spec.get("stops", []),
             size=size,
             relative_chroma=bool(spec.get("relative_chroma", OKLCH_DEFAULT_RELATIVE_CHROMA)),
             interp_mix=float(spec.get("interp_mix", OKLCH_DEFAULT_INTERP_MIX)),
         )
-    return _build_rgb_lut_from_stops(spec.get("stops", []), size=size)
+    else:
+        lut = _build_rgb_lut_from_stops(spec.get("stops", []), size=size)
+
+    _set_cached_palette_lut(cache_key, lut)
+    return lut
 
 
 def _palette_spec_to_colormap_colors(spec: dict) -> np.ndarray:
@@ -435,6 +490,11 @@ def _build_palette_luts(palette_specs: dict[str, dict]) -> dict[str, np.ndarray]
 _RUNTIME_PALETTE_SPECS = _build_runtime_palette_specs()
 _RUNTIME_PALETTES = _build_runtime_palettes(_RUNTIME_PALETTE_SPECS)
 PALETTE_LUTS: dict[str, np.ndarray] = _build_palette_luts(_RUNTIME_PALETTE_SPECS)
+
+
+def list_palette_colormap_colors() -> dict[str, np.ndarray]:
+    """Return palette colors used for DPG colormaps."""
+    return dict(_RUNTIME_PALETTES)
 
 
 def list_color_palettes() -> tuple[str, ...]:
