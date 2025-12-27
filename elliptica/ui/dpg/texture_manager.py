@@ -17,6 +17,10 @@ except ImportError:
     dpg = None
 
 
+def _palette_name_to_colormap_tag(name: str) -> str:
+    return f"colormap_{name.replace(' ', '_').replace('&', 'and')}"
+
+
 def _mask_to_rgba(mask: np.ndarray, color: Tuple[float, float, float, float]) -> np.ndarray:
     """Convert mask to RGBA float texture."""
     h, w = mask.shape
@@ -82,7 +86,7 @@ class TextureManager:
         for palette_name, colors_normalized in list_palette_colormap_colors().items():
             # DPG expects colors as [R, G, B, A] with values 0-255
             colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
-            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
+            tag = _palette_name_to_colormap_tag(palette_name)
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
             self.palette_colormaps[palette_name] = tag
 
@@ -100,6 +104,14 @@ class TextureManager:
         if dpg is None:
             return
 
+        # Clear old aliases to avoid DPG alias collisions.
+        old_tags = list(self.palette_colormaps.values())
+        if self.grayscale_colormap_tag:
+            old_tags.append(self.grayscale_colormap_tag)
+        for tag in old_tags:
+            if dpg.does_alias_exist(tag):
+                dpg.remove_alias(tag)
+
         # Clear existing colormap registry
         if hasattr(self, 'colormap_registry_id') and dpg.does_item_exist(self.colormap_registry_id):
             dpg.delete_item(self.colormap_registry_id, children_only=True)
@@ -109,7 +121,7 @@ class TextureManager:
 
         for palette_name, colors_normalized in list_palette_colormap_colors().items():
             colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
-            tag = f"colormap_{palette_name.replace(' ', '_').replace('&', 'and')}"
+            tag = _palette_name_to_colormap_tag(palette_name)
             dpg.add_colormap(colors_255, qualitative=False, tag=tag, parent=self.colormap_registry_id)
             self.palette_colormaps[palette_name] = tag
 
@@ -120,6 +132,27 @@ class TextureManager:
             tag=self.grayscale_colormap_tag,
             parent=self.colormap_registry_id,
         )
+
+    def update_palette_colormap(self, palette_name: str) -> bool:
+        """Update an existing palette colormap in place for live previews."""
+        if dpg is None:
+            return False
+
+        colors_normalized = list_palette_colormap_colors().get(palette_name)
+        if colors_normalized is None:
+            return False
+
+        colors_255 = [[int(c[0] * 255), int(c[1] * 255), int(c[2] * 255), 255] for c in colors_normalized]
+        tag = self.palette_colormaps.get(palette_name)
+
+        if tag and dpg.does_item_exist(tag):
+            try:
+                dpg.set_value(tag, colors_255)
+                return True
+            except Exception:
+                return False
+
+        return False
 
     def ensure_boundary_texture(self, idx: int, mask: np.ndarray, boundary_colors: list) -> int:
         """Create or update boundary texture, returns texture ID.

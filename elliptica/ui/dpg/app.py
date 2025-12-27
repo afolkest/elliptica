@@ -532,6 +532,7 @@ class EllipticaApp:
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
                 self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates
                 self.postprocess_panel.check_lightness_expr_debounce()  # Handle debounced lightness expr updates
+                self.postprocess_panel.check_palette_editor_debounce()  # Handle throttled palette editor refreshes
                 if self.canvas_renderer.canvas_dirty:
                     self.canvas_renderer.draw()
                 dpg.render_dearpygui_frame()
