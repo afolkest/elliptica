@@ -524,13 +524,17 @@ def _get_palette_lut(name: str | None) -> np.ndarray:
     return _build_rgb_lut_from_stops(_rgb_colors_to_stops(grayscale))
 
 
-def set_palette_spec(name: str, spec: dict) -> None:
-    """Add or update a palette spec in the user library."""
+def set_palette_spec(name: str, spec: dict, *, persist: bool = True) -> None:
+    """Add or update a palette spec in the user library.
+
+    When persist is False, updates runtime palettes without writing to disk.
+    """
     global _RUNTIME_PALETTE_SPECS, _RUNTIME_PALETTES, PALETTE_LUTS
 
-    user_palettes = _load_user_palette_specs()
-    user_palettes[name] = spec
-    _save_user_palette_specs(user_palettes)
+    if persist:
+        user_palettes = _load_user_palette_specs()
+        user_palettes[name] = spec
+        _save_user_palette_specs(user_palettes)
 
     if _palette_spec_is_deleted(spec):
         _RUNTIME_PALETTE_SPECS.pop(name, None)
