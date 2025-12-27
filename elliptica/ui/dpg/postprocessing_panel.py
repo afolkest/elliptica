@@ -7,6 +7,7 @@ from typing import Optional, Literal, TYPE_CHECKING
 
 from elliptica import defaults
 from elliptica.app import actions
+from elliptica.app.core import resolve_region_postprocess_params
 from elliptica.colorspace import (
     build_oklch_lut,
     gamut_map_to_srgb,
@@ -74,7 +75,8 @@ class PostprocessingPanel:
         self.region_palette_preview_button_id: Optional[int] = None
         self.global_hist_drawlist_id: Optional[int] = None
         self.region_hist_drawlist_id: Optional[int] = None
-        self.hist_values: Optional[np.ndarray] = None
+        self.global_hist_values: Optional[np.ndarray] = None
+        self.region_hist_values: Optional[np.ndarray] = None
         self.hist_pending_update: bool = False
         self.hist_last_update_time: float = 0.0
         self.hist_debounce_delay: float = 0.05  # 50ms throttle
@@ -2001,29 +2003,48 @@ class PostprocessingPanel:
             step = max(1, int(np.sqrt(arr.size / max_samples)))
             return arr[::step, ::step].astype(np.float32, copy=False)
 
-    def _compute_histogram_values(self) -> Optional[np.ndarray]:
-        """Compute histogram for post-processed intensity (global clip/contrast/gamma)."""
-        with self.app.state_lock:
-            cache = self.app.state.render_cache
-            if cache is None or cache.result is None:
-                return None
+    def _compute_histogram_values(
+        self,
+        source: np.ndarray,
+        clip_low: float,
+        clip_high: float,
+        brightness: float,
+        contrast: float,
+        gamma: float,
+        *,
+        cached_percentiles: Optional[tuple[float, float]] = None,
+        mask: Optional[np.ndarray] = None,
+    ) -> Optional[np.ndarray]:
+        """Compute histogram for post-processed intensity (clip/contrast/gamma)."""
+        if source is None:
+            return None
 
-            source = cache.result.array
-            clip_low = float(self.app.state.display_settings.clip_low_percent)
-            clip_high = float(self.app.state.display_settings.clip_high_percent)
-            brightness = float(self.app.state.display_settings.brightness)
-            contrast = float(self.app.state.display_settings.contrast)
-            gamma = float(self.app.state.display_settings.gamma)
-
-            cached_percentiles = None
-            if cache.lic_percentiles is not None:
-                cached_clip = cache.lic_percentiles_clip_range
-                if cached_clip is not None:
-                    cached_low, cached_high = cached_clip
-                    if abs(cached_low - clip_low) < 0.01 and abs(cached_high - clip_high) < 0.01:
-                        cached_percentiles = cache.lic_percentiles
+        if mask is not None:
+            mask_arr = np.asarray(mask, dtype=np.float32)
+            if mask_arr.shape != source.shape:
+                min_h = min(mask_arr.shape[0], source.shape[0])
+                min_w = min(mask_arr.shape[1], source.shape[1])
+                if min_h <= 0 or min_w <= 0:
+                    return None
+                source = source[:min_h, :min_w]
+                mask_arr = mask_arr[:min_h, :min_w]
+        else:
+            mask_arr = None
 
         sample = self._downsample_histogram_source(source)
+        weights = None
+        if mask_arr is not None:
+            mask_sample = self._downsample_histogram_source(mask_arr)
+            if mask_sample.shape != sample.shape:
+                min_h = min(mask_sample.shape[0], sample.shape[0])
+                min_w = min(mask_sample.shape[1], sample.shape[1])
+                if min_h <= 0 or min_w <= 0:
+                    return None
+                sample = sample[:min_h, :min_w]
+                mask_sample = mask_sample[:min_h, :min_w]
+            weights = np.clip(mask_sample, 0.0, 1.0)
+            if float(weights.max()) <= 0.0:
+                return np.zeros(self.palette_hist_bins, dtype=np.float32)
 
         if clip_low > 0.0 or clip_high > 0.0:
             lower = max(0.0, min(clip_low, 100.0))
@@ -2056,7 +2077,12 @@ class PostprocessingPanel:
         if gamma != 1.0:
             adjusted = np.clip(adjusted ** gamma, 0.0, 1.0)
 
-        counts, _ = np.histogram(adjusted, bins=self.palette_hist_bins, range=(0.0, 1.0))
+        counts, _ = np.histogram(
+            adjusted,
+            bins=self.palette_hist_bins,
+            range=(0.0, 1.0),
+            weights=weights,
+        )
         counts = counts.astype(np.float32)
         if counts.max() > 0:
             counts /= counts.max()
@@ -2112,9 +2138,81 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        self.hist_values = self._compute_histogram_values()
-        self._update_histogram_drawlist(self.global_hist_drawlist_id, self.hist_values)
-        self._update_histogram_drawlist(self.region_hist_drawlist_id, self.hist_values)
+        with self.app.state_lock:
+            cache = self.app.state.render_cache
+            if cache is None or cache.result is None:
+                self.global_hist_values = None
+                self.region_hist_values = None
+                self._update_histogram_drawlist(self.global_hist_drawlist_id, None)
+                self._update_histogram_drawlist(self.region_hist_drawlist_id, None)
+                self.hist_last_update_time = time.time()
+                self.hist_pending_update = False
+                return
+
+            source = cache.result.array
+            clip_low = float(self.app.state.display_settings.clip_low_percent)
+            clip_high = float(self.app.state.display_settings.clip_high_percent)
+            brightness = float(self.app.state.display_settings.brightness)
+            contrast = float(self.app.state.display_settings.contrast)
+            gamma = float(self.app.state.display_settings.gamma)
+
+            cached_percentiles = None
+            if cache.lic_percentiles is not None:
+                cached_clip = cache.lic_percentiles_clip_range
+                if cached_clip is not None:
+                    cached_low, cached_high = cached_clip
+                    if abs(cached_low - clip_low) < 0.01 and abs(cached_high - clip_high) < 0.01:
+                        cached_percentiles = cache.lic_percentiles
+
+            region_mask = None
+            region_brightness = brightness
+            region_contrast = contrast
+            region_gamma = gamma
+            boundary_idx = -1
+            selected = self.app.state.get_selected()
+            boundary_selected = selected is not None and selected.id is not None
+            if boundary_selected:
+                boundary_idx = self.app.state.get_single_selected_idx()
+                region_style = self._get_current_region_style_unlocked()
+                if region_style is not None:
+                    region_brightness, region_contrast, region_gamma = resolve_region_postprocess_params(
+                        region_style,
+                        self.app.state.display_settings,
+                    )
+                if boundary_idx >= 0:
+                    if self.app.state.selected_region_type == "surface":
+                        masks = cache.boundary_masks
+                    else:
+                        masks = cache.interior_masks
+                    if masks is not None and boundary_idx < len(masks):
+                        region_mask = masks[boundary_idx]
+
+        self.global_hist_values = self._compute_histogram_values(
+            source,
+            clip_low,
+            clip_high,
+            brightness,
+            contrast,
+            gamma,
+            cached_percentiles=cached_percentiles,
+        )
+
+        if boundary_idx >= 0:
+            self.region_hist_values = self._compute_histogram_values(
+                source,
+                clip_low,
+                clip_high,
+                region_brightness,
+                region_contrast,
+                region_gamma,
+                cached_percentiles=cached_percentiles,
+                mask=region_mask,
+            )
+        else:
+            self.region_hist_values = self.global_hist_values
+
+        self._update_histogram_drawlist(self.global_hist_drawlist_id, self.global_hist_values)
+        self._update_histogram_drawlist(self.region_hist_drawlist_id, self.region_hist_values)
         self.hist_last_update_time = time.time()
         self.hist_pending_update = False
 
@@ -2365,8 +2463,7 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
-        if not has_override:
-            self._request_histogram_update()
+        self._request_histogram_update()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
         """Handle contrast slider change (real-time with GPU acceleration)."""
@@ -2384,8 +2481,7 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
-        if not has_override:
-            self._request_histogram_update()
+        self._request_histogram_update()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
         """Handle gamma slider change (real-time with GPU acceleration)."""
@@ -2403,8 +2499,7 @@ class PostprocessingPanel:
                 self.app.state.invalidate_base_rgb()
 
         self.app.display_pipeline.refresh_display()
-        if not has_override:
-            self._request_histogram_update()
+        self._request_histogram_update()
 
     def on_saturation_change(self, sender=None, app_data=None) -> None:
         """Handle saturation slider change (post-colorization chroma multiplier)."""
