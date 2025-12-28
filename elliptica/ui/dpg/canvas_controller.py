@@ -258,16 +258,23 @@ class CanvasController:
         return False
 
     def is_menu_open(self) -> bool:
-        """Check if any dropdown menu is currently open."""
+        """Check if any dropdown menu or popup is currently open."""
         if dpg is None:
             return False
 
+        # Menus: check active/hovered state
         menu_tags = ["file_menu", "export_menu"]
         for tag in menu_tags:
             if dpg.does_item_exist(tag):
-                # Check both active (menu expanded) and hovered states
                 if dpg.is_item_active(tag) or dpg.is_item_hovered(tag):
                     return True
+
+        # Popups: check if shown (popups use show state, not active/hovered)
+        popup_tags = ["region_palette_popup", "global_palette_popup"]
+        for tag in popup_tags:
+            if dpg.does_item_exist(tag) and dpg.is_item_shown(tag):
+                return True
+
         return False
 
     def process_canvas_mouse(self) -> None:
