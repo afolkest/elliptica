@@ -266,13 +266,17 @@ class CanvasController:
         menu_tags = ["file_menu", "export_menu"]
         for tag in menu_tags:
             if dpg.does_item_exist(tag):
-                if dpg.is_item_active(tag) or dpg.is_item_hovered(tag):
+                active = dpg.is_item_active(tag)
+                hovered = dpg.is_item_hovered(tag)
+                if active or hovered:
+                    print(f"[DEBUG] is_menu_open: {tag} active={active} hovered={hovered}")
                     return True
 
-        # Popups: check if shown (popups use show state, not active/hovered)
+        # Popups: check if actually visible (not just show=True, which can get stuck)
         popup_tags = ["region_palette_popup", "global_palette_popup"]
         for tag in popup_tags:
-            if dpg.does_item_exist(tag) and dpg.is_item_shown(tag):
+            if dpg.does_item_exist(tag) and dpg.is_item_visible(tag):
+                print(f"[DEBUG] is_menu_open: {tag} is_visible=True")
                 return True
 
         return False
@@ -282,11 +286,19 @@ class CanvasController:
         if dpg is None or self.app.canvas_id is None:
             return
 
-        # Don't process canvas input when file dialogs, modals, or menus are open
-        if self.is_file_dialog_showing() or self.is_modal_open() or self.is_menu_open():
-            return
-
         mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
+
+        # Don't process canvas input when file dialogs, modals, or menus are open
+        # But still track mouse state to prevent desync
+        file_dialog = self.is_file_dialog_showing()
+        modal_open = self.is_modal_open()
+        menu_open = self.is_menu_open()
+        if file_dialog or modal_open or menu_open:
+            # DEBUG: log when blocking
+            if mouse_down and not self.mouse_down_last:
+                print(f"[DEBUG] Click blocked: file_dialog={file_dialog}, modal={modal_open}, menu={menu_open}")
+            self.mouse_down_last = mouse_down
+            return
         pressed = mouse_down and not self.mouse_down_last
         released = (not mouse_down) and self.mouse_down_last
 
@@ -314,10 +326,15 @@ class CanvasController:
 
         # Render mode: click to select region for colorization (single-select only)
         if mode != "edit":
-            if pressed and self.is_mouse_over_canvas():
+            over_canvas = self.is_mouse_over_canvas()
+            # DEBUG: log click attempts
+            if pressed:
+                print(f"[DEBUG] Render mode click: over_canvas={over_canvas}, pressed={pressed}")
+            if pressed and over_canvas:
                 x, y = self.get_canvas_mouse_pos()
                 with self.app.state_lock:
                     hit_idx, hit_region = self.detect_region_at_point(x, y)
+                    print(f"[DEBUG] Render click at ({x:.1f}, {y:.1f}): hit_idx={hit_idx}, hit_region={hit_region}")
                     self.app.state.set_selected(hit_idx)
                     if hit_region is not None:
                         self.app.state.selected_region_type = hit_region
@@ -329,9 +346,14 @@ class CanvasController:
             return
 
         # Edit mode: click/shift-click to select, drag to move, box select from empty space
-        if pressed and self.is_mouse_over_canvas():
+        over_canvas_edit = self.is_mouse_over_canvas()
+        # DEBUG: log click attempts in edit mode
+        if pressed:
+            print(f"[DEBUG] Edit mode click: over_canvas={over_canvas_edit}, pressed={pressed}")
+        if pressed and over_canvas_edit:
             x, y = self.get_canvas_mouse_pos()
             hit_idx = self.find_hit_boundary(x, y)
+            print(f"[DEBUG] Edit click at ({x:.1f}, {y:.1f}): hit_idx={hit_idx}")
 
             with self.app.state_lock:
                 if hit_idx >= 0:
