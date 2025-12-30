@@ -1,7 +1,6 @@
 numpy
 matplotlib
-# rLIC  # Replaced with brylic (local fork with tiling and mask support)
-# brylic - install with: pip install -e ../brylic
+brylic
 numba
 scipy
 pyamg
