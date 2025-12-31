@@ -4,12 +4,57 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import copy
+import os
+import sys
 import threading
 from pathlib import Path
 from typing import Optional, Dict
 
 import numpy as np
 import dearpygui.dearpygui as dpg  # type: ignore
+
+
+class HeadlessEnvironmentError(Exception):
+    """Raised when Elliptica is run in a headless environment without a display."""
+    pass
+
+
+def _check_display_available() -> None:
+    """Check if a graphical display is available.
+
+    Raises:
+        HeadlessEnvironmentError: If no display is available.
+    """
+    # On Linux, check DISPLAY environment variable
+    if sys.platform.startswith('linux'):
+        display = os.environ.get('DISPLAY')
+        wayland = os.environ.get('WAYLAND_DISPLAY')
+        if not display and not wayland:
+            raise HeadlessEnvironmentError(
+                "No display found. Elliptica requires a graphical environment.\n\n"
+                "If running on a remote server:\n"
+                "  - Use SSH with X11 forwarding: ssh -X user@host\n"
+                "  - Or set up a virtual display: Xvfb :99 -screen 0 1024x768x24 &\n"
+                "    export DISPLAY=:99\n\n"
+                "If running in Docker:\n"
+                "  - Mount X11 socket: -v /tmp/.X11-unix:/tmp/.X11-unix -e DISPLAY\n"
+                "  - Or use a virtual display with xvfb-run\n\n"
+                "Elliptica is a GUI application and cannot run in headless mode."
+            )
+
+    # On macOS, check for valid display (headless servers won't have one)
+    elif sys.platform == 'darwin':
+        # Check if we're in a headless environment (e.g., CI without display)
+        # The TERM_PROGRAM check helps identify if we're in a real terminal vs headless
+        if os.environ.get('CI') and not os.environ.get('DISPLAY'):
+            raise HeadlessEnvironmentError(
+                "No display found. Elliptica requires a graphical environment.\n\n"
+                "Running in a CI environment without a display is not supported.\n"
+                "Elliptica is a GUI application and cannot run in headless mode."
+            )
+
+    # Windows typically always has a display when running interactively
+    # No specific check needed
 
 from elliptica.pde.register import register_all_pdes
 from elliptica.pde import PDERegistry
@@ -573,5 +618,10 @@ class EllipticaApp:
         self.boundary_controls.update_slider_labels()
 
 def run() -> None:
-    """Launch Elliptica Dear PyGui application."""
+    """Launch Elliptica Dear PyGui application.
+
+    Raises:
+        HeadlessEnvironmentError: If no graphical display is available.
+    """
+    _check_display_available()
     EllipticaApp().render()

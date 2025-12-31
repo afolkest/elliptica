@@ -25,8 +25,8 @@ These will break 95%+ of installations.
 - [x] Create or remove reference to `elliptica.migrate` script (`serialization.py:110-115`)
 
 ### Headless Environment
-- [ ] Add display/headless check before `dpg.create_context()` in `app.py`
-- [ ] Provide helpful error message for headless environments
+- [x] Add display/headless check before `dpg.create_context()` in `app.py`
+- [x] Provide helpful error message for headless environments
 
 ---
 
@@ -149,10 +149,10 @@ python -c "import elliptica; print('OK')"
 
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
-| P0       | 10    | 8    | 2         |
+| P0       | 10    | 10   | 0         |
 | P1       | 12    | 0    | 12        |
 | P2       | 14    | 0    | 14        |
 | P3       | 14    | 0    | 14        |
-| **Total**| **50**| **8**| **42**    |
+| **Total**| **50**| **10**| **40**   |
 
 *Last updated: 2025-12-31*
