@@ -7,7 +7,7 @@ name = "elliptica"
 version = "0.1.0"
 description = "Physics-based generative art framework"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "matplotlib",

@@ -14,7 +14,7 @@ These will break 95%+ of installations.
 - [x] Verify JSON files included: `palettes/library.json`, `palettes_user.json`
 
 ### Python Version
-- [ ] Change `requires-python` from `>=3.10` to `>=3.11` in `pyproject.toml`
+- [x] Change `requires-python` from `>=3.10` to `>=3.11` in `pyproject.toml`
 
 ### NumPy 2.x Compatibility
 - [ ] Fix `render.py:732` - remove `dtype` param from `np.power()`, cast result instead
@@ -149,10 +149,10 @@ python -c "import elliptica; print('OK')"
 
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
-| P0       | 10    | 3    | 7         |
+| P0       | 10    | 4    | 6         |
 | P1       | 12    | 0    | 12        |
 | P2       | 14    | 0    | 14        |
 | P3       | 14    | 0    | 14        |
-| **Total**| **50**| **3**| **47**    |
+| **Total**| **50**| **4**| **46**    |
 
 *Last updated: 2025-12-31*
