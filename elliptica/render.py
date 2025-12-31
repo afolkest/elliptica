@@ -729,7 +729,7 @@ def colorize_array(
         norm = np.clip(norm + brightness, 0.0, 1.0)
     gamma = max(float(gamma), 1e-3)
     if not np.isclose(gamma, 1.0):
-        norm = np.power(norm, gamma, dtype=np.float32)
+        norm = np.power(norm, gamma).astype(np.float32)
     norm = np.clip(norm, 0.0, 1.0)
     lut = _get_palette_lut(palette)
     idx = np.clip((norm * (lut.shape[0] - 1)).astype(np.int32), 0, lut.shape[0] - 1)
@@ -777,7 +777,7 @@ def _apply_display_transforms(
     # Gamma correction
     gamma = max(float(gamma), 1e-3)
     if not np.isclose(gamma, 1.0):
-        norm = np.power(norm, gamma, dtype=np.float32)
+        norm = np.power(norm, gamma).astype(np.float32)
 
     return np.clip(norm, 0.0, 1.0)
 
