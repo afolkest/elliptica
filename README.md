@@ -168,7 +168,6 @@ Projects are saved as `.elliptica` ZIP archives. The format has been updated to 
 ### Philosophy
 -   **Functional Backend**: Physics and rendering are pure functions.
 -   **Modular Frontend**: UI controllers are single-responsibility.
--   **No Defensive Programming**: Assume correct usage for maximum performance.
 
 ### Contributing
 To add a new physics engine:
@@ -178,7 +177,7 @@ To add a new physics engine:
 
 ## License
 
-[License Information]
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0). See [LICENSE](LICENSE) for details.
 
 ## Credits
 
