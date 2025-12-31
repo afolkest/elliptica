@@ -205,7 +205,7 @@ def perform_render(
     if lic_mask is not None:
         mask_pixels = int(lic_mask.sum())
         print(f"  LIC mask enabled: {mask_pixels} pixels blocked, edge_gain={edge_gain_strength:.3f}, power={edge_gain_power:.3f}")
-        if os.environ.get("FLOWCOL_DEBUG_LIC_MASK"):
+        if os.environ.get("ELLIPTICA_DEBUG_LIC_MASK"):
             # Write a quick debug mask preview
             out_dir = Path("outputs")
             out_dir.mkdir(exist_ok=True)

@@ -4,7 +4,7 @@ Parse Python-like math expressions and compile them to efficient callables
 that work with numpy arrays or torch tensors.
 
 Example:
-    from flowcol.expr import compile_expression
+    from elliptica.expr import compile_expression
 
     # Parse and compile
     fn = compile_expression("lic * 0.7 + sin(e_mag) * 0.3")

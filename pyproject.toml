@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "elliptica"
+version = "0.1.0"
+description = "Physics-based generative art framework"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "matplotlib",
+    "brylic",
+    "numba",
+    "scipy",
+    "pyamg",
+    "pillow",
+    "scikit-image",
+    "scikit-fmm",
+    "dearpygui",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[project.scripts]
+elliptica = "elliptica.ui.dpg.app:run"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["elliptica*"]

@@ -38,8 +38,7 @@ def save_project(state: AppState, filepath: str) -> None:
         filepath: Output path (should end with .elliptica)
     """
     filepath = Path(filepath)
-    # Accept both .elliptica and legacy .flowcol extensions
-    if filepath.suffix not in ('.elliptica', '.flowcol'):
+    if filepath.suffix != '.elliptica':
         filepath = filepath.with_suffix('.elliptica')
 
     # Build metadata dictionary
@@ -461,7 +460,7 @@ def save_render_cache(
     Args:
         cache: RenderCache to save
         project: Current project (for fingerprinting)
-        filepath: Output path (should end with .elliptica.cache or .flowcol.cache)
+        filepath: Output path (should end with .elliptica.cache)
     """
 
     filepath = Path(filepath)
@@ -511,13 +510,13 @@ def load_render_cache(
     filepath: str,
     project: Project,
 ) -> 'RenderCache | None':
-    """Load render cache from .elliptica.cache or .flowcol.cache file.
+    """Load render cache from .elliptica.cache file.
 
     Compares project fingerprint to detect staleness. If fingerprint doesn't match,
     still loads the cache but marks it as potentially stale.
 
     Args:
-        filepath: Path to .elliptica.cache or .flowcol.cache file
+        filepath: Path to .elliptica.cache file
         project: Current project (for fingerprint comparison)
 
     Returns:

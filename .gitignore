@@ -3,9 +3,13 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+# Development artifacts
+*.bak
+todo.md
 *.png
 DearPyGui
 trash
+tools
 
 LineIntegralConvolutions
 CLAUDE.md

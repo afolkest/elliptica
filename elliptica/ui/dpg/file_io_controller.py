@@ -246,7 +246,6 @@ class FileIOController:
         ) as dialog:
             self.save_project_dialog_id = dialog
             dpg.add_file_extension(".elliptica", color=(180, 255, 150, 255))
-            dpg.add_file_extension(".flowcol", color=(150, 180, 255, 255))  # Legacy support
             dpg.add_file_extension(".*")
 
     def ensure_load_project_dialog(self) -> None:
@@ -270,13 +269,8 @@ class FileIOController:
             tag="load_project_dialog",
         ) as dialog:
             self.load_project_dialog_id = dialog
-            # Order matters - first extension is the default filter
-            # Combined filter shows both .elliptica and .flowcol (but not .cache)
-            dpg.add_file_extension(
-                "Projects (*.elliptica *.flowcol){.elliptica,.flowcol}",
-                color=(180, 255, 150, 255)
-            )
-            dpg.add_file_extension(".*")  # Allow showing all files if needed
+            dpg.add_file_extension(".elliptica", color=(180, 255, 150, 255))
+            dpg.add_file_extension(".*")
 
     def open_save_project_dialog(self, sender=None, app_data=None) -> None:
         """Open the save project dialog."""
@@ -322,9 +316,8 @@ class FileIOController:
             dpg.set_value("status_text", "No file selected.")
             return
 
-        # Ensure valid extension (.elliptica preferred, .flowcol for legacy)
         path_obj = Path(path_str)
-        if path_obj.suffix not in ('.elliptica', '.flowcol'):
+        if path_obj.suffix != '.elliptica':
             path_obj = path_obj.with_suffix('.elliptica')
 
         # Check if file exists and confirm overwrite
@@ -347,10 +340,9 @@ class FileIOController:
                 # Track current project path
                 self.current_project_path = str(path_obj)
 
-                # Also save render cache if it exists (use matching cache extension)
+                # Also save render cache if it exists
                 if self.app.state.render_cache is not None:
-                    cache_suffix = '.elliptica.cache' if path_obj.suffix == '.elliptica' else '.flowcol.cache'
-                    cache_path = path_obj.with_suffix(cache_suffix)
+                    cache_path = path_obj.with_suffix('.elliptica.cache')
                     save_render_cache(self.app.state.render_cache, self.app.state.project, str(cache_path))
                     cache_size_mb = cache_path.stat().st_size / 1024 / 1024
                     dpg.set_value("status_text", f"Saved project + cache ({cache_size_mb:.1f} MB): {path_obj.name}")
@@ -431,17 +423,10 @@ class FileIOController:
         try:
             new_state = load_project(path_str)
 
-            # Try to load render cache (try matching extension first, then fallback)
+            # Try to load render cache
             project_path = Path(path_str)
-            loaded_cache = None
-            if project_path.suffix == '.elliptica':
-                cache_paths = [project_path.with_suffix('.elliptica.cache'), project_path.with_suffix('.flowcol.cache')]
-            else:
-                cache_paths = [project_path.with_suffix('.flowcol.cache'), project_path.with_suffix('.elliptica.cache')]
-            for cache_path in cache_paths:
-                loaded_cache = load_render_cache(str(cache_path), new_state.project)
-                if loaded_cache is not None:
-                    break
+            cache_path = project_path.with_suffix('.elliptica.cache')
+            loaded_cache = load_render_cache(str(cache_path), new_state.project)
 
             # Sync PDERegistry to loaded project's PDE type
             PDERegistry.set_active(new_state.project.pde_type)
@@ -620,8 +605,7 @@ class FileIOController:
 
         try:
             project_path = Path(self.current_project_path)
-            cache_suffix = '.elliptica.cache' if project_path.suffix == '.elliptica' else '.flowcol.cache'
-            cache_path = project_path.with_suffix(cache_suffix)
+            cache_path = project_path.with_suffix('.elliptica.cache')
             with self.app.state_lock:
                 if self.app.state.render_cache is not None:
                     save_render_cache(self.app.state.render_cache, self.app.state.project, str(cache_path))
