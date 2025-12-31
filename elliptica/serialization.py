@@ -17,6 +17,7 @@ from PIL import Image
 from elliptica.app.core import AppState, RenderSettings, DisplaySettings, BoundaryColorSettings, RegionStyle, RenderCache
 from elliptica.types import Project, BoundaryObject
 from elliptica.pipeline import RenderResult
+from elliptica.poisson import DIRICHLET
 from elliptica import defaults
 
 SCHEMA_VERSION = "2.0"
@@ -110,8 +111,9 @@ def load_project(filepath: str) -> AppState:
             schema_version = metadata.get('schema_version', '1.0')
             if schema_version != SCHEMA_VERSION:
                 raise ProjectLoadError(
-                    f"Schema version {schema_version} not supported. "
-                    f"Expected {SCHEMA_VERSION}. Run migration script: python -m elliptica.migrate {filepath}"
+                    f"Project file uses schema version {schema_version}, but this version of Elliptica "
+                    f"requires version {SCHEMA_VERSION}. The project file may have been created with a "
+                    f"different version of Elliptica. Please update Elliptica or recreate the project."
                 )
 
             # Reconstruct project
@@ -172,19 +174,22 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
 
 
 def _dict_to_project(data: dict[str, Any]) -> Project:
-    """Reconstruct Project from dict."""
+    """Reconstruct Project from dict.
+
+    Uses .get() with defaults for backward compatibility with older project files.
+    """
     return Project(
         boundary_objects=[],  # Will be populated separately
         canvas_resolution=tuple(data['canvas_resolution']),
-        streamlength_factor=data['streamlength_factor'],
-        next_boundary_id=data['next_boundary_id'],
-        boundary_top=data['boundary_top'],
-        boundary_bottom=data['boundary_bottom'],
-        boundary_left=data['boundary_left'],
-        boundary_right=data['boundary_right'],
-        pde_type=data['pde_type'],
-        pde_params=data['pde_params'],
-        pde_bc=data['pde_bc'],
+        streamlength_factor=data.get('streamlength_factor', defaults.DEFAULT_STREAMLENGTH_FACTOR),
+        next_boundary_id=data.get('next_boundary_id', 0),
+        boundary_top=data.get('boundary_top', DIRICHLET),
+        boundary_bottom=data.get('boundary_bottom', DIRICHLET),
+        boundary_left=data.get('boundary_left', DIRICHLET),
+        boundary_right=data.get('boundary_right', DIRICHLET),
+        pde_type=data.get('pde_type', 'poisson'),
+        pde_params=data.get('pde_params', {}),
+        pde_bc=data.get('pde_bc', {}),
     )
 
 
