@@ -5,7 +5,7 @@ from PIL import Image
 from pathlib import Path
 from datetime import datetime
 from scipy.ndimage import gaussian_filter, zoom
-from elliptica.types import RenderInfo, Project
+from elliptica.types import Project
 from elliptica.lic import convolve, get_cosine_kernel
 from elliptica import defaults
 from elliptica.colorspace.oklch_palette import build_oklch_lut
@@ -820,42 +820,6 @@ def array_to_pil(
         img = (norm * 255.0).astype(np.uint8)
         return Image.fromarray(img, mode='L').convert('RGB')
 
-
-def save_render(
-    arr: np.ndarray,
-    project: Project,
-    multiplier: float,
-    *,
-    use_color: bool = False,
-    palette: str | None = None,
-    contrast: float = 1.0,
-    gamma: float = 1.0,
-    clip_low_percent: float = 0.5,
-    clip_high_percent: float = 0.5,
-) -> RenderInfo:
-    """Save render to file and return RenderInfo."""
-    renders_dir = Path("renders")
-    renders_dir.mkdir(exist_ok=True)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"lic_{multiplier}x_{timestamp}.png"
-    filepath = renders_dir / filename
-
-    pil_img = array_to_pil(
-        arr,
-        use_color=use_color,
-        palette=palette,
-        contrast=contrast,
-        gamma=gamma,
-        clip_low_percent=clip_low_percent,
-        clip_high_percent=clip_high_percent,
-    )
-    pil_img.save(filepath)
-
-    render_info = RenderInfo(multiplier=multiplier, filepath=str(filepath), timestamp=timestamp)
-    project.renders.append(render_info)
-
-    return render_info
 
 def apply_gaussian_highpass(arr: np.ndarray, sigma: float) -> np.ndarray:
     """Subtract Gaussian blur from array (returns highpass with unbounded range)."""

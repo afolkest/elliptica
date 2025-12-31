@@ -10,7 +10,6 @@ import numpy as np
 from elliptica.app.core import RenderCache
 from elliptica import defaults
 from elliptica.pipeline import perform_render
-from elliptica.render import downsample_lic
 from elliptica.serialization import compute_project_fingerprint
 
 if TYPE_CHECKING:
@@ -151,51 +150,6 @@ class RenderOrchestrator:
                 self.app.state.field_dirty = False
                 self.app.state.render_dirty = False
                 self.app.state.view_mode = "render"
-
-            # Auto-save high-res renders (>2k on any dimension)
-            render_h, render_w = result.array.shape
-            if render_w >= 2000 or render_h >= 2000:
-                from PIL import Image
-                from datetime import datetime
-
-                output_dir = Path.cwd() / "output_raw"
-                output_dir.mkdir(exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-                if settings_snapshot.supersample > 1.0:
-                    # Save supersampled raw LIC
-                    output_path_super = output_dir / f"render_{render_w}x{render_h}_supersampled_{timestamp}.png"
-                    img_data_super = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
-                    pil_img_super = Image.fromarray(img_data_super, mode='L')
-                    pil_img_super.save(output_path_super)
-                    print(f"Auto-saved supersampled render to: {output_path_super.name}")
-
-                    # Downsample and save final raw LIC
-                    canvas_w, canvas_h = project_snapshot.canvas_resolution
-                    output_canvas_w = int(round(canvas_w * settings_snapshot.multiplier))
-                    output_canvas_h = int(round(canvas_h * settings_snapshot.multiplier))
-                    output_shape = (output_canvas_h, output_canvas_w)
-
-                    downsampled_lic = downsample_lic(
-                        result.array,
-                        output_shape,
-                        settings_snapshot.supersample,
-                        0.6,  # Default sigma
-                    )
-
-                    output_h, output_w = downsampled_lic.shape
-                    output_path_final = output_dir / f"render_{output_w}x{output_h}_final_{timestamp}.png"
-                    img_data_final = (np.clip(downsampled_lic, 0, 1) * 255).astype(np.uint8)
-                    pil_img_final = Image.fromarray(img_data_final, mode='L')
-                    pil_img_final.save(output_path_final)
-                    print(f"Auto-saved final render to: {output_path_final.name}")
-                else:
-                    # Single save
-                    output_path = output_dir / f"render_{render_w}x{render_h}_{timestamp}.png"
-                    img_data = (np.clip(result.array, 0, 1) * 255).astype(np.uint8)
-                    pil_img = Image.fromarray(img_data, mode='L')
-                    pil_img.save(output_path)
-                    print(f"Auto-saved high-res render to: {output_path.name}")
 
             return True
 
