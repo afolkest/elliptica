@@ -1,6 +1,0 @@
-python tools/theme_preview.py "DejaVu Sans"
-python tools/theme_preview.py "Source Sans 3"
-python tools/theme_preview.py "Fira Sans"
-python tools/theme_preview.py "Lato"
-python tools/theme_preview.py "Crimson Pro"
-python tools/theme_preview.py "Zilla Slab"
