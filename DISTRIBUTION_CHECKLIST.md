@@ -9,9 +9,9 @@ Track progress on distribution issues. Check off items as they're completed.
 These will break 95%+ of installations.
 
 ### Packaging & Data Files
-- [ ] Add `[tool.setuptools.package-data]` to `pyproject.toml` for JSON files
-- [ ] Create `MANIFEST.in` file for source distributions
-- [ ] Verify JSON files included: `palettes/library.json`, `palettes_user.json`
+- [x] Add `[tool.setuptools.package-data]` to `pyproject.toml` for JSON files
+- [x] Create `MANIFEST.in` file for source distributions
+- [x] Verify JSON files included: `palettes/library.json`, `palettes_user.json`
 
 ### Python Version
 - [ ] Change `requires-python` from `>=3.10` to `>=3.11` in `pyproject.toml`
@@ -149,10 +149,10 @@ python -c "import elliptica; print('OK')"
 
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
-| P0       | 10    | 0    | 10        |
+| P0       | 10    | 3    | 7         |
 | P1       | 12    | 0    | 12        |
 | P2       | 14    | 0    | 14        |
 | P3       | 14    | 0    | 14        |
-| **Total**| **50**| **0**| **50**    |
+| **Total**| **50**| **3**| **47**    |
 
 *Last updated: 2025-12-31*

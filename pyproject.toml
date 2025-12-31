@@ -34,3 +34,6 @@ elliptica = "elliptica.ui.dpg.app:run"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["elliptica*"]
+
+[tool.setuptools.package-data]
+elliptica = ["*.json", "palettes/*.json"]
