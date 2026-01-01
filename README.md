@@ -12,6 +12,8 @@ Making good art requires rapid iteration and large amounts of trial and error, s
 
 This software is not about trying to give maximally scientifically accurate visualizations of physics, although accurate representation of some aspects of the physics is a side effect. This software is all about making beautiful things. The laws of physics happen to be extremely helpful.
 
+The software contains various useful things that let's you iterate without leaving the software, such as OKLCH color palette creation and postprocessing effects.
+
 The above image is created in Elliptica. So is this one:
 
 <img src="examples/Folkestad_portrait_of_you_and_me_elliptica.jpg" width="600" alt="Portrait of You and Me">
