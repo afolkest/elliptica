@@ -21,13 +21,18 @@ class GPUContext:
         PyTorch operations work on all devices, so CPU is a valid fallback.
         """
         if cls._device is None:
-            if torch.cuda.is_available():
-                cls._device = torch.device('cuda')
-                cls._backend = 'cuda'
-            elif torch.backends.mps.is_available():
-                cls._device = torch.device('mps')
-                cls._backend = 'mps'
-            else:
+            try:
+                if torch.cuda.is_available():
+                    cls._device = torch.device('cuda')
+                    cls._backend = 'cuda'
+                elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+                    cls._device = torch.device('mps')
+                    cls._backend = 'mps'
+                else:
+                    cls._device = torch.device('cpu')
+                    cls._backend = None
+            except Exception:
+                # Fallback to CPU on any GPU initialization error
                 cls._device = torch.device('cpu')
                 cls._backend = None
         return cls._device
@@ -36,34 +41,48 @@ class GPUContext:
     def is_available(cls) -> bool:
         """Check if GPU acceleration is available (CUDA or MPS)."""
         if cls._available is None:
-            cls._available = torch.cuda.is_available() or torch.backends.mps.is_available()
+            try:
+                cuda_ok = torch.cuda.is_available()
+                mps_ok = hasattr(torch.backends, 'mps') and torch.backends.mps.is_available()
+                cls._available = cuda_ok or mps_ok
+            except Exception:
+                cls._available = False
         return cls._available
 
     @classmethod
     def warmup(cls) -> None:
-        """Pre-compile GPU kernels with dummy operations."""
+        """Pre-compile GPU kernels with dummy operations.
+
+        Fails silently on errors to avoid blocking app startup.
+        """
         if not cls.is_available():
             return
 
-        device = cls.device()
-        # Warmup with realistic operation sizes
-        dummy = torch.randn(1024, 1024, device=device, dtype=torch.float32)
+        try:
+            device = cls.device()
+            # Warmup with realistic operation sizes
+            dummy = torch.randn(1024, 1024, device=device, dtype=torch.float32)
 
-        # Gaussian blur warmup (torchvision will compile kernels)
-        _ = gaussian_blur(dummy.unsqueeze(0).unsqueeze(0), kernel_size=5, sigma=2.0)
+            # Gaussian blur warmup (torchvision will compile kernels)
+            _ = gaussian_blur(dummy.unsqueeze(0).unsqueeze(0), kernel_size=5, sigma=2.0)
 
-        # Percentile/quantile warmup
-        _ = torch.quantile(dummy, torch.tensor([0.01, 0.99], device=device))
+            # Percentile/quantile warmup
+            _ = torch.quantile(dummy, torch.tensor([0.01, 0.99], device=device))
 
-        # Arithmetic operations warmup
-        _ = dummy * 1.5 + 0.5
-        _ = torch.pow(dummy.clamp(0, 1), 1.2)
+            # Arithmetic operations warmup
+            _ = dummy * 1.5 + 0.5
+            _ = torch.pow(dummy.clamp(0, 1), 1.2)
 
-        # Synchronize to ensure all operations complete
-        if cls._backend == 'cuda':
-            torch.cuda.synchronize()
-        elif cls._backend == 'mps':
-            torch.mps.synchronize()
+            # Synchronize to ensure all operations complete
+            if cls._backend == 'cuda':
+                torch.cuda.synchronize()
+            elif cls._backend == 'mps' and hasattr(torch.mps, 'synchronize'):
+                torch.mps.synchronize()
+        except Exception:
+            # GPU warmup failed - fall back to CPU
+            cls._device = torch.device('cpu')
+            cls._backend = None
+            cls._available = False
 
     @classmethod
     def to_gpu(cls, arr: np.ndarray) -> torch.Tensor:
@@ -82,10 +101,13 @@ class GPUContext:
 
         Call this after freeing large tensors to ensure VRAM is released.
         """
-        if cls._backend == 'cuda':
-            torch.cuda.empty_cache()
-        elif cls._backend == 'mps':
-            torch.mps.empty_cache()
+        try:
+            if cls._backend == 'cuda':
+                torch.cuda.empty_cache()
+            elif cls._backend == 'mps' and hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+        except Exception:
+            pass  # Ignore cache clearing errors
 
 
 __all__ = ['GPUContext']

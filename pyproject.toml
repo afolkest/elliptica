@@ -9,16 +9,16 @@ description = "Physics-based generative art framework"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "numpy",
-    "matplotlib",
+    "numpy>=1.24.0",
+    "matplotlib>=3.7.0",
     "brylic",
-    "numba",
-    "scipy",
-    "pyamg",
-    "pillow",
-    "scikit-image",
-    "scikit-fmm",
-    "dearpygui",
+    "numba>=0.57.0",
+    "scipy>=1.10.0",
+    "pyamg>=5.0.0",
+    "pillow>=9.0.0",
+    "scikit-image>=0.20.0",
+    "scikit-fmm>=2022.0.0",
+    "dearpygui>=1.9.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
 ]

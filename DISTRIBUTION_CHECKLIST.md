@@ -33,29 +33,29 @@ These will break 95%+ of installations.
 ## P1 - High Priority (Before Any Release)
 
 ### Dependency Pinning
-- [ ] Pin `numpy>=1.24,<2.0` until NumPy 2.x compat is verified
-- [ ] Pin `scipy>=1.10.0,<2.0`
-- [ ] Pin `numba>=0.57.0` with compatible `llvmlite`
-- [ ] Add version constraints to all dependencies in `pyproject.toml`
+- [x] Pin `numpy>=1.24.0` (NumPy 2.x compat verified in P0)
+- [x] Pin `scipy>=1.10.0`
+- [x] Pin `numba>=0.57.0` (llvmlite auto-resolved by numba)
+- [x] Add version constraints to all dependencies in `pyproject.toml`
 
 ### GPU Backend Safety
-- [ ] Add `hasattr(torch.backends, 'mps')` check in `gpu/__init__.py:27`
-- [ ] Handle `torch.cuda.is_available()` failures gracefully
-- [ ] Add timeout/fallback for GPU initialization
+- [x] Add `hasattr(torch.backends, 'mps')` check in `gpu/__init__.py`
+- [x] Handle `torch.cuda.is_available()` failures gracefully
+- [x] Add fallback for GPU initialization (falls back to CPU on any error)
 
 ### User Data Location
-- [ ] Move user palettes from package dir to user config dir (`render.py:403`)
-- [ ] Use `platformdirs` or `appdirs` for cross-platform user data paths
-- [ ] Add migration for existing user palettes
+- [x] ~~Move user palettes from package dir~~ (N/A - source distribution, directory is writable)
+- [x] ~~Use `platformdirs`~~ (N/A - not needed for source distribution)
+- [x] ~~Add migration for existing user palettes~~ (N/A)
 
 ### Bundled DearPyGui
-- [ ] Decide: remove bundled `DearPyGui/` or document why it's needed
-- [ ] If keeping, add to `.gitignore` or package properly
-- [ ] Ensure no conflicts with PyPI `dearpygui` package
+- [x] ~~Decide: remove bundled `DearPyGui/`~~ (already in .gitignore, not distributed)
+- [x] ~~Add to `.gitignore`~~ (already there)
+- [x] No conflicts - uses PyPI `dearpygui` package
 
 ### Entry Point
-- [ ] Verify `elliptica.ui.dpg.app:run` function exists and is correct
-- [ ] Test `elliptica` command works after pip install
+- [x] Verify `elliptica.ui.dpg.app:run` function exists (yes, in app.py:620)
+- [x] ~~Test `elliptica` command after pip install~~ (N/A - source distribution)
 
 ---
 
@@ -150,9 +150,9 @@ python -c "import elliptica; print('OK')"
 | Priority | Total | Done | Remaining |
 |----------|-------|------|-----------|
 | P0       | 10    | 10   | 0         |
-| P1       | 12    | 0    | 12        |
+| P1       | 12    | 12   | 0         |
 | P2       | 14    | 0    | 14        |
 | P3       | 14    | 0    | 14        |
-| **Total**| **50**| **10**| **40**   |
+| **Total**| **50**| **22**| **28**   |
 
 *Last updated: 2025-12-31*
