@@ -18,6 +18,7 @@ You draw with physics: place boundary objects (conductors, obstacles, sources) o
 - [Usage](#usage)
 - [Architecture](#architecture)
 - [Project File Format](#project-file-format)
+- [Troubleshooting](#troubleshooting)
 - [Development](#development)
 
 ## Quick Start
@@ -187,6 +188,58 @@ Projects are saved as `.elliptica` ZIP archives. The format has been updated to 
     }
   ]
 }
+```
+
+## Troubleshooting
+
+### "No display found" / HeadlessEnvironmentError
+
+Elliptica requires a graphical display. This error occurs when running on:
+-   Remote servers via SSH (without X11 forwarding)
+-   Docker containers without display access
+-   CI environments
+
+**Solutions:**
+-   SSH with X11 forwarding: `ssh -X user@host`
+-   Docker: Mount X11 socket or use `xvfb-run`
+-   Use a machine with a physical display
+
+### "Failed to create display window"
+
+Graphics driver or display server issue.
+
+**Solutions:**
+-   Update graphics drivers
+-   Check display server is running (X11/Wayland on Linux)
+-   Try a different terminal or restart the display manager
+
+### GPU Not Detected / Slow Performance
+
+Elliptica auto-detects GPU (MPS on Apple Silicon, CUDA on NVIDIA). If detection fails, it falls back to CPU.
+
+**Check GPU status:**
+```python
+from elliptica.gpu import GPUContext
+print(GPUContext.device())  # Should show 'mps', 'cuda', or 'cpu'
+```
+
+**If showing 'cpu' unexpectedly:**
+-   macOS: Ensure you have Apple Silicon (M1/M2/M3), not Intel
+-   Linux/Windows: Install CUDA toolkit and PyTorch with CUDA support
+-   Verify: `python -c "import torch; print(torch.cuda.is_available())"`
+
+### Project File Won't Load
+
+**"Schema version X not supported":** Project was saved with a different Elliptica version. Re-export from the original version or recreate the project.
+
+**Corrupt file:** If the `.elliptica` file is damaged, it cannot be recovered. Keep backups of important projects.
+
+### Import Errors / Module Not Found
+
+Ensure you're in the correct virtual environment:
+```bash
+source venv/bin/activate  # or: venv\Scripts\activate on Windows
+pip install -r requirements.txt
 ```
 
 ## Development

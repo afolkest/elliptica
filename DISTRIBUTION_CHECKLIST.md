@@ -93,7 +93,7 @@ These will break 95%+ of installations.
 ### Documentation
 - [x] Add "System Requirements" section to README
 - [x] Document GPU requirements (CUDA/MPS versions)
-- [ ] Add troubleshooting guide for common errors
+- [x] Add troubleshooting guide for common errors
 - [ ] Document the `.elliptica` project file format
 - [x] Add installation instructions for each platform
 
@@ -152,7 +152,7 @@ python -c "import elliptica; print('OK')"
 | P0       | 10    | 10   | 0         |
 | P1       | 12    | 12   | 0         |
 | P2       | 14    | 10   | 4         |
-| P3       | 14    | 4    | 10        |
-| **Total**| **50**| **36**| **14**   |
+| P3       | 14    | 5    | 9         |
+| **Total**| **50**| **37**| **13**   |
 
 *Last updated: 2025-12-31*
