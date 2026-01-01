@@ -49,7 +49,7 @@ python -m elliptica.ui.dpg
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/elliptica.git
+git clone https://github.com/afolkest/elliptica.git
 cd elliptica
 python3 -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
