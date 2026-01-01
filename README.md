@@ -1,8 +1,10 @@
+![Electrogenesis](examples/Folkestad_electrogeneis_elliptica.jpg)
+
 # Elliptica
 
 Elliptica is a modular framework for making 2d visual arts using laws of physics,
 specifically elliptic boundary value problems.  You place objects on a canvas,
-place boundary conditions on these, and then solve a partial differential
+impose boundary conditions on these, and then solve a partial differential
 equation system (like the Poisson equation for electric fields), and visualize
 the resulting vector fields using high-quality Line Integral Convolution (LIC).
 
@@ -15,7 +17,9 @@ visualizations of physics, although accurate physics is a side effect. This
 software is all about making beautiful things. The laws of physics happen to be
 extremely helpful.
 
-![TODO: Add example renders]
+The above image is created in Elliptica. So is this one:
+
+<img src="examples/Folkestad_portrait_of_you_and_me_elliptica.jpg" width="600" alt="Portrait of You and Me">
 
 ## This is an alpha version
 This is an alpha version, and I am actively working on this software. Expect bugs,
