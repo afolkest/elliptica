@@ -8,9 +8,10 @@ impose boundary conditions on these, and then solve a partial differential
 equation system (like the Poisson equation for electric fields), and visualize
 the resulting vector fields using high-quality Line Integral Convolution (LIC).
 
-Making good art always requires rapid iteration, so the software is made with this
-in mind. That said, it is computationally heavy to run some of these algorithms, but 
-at 1024 x 1024, expect to have to wait a few seconds per render.
+Making good art requires rapid iteration, so the software is made with
+this in mind, trying to let you focus on the aesthetic aspects. That said, it is
+computationally heavy to run some of these algorithms.  At 1024 x 1024, expect
+to have to wait a few seconds per render.
 
 This software is not about trying to give maximally scientifically accurate
 visualizations of physics, although accurate physics is a side effect. This
