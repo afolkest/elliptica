@@ -409,8 +409,13 @@ def _load_user_palette_specs() -> dict[str, dict]:
         return {}
 
     import json
-    with open(USER_PALETTES_PATH) as f:
-        data = json.load(f)
+    try:
+        with open(USER_PALETTES_PATH) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        # Corrupt or unreadable file - log and return empty
+        print(f"Warning: Could not load user palettes from {USER_PALETTES_PATH}: {e}")
+        return {}
 
     if isinstance(data, dict) and "palettes" in data:
         palettes = data.get("palettes", {})

@@ -256,7 +256,15 @@ class EllipticaApp:
 
         self.display_pipeline.texture_manager.create_registries()
 
-        dpg.create_viewport(title="Elliptica", width=1280, height=820)
+        try:
+            dpg.create_viewport(title="Elliptica", width=1280, height=820)
+        except Exception as e:
+            dpg.destroy_context()
+            raise RuntimeError(
+                f"Failed to create display window: {e}\n\n"
+                "This may indicate a display/graphics driver issue. "
+                "Ensure you have a working display and up-to-date graphics drivers."
+            ) from e
         self.viewport_created = True
 
         # Add menu bar

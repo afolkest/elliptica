@@ -37,7 +37,13 @@ def save_project(state: AppState, filepath: str) -> None:
     Args:
         state: Application state to save
         filepath: Output path (should end with .elliptica)
+
+    Uses atomic write pattern: writes to temp file, then renames on success.
+    This prevents data loss if save is interrupted.
     """
+    import tempfile
+    import os
+
     filepath = Path(filepath)
     if filepath.suffix != '.elliptica':
         filepath = filepath.with_suffix('.elliptica')
@@ -53,28 +59,42 @@ def save_project(state: AppState, filepath: str) -> None:
         'boundary_color_settings': {},
     }
 
-    # Create ZIP archive
-    with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Save each boundary object and its masks
-        for i, boundary in enumerate(state.project.boundary_objects):
-            boundary_meta = _boundary_object_to_dict(boundary, i)
-            metadata['boundary_objects'].append(boundary_meta)
+    # Write to temp file first (atomic write pattern)
+    temp_fd, temp_path = tempfile.mkstemp(suffix='.elliptica.tmp', dir=filepath.parent)
+    os.close(temp_fd)  # Close fd, we'll open with zipfile
+    temp_path = Path(temp_path)
 
-            # Save mask PNGs
-            _save_mask_to_zip(zf, boundary.mask, boundary_meta['masks']['mask']['file'])
-            if boundary.interior_mask is not None:
-                _save_mask_to_zip(zf, boundary.interior_mask, boundary_meta['masks']['interior_mask']['file'])
-            if boundary.original_mask is not None:
-                _save_mask_to_zip(zf, boundary.original_mask, boundary_meta['masks']['original_mask']['file'])
-            if boundary.original_interior_mask is not None:
-                _save_mask_to_zip(zf, boundary.original_interior_mask, boundary_meta['masks']['original_interior_mask']['file'])
+    try:
+        # Create ZIP archive in temp file
+        with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Save each boundary object and its masks
+            for i, boundary in enumerate(state.project.boundary_objects):
+                boundary_meta = _boundary_object_to_dict(boundary, i)
+                metadata['boundary_objects'].append(boundary_meta)
 
-        # Save boundary color settings
-        for boundary_id, color_settings in state.boundary_color_settings.items():
-            metadata['boundary_color_settings'][str(boundary_id)] = _color_settings_to_dict(color_settings)
+                # Save mask PNGs
+                _save_mask_to_zip(zf, boundary.mask, boundary_meta['masks']['mask']['file'])
+                if boundary.interior_mask is not None:
+                    _save_mask_to_zip(zf, boundary.interior_mask, boundary_meta['masks']['interior_mask']['file'])
+                if boundary.original_mask is not None:
+                    _save_mask_to_zip(zf, boundary.original_mask, boundary_meta['masks']['original_mask']['file'])
+                if boundary.original_interior_mask is not None:
+                    _save_mask_to_zip(zf, boundary.original_interior_mask, boundary_meta['masks']['original_interior_mask']['file'])
 
-        # Write metadata JSON
-        zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+            # Save boundary color settings
+            for boundary_id, color_settings in state.boundary_color_settings.items():
+                metadata['boundary_color_settings'][str(boundary_id)] = _color_settings_to_dict(color_settings)
+
+            # Write metadata JSON
+            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+
+        # Atomic rename (on POSIX this is atomic, on Windows it may not be if target exists)
+        temp_path.replace(filepath)
+
+    except Exception:
+        # Clean up temp file on failure
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 class ProjectLoadError(Exception):
@@ -466,7 +486,11 @@ def save_render_cache(
         cache: RenderCache to save
         project: Current project (for fingerprinting)
         filepath: Output path (should end with .elliptica.cache)
+
+    Uses atomic write pattern: writes to temp file, then renames on success.
     """
+    import tempfile
+    import os
 
     filepath = Path(filepath)
 
@@ -486,29 +510,42 @@ def save_render_cache(
         'created_at': datetime.now().isoformat(),
     }
 
-    # Create ZIP archive
-    with zipfile.ZipFile(filepath, 'w', zipfile.ZIP_DEFLATED) as zf:
-        # Save metadata
-        zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+    # Write to temp file first (atomic write pattern)
+    temp_fd, temp_path = tempfile.mkstemp(suffix='.cache.tmp', dir=filepath.parent)
+    os.close(temp_fd)
+    temp_path = Path(temp_path)
 
-        # Save LIC result (unsigned, already in [0, 1])
-        _save_mask_to_zip(zf, cache.result.array, 'lic_result.png')
-
-        # Save E-fields (signed floats, need special handling)
-        if cache.result.ex is not None:
-            _save_signed_float_array(zf, cache.result.ex, 'field_ex.png')
-        if cache.result.ey is not None:
-            _save_signed_float_array(zf, cache.result.ey, 'field_ey.png')
-
-        # Save solution fields (phi, etc.) - signed floats
-        if cache.result.solution:
-            solution_keys = list(cache.result.solution.keys())
-            metadata['solution_fields'] = solution_keys
-            # Re-save metadata with solution_fields list
+    try:
+        # Create ZIP archive in temp file
+        with zipfile.ZipFile(temp_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+            # Save metadata
             zf.writestr('metadata.json', json.dumps(metadata, indent=2))
-            for name, array in cache.result.solution.items():
-                if isinstance(array, np.ndarray) and array.ndim == 2:
-                    _save_signed_float_array(zf, array, f'solution_{name}.png')
+
+            # Save LIC result (unsigned, already in [0, 1])
+            _save_mask_to_zip(zf, cache.result.array, 'lic_result.png')
+
+            # Save E-fields (signed floats, need special handling)
+            if cache.result.ex is not None:
+                _save_signed_float_array(zf, cache.result.ex, 'field_ex.png')
+            if cache.result.ey is not None:
+                _save_signed_float_array(zf, cache.result.ey, 'field_ey.png')
+
+            # Save solution fields (phi, etc.) - signed floats
+            if cache.result.solution:
+                solution_keys = list(cache.result.solution.keys())
+                metadata['solution_fields'] = solution_keys
+                # Re-save metadata with solution_fields list
+                zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+                for name, array in cache.result.solution.items():
+                    if isinstance(array, np.ndarray) and array.ndim == 2:
+                        _save_signed_float_array(zf, array, f'solution_{name}.png')
+
+        # Atomic rename
+        temp_path.replace(filepath)
+
+    except Exception:
+        temp_path.unlink(missing_ok=True)
+        raise
 
 
 def load_render_cache(
