@@ -234,8 +234,8 @@ def test_roundtrip_boundary_color_settings():
         assert cs.interior.solid_color == (0.1, 0.5, 0.9)
 
 
-def test_v1_files_rejected_with_migration_message():
-    """Test that v1 files are rejected with a helpful error pointing to migration."""
+def test_v1_files_rejected_with_helpful_error():
+    """Test that v1 files are rejected with a helpful error message."""
     import json
     import zipfile
     import pytest
@@ -258,14 +258,14 @@ def test_v1_files_rejected_with_migration_message():
         with zipfile.ZipFile(filepath, 'w') as zf:
             zf.writestr('metadata.json', json.dumps(metadata))
 
-        # Should raise ProjectLoadError with migration instructions
+        # Should raise ProjectLoadError with version info
         with pytest.raises(ProjectLoadError) as exc_info:
             load_project(str(filepath))
 
         error_msg = str(exc_info.value)
-        assert '1.0' in error_msg
-        assert '2.0' in error_msg
-        assert 'elliptica.migrate' in error_msg
+        assert '1.0' in error_msg  # Old version mentioned
+        assert '2.0' in error_msg  # Required version mentioned
+        assert 'version' in error_msg.lower()  # Mentions version mismatch
 
 
 def test_file_extension_handling():

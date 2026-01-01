@@ -113,7 +113,7 @@ These will break 95%+ of installations.
 - [ ] Create release workflow for PyPI publishing
 
 ### Testing
-- [ ] Add unit tests for serialization round-trip
+- [x] Add unit tests for serialization round-trip (already existed, fixed one test)
 - [ ] Add tests for GPU fallback behavior
 - [ ] Add tests for palette loading edge cases
 
@@ -152,7 +152,7 @@ python -c "import elliptica; print('OK')"
 | P0       | 10    | 10   | 0         |
 | P1       | 12    | 12   | 0         |
 | P2       | 14    | 10   | 4         |
-| P3       | 14    | 0    | 14        |
-| **Total**| **50**| **32**| **18**   |
+| P3       | 14    | 1    | 13        |
+| **Total**| **50**| **33**| **17**   |
 
 *Last updated: 2025-12-31*
