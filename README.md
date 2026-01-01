@@ -1,8 +1,10 @@
+# Elliptica
+
 ![Electrogenesis](examples/Folkestad_electrogeneis_elliptica.jpg)
 
 ![Elliptica UI](examples/ui_example.png)
 
-# Elliptica
+## What is Elliptica?
 
 Elliptica is a modular framework for making 2d visual arts using elliptic boundary value problems, often in the form of laws of physics.   You place objects on a canvas, impose boundary conditions on them, and then solve a partial differential equation system (like the Poisson equation for electric fields), and visualize the resulting vector fields using high-quality Line Integral Convolution (LIC).
 
