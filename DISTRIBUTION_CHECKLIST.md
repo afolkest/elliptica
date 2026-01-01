@@ -91,11 +91,11 @@ These will break 95%+ of installations.
 ## P3 - Low Priority (Ongoing Improvements)
 
 ### Documentation
-- [ ] Add "System Requirements" section to README
-- [ ] Document GPU requirements (CUDA/MPS versions)
+- [x] Add "System Requirements" section to README
+- [x] Document GPU requirements (CUDA/MPS versions)
 - [ ] Add troubleshooting guide for common errors
 - [ ] Document the `.elliptica` project file format
-- [ ] Add installation instructions for each platform
+- [x] Add installation instructions for each platform
 
 ### Performance
 - [ ] Optimize O(n³) contour algorithm in `canvas_renderer.py:79-92`
@@ -152,7 +152,7 @@ python -c "import elliptica; print('OK')"
 | P0       | 10    | 10   | 0         |
 | P1       | 12    | 12   | 0         |
 | P2       | 14    | 10   | 4         |
-| P3       | 14    | 1    | 13        |
-| **Total**| **50**| **33**| **17**   |
+| P3       | 14    | 4    | 10        |
+| **Total**| **50**| **36**| **14**   |
 
 *Last updated: 2025-12-31*

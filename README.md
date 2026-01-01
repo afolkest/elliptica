@@ -13,11 +13,11 @@ You draw with physics: place boundary objects (conductors, obstacles, sources) o
 - [Quick Start](#quick-start)
 - [Core Concept](#core-concept)
 - [Features](#features)
+- [System Requirements](#system-requirements)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Architecture](#architecture)
 - [Project File Format](#project-file-format)
-- [Performance](#performance)
 - [Development](#development)
 
 ## Quick Start
@@ -57,15 +57,41 @@ Elliptica transforms mathematical physics into visual art through a four-step pi
 -   **Real-time Feedback** - Adjust physics parameters and see results instantly (using low-res preview).
 -   **Project Management** - Save/load projects with full state preservation.
 
+## System Requirements
+
+### Python
+-   **Python 3.11 or later** (3.12, 3.13 also work)
+
+### Operating System
+-   **macOS** (Intel or Apple Silicon)
+-   **Linux** (requires X11 or Wayland display)
+-   **Windows** 10/11
+
+### GPU (Optional)
+GPU acceleration is optional but recommended for real-time post-processing:
+-   **macOS**: Apple Silicon with MPS (M1/M2/M3) - automatic
+-   **Linux/Windows**: NVIDIA GPU with CUDA - automatic
+-   **CPU fallback**: Works without GPU, just slower
+
+### Display
+Elliptica is a GUI application and requires a graphical display. Headless environments (SSH without X11, Docker without display) are not supported.
+
 ## Installation
 
-### Requirements
--   Python 3.10+
--   macOS with Apple Silicon (recommended for MPS acceleration) or CUDA-compatible GPU
-
-### Install Dependencies
 ```bash
+# Clone the repository
+git clone https://github.com/your-username/elliptica.git
+cd elliptica
+
+# Create virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
 pip install -r requirements.txt
+
+# Run
+python -m elliptica.ui.dpg
 ```
 
 ## Usage
