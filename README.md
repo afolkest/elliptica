@@ -1,5 +1,7 @@
 ![Electrogenesis](examples/Folkestad_electrogeneis_elliptica.jpg)
 
+![Elliptica UI](examples/ui_example.png)
+
 # Elliptica
 
 Elliptica is a modular framework for making 2d visual arts using laws of physics,
