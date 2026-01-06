@@ -8,7 +8,7 @@ SUPERSAMPLE_CHOICES: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
 # LIC render settings
 DEFAULT_RENDER_PASSES: int = 2
 DEFAULT_STREAMLENGTH_FACTOR: float = 60.0 / 1024.0
-DEFAULT_PADDING_MARGIN: float = 0.10
+DEFAULT_PADDING_MARGIN: float = 0.0
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.5
 DEFAULT_USE_MASK: bool = True  # Block streamlines at boundaries
@@ -30,7 +30,7 @@ MIN_EDGE_GAIN_POWER: float = 0.1
 MAX_EDGE_GAIN_POWER: float = 3.0
 
 # Domain edge gain (for closed boundaries at image edges)
-DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH: float = 0.5  # Creates halos at domain boundaries
+DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH: float = 0.0  # Creates halos at domain boundaries (0 = disabled)
 DEFAULT_DOMAIN_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for domain edge gain
 MIN_DOMAIN_EDGE_GAIN_STRENGTH: float = -3.0
 MAX_DOMAIN_EDGE_GAIN_STRENGTH: float = 3.0

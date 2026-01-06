@@ -56,6 +56,8 @@ class RenderModalController:
         self.solve_scale_slider_id: Optional[int] = None
         self.edge_gain_strength_slider_id: Optional[int] = None
         self.edge_gain_power_slider_id: Optional[int] = None
+        self.domain_edge_gain_strength_slider_id: Optional[int] = None
+        self.domain_edge_gain_power_slider_id: Optional[int] = None
 
         # Generic Boundary Condition Controls
         # Map: edge_name -> field_name -> widget_id
@@ -196,6 +198,33 @@ class RenderModalController:
                 edge_power_label = dpg.add_text("Edge Halo Power")
                 with dpg.tooltip(edge_power_label):
                     dpg.add_text("Controls how sharply the halo falls off from the edge. Higher = tighter glow, lower = broader spread.")
+
+            dpg.add_spacer(height=8)
+            with dpg.group(horizontal=True):
+                self.domain_edge_gain_strength_slider_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH,
+                    min_value=defaults.MIN_DOMAIN_EDGE_GAIN_STRENGTH,
+                    max_value=defaults.MAX_DOMAIN_EDGE_GAIN_STRENGTH,
+                    format="%.2f",
+                    width=250,
+                )
+                domain_strength_label = dpg.add_text("Border Halo Strength")
+                with dpg.tooltip(domain_strength_label):
+                    dpg.add_text("Brightness boost at canvas borders (domain edges). Creates a glowing frame effect.")
+
+            with dpg.group(horizontal=True):
+                self.domain_edge_gain_power_slider_id = dpg.add_slider_float(
+                    label="",
+                    default_value=defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER,
+                    min_value=defaults.MIN_DOMAIN_EDGE_GAIN_POWER,
+                    max_value=defaults.MAX_DOMAIN_EDGE_GAIN_POWER,
+                    format="%.2f",
+                    width=250,
+                )
+                domain_power_label = dpg.add_text("Border Halo Power")
+                with dpg.tooltip(domain_power_label):
+                    dpg.add_text("Controls how sharply the border halo falls off. Higher = tighter glow, lower = broader spread.")
 
             dpg.add_spacer(height=15)
             dpg.add_separator()
@@ -389,6 +418,12 @@ class RenderModalController:
         if self.edge_gain_power_slider_id is not None:
             dpg.set_value(self.edge_gain_power_slider_id, float(settings.edge_gain_power))
 
+        if self.domain_edge_gain_strength_slider_id is not None:
+            dpg.set_value(self.domain_edge_gain_strength_slider_id, float(settings.domain_edge_gain_strength))
+
+        if self.domain_edge_gain_power_slider_id is not None:
+            dpg.set_value(self.domain_edge_gain_power_slider_id, float(settings.domain_edge_gain_power))
+
         # Update boundary condition controls
         from elliptica.pde import PDERegistry
         pde = PDERegistry.get_active()
@@ -447,6 +482,8 @@ class RenderModalController:
         use_mask = True  # Always block streamlines at boundaries
         edge_gain_strength = float(dpg.get_value(self.edge_gain_strength_slider_id)) if self.edge_gain_strength_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_STRENGTH
         edge_gain_power = float(dpg.get_value(self.edge_gain_power_slider_id)) if self.edge_gain_power_slider_id is not None else defaults.DEFAULT_EDGE_GAIN_POWER
+        domain_edge_gain_strength = float(dpg.get_value(self.domain_edge_gain_strength_slider_id)) if self.domain_edge_gain_strength_slider_id is not None else defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH
+        domain_edge_gain_power = float(dpg.get_value(self.domain_edge_gain_power_slider_id)) if self.domain_edge_gain_power_slider_id is not None else defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER
 
         # Read boundary condition controls
         from elliptica.pde import PDERegistry
@@ -487,6 +524,8 @@ class RenderModalController:
         noise_sigma = max(noise_sigma, 0.0)
         edge_gain_strength = max(defaults.MIN_EDGE_GAIN_STRENGTH, min(defaults.MAX_EDGE_GAIN_STRENGTH, edge_gain_strength))
         edge_gain_power = max(defaults.MIN_EDGE_GAIN_POWER, min(defaults.MAX_EDGE_GAIN_POWER, edge_gain_power))
+        domain_edge_gain_strength = max(defaults.MIN_DOMAIN_EDGE_GAIN_STRENGTH, min(defaults.MAX_DOMAIN_EDGE_GAIN_STRENGTH, domain_edge_gain_strength))
+        domain_edge_gain_power = max(defaults.MIN_DOMAIN_EDGE_GAIN_POWER, min(defaults.MAX_DOMAIN_EDGE_GAIN_POWER, domain_edge_gain_power))
 
         # Update app state
         with self.app.state_lock:
@@ -500,6 +539,8 @@ class RenderModalController:
             self.app.state.render_settings.use_mask = use_mask
             self.app.state.render_settings.edge_gain_strength = edge_gain_strength
             self.app.state.render_settings.edge_gain_power = edge_gain_power
+            self.app.state.render_settings.domain_edge_gain_strength = domain_edge_gain_strength
+            self.app.state.render_settings.domain_edge_gain_power = domain_edge_gain_power
             # Update boundary conditions
             self.app.state.project.pde_bc[pde.name] = bc_map
             self.app.state.project.boundary_top = legacy_bc.get("top", self.app.state.project.boundary_top)
