@@ -13,6 +13,8 @@ def convolve(
     mask=None,
     edge_gain_strength=None,
     edge_gain_power=None,
+    domain_edge_gain_strength=None,
+    domain_edge_gain_power=None,
 ):
     """
     Convolve a texture with a vector field using a kernel to produce a LIC image.
@@ -27,8 +29,10 @@ def convolve(
         iterations: The number of iterations to use for the convolution. Default is 1.
         boundaries: Boundary condition ("closed" or "periodic"). Default is "closed".
         mask: Optional boolean mask to block streamlines (boundaries). None for no blocking.
-        edge_gain_strength: Brightness boost near boundary edges (0.0 = none, higher = brighter halos).
-        edge_gain_power: Falloff curve sharpness for edge gain (higher = sharper edge).
+        edge_gain_strength: Brightness boost near mask edges (0.0 = none, higher = brighter halos).
+        edge_gain_power: Falloff curve sharpness for mask edge gain (higher = sharper edge).
+        domain_edge_gain_strength: Brightness boost near domain edges (0.0 = none, higher = brighter halos).
+        domain_edge_gain_power: Falloff curve sharpness for domain edge gain (higher = sharper edge).
 
     Returns:
         The convolved texture. 2d or 3d numpy array.
@@ -37,6 +41,10 @@ def convolve(
         edge_gain_strength = defaults.DEFAULT_EDGE_GAIN_STRENGTH
     if edge_gain_power is None:
         edge_gain_power = defaults.DEFAULT_EDGE_GAIN_POWER
+    if domain_edge_gain_strength is None:
+        domain_edge_gain_strength = defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH
+    if domain_edge_gain_power is None:
+        domain_edge_gain_power = defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER
 
     return brylic.tiled_convolve(
         texture,
@@ -48,6 +56,8 @@ def convolve(
         mask=mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
         tile_shape=defaults.DEFAULT_TILE_SHAPE,
         num_threads=defaults.DEFAULT_NUM_THREADS,
     )

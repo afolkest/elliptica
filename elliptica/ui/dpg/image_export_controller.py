@@ -415,6 +415,8 @@ class ImageExportController:
                 render_settings.use_mask,
                 render_settings.edge_gain_strength,
                 render_settings.edge_gain_power,
+                render_settings.domain_edge_gain_strength,
+                render_settings.domain_edge_gain_power,
                 solve_scale,
             )
 

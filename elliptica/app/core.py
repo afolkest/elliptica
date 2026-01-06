@@ -79,6 +79,8 @@ class RenderSettings:
     use_mask: bool = defaults.DEFAULT_USE_MASK
     edge_gain_strength: float = defaults.DEFAULT_EDGE_GAIN_STRENGTH
     edge_gain_power: float = defaults.DEFAULT_EDGE_GAIN_POWER
+    domain_edge_gain_strength: float = defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH
+    domain_edge_gain_power: float = defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER
     solve_scale: float = defaults.DEFAULT_SOLVE_SCALE
 
 

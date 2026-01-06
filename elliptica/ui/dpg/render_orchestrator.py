@@ -75,6 +75,8 @@ class RenderOrchestrator:
                 settings_snapshot.use_mask,
                 settings_snapshot.edge_gain_strength,
                 settings_snapshot.edge_gain_power,
+                settings_snapshot.domain_edge_gain_strength,
+                settings_snapshot.domain_edge_gain_power,
                 settings_snapshot.solve_scale,
             )
             if result is None:

@@ -619,6 +619,8 @@ def compute_lic(
     mask: np.ndarray | None = None,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    domain_edge_gain_strength: float = 0.0,
+    domain_edge_gain_power: float = 2.0,
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1].
 
@@ -633,8 +635,10 @@ def compute_lic(
         noise_oversample: Oversample factor for noise generation
         noise_sigma: Low-pass filter sigma for noise
         mask: Optional boolean mask to block streamlines (True = blocked)
-        edge_gain_strength: Brightness boost near boundary edges (0.0 = none)
-        edge_gain_power: Falloff curve sharpness for edge gain
+        edge_gain_strength: Brightness boost near mask edges (0.0 = none)
+        edge_gain_power: Falloff curve sharpness for mask edge gain
+        domain_edge_gain_strength: Brightness boost near domain edges (0.0 = none)
+        domain_edge_gain_power: Falloff curve sharpness for domain edge gain
     """
     field_h, field_w = ex.shape
 
@@ -670,6 +674,8 @@ def compute_lic(
         mask=mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
     )
 
     max_abs = np.max(np.abs(lic_result))

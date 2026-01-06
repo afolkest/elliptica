@@ -115,6 +115,8 @@ def perform_render(
     use_mask: bool = True,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    domain_edge_gain_strength: float = 0.0,
+    domain_edge_gain_power: float = 2.0,
     solve_scale: float = 1.0,
 ) -> RenderResult | None:
     """Execute full render pipeline.
@@ -236,6 +238,8 @@ def perform_render(
         mask=lic_mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
     )
     t_lic_end = time.time()
     print(f"  LIC completed in {t_lic_end - t_lic_start:.2f}s")

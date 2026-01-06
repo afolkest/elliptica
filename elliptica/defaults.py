@@ -22,12 +22,20 @@ SOLVE_RELAX_OMEGA: float = 0.8
 # bryLIC tiling defaults (for performance)
 DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling
 DEFAULT_NUM_THREADS: int | None = None  # None = auto-detect from CPU count
-DEFAULT_EDGE_GAIN_STRENGTH: float = 0.5  # Disabled for now, creates halos around boundaries
+DEFAULT_EDGE_GAIN_STRENGTH: float = 0.5  # Creates halos around mask boundaries
 DEFAULT_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for edge gain effect
 MIN_EDGE_GAIN_STRENGTH: float = -3.0
 MAX_EDGE_GAIN_STRENGTH: float = 3.0
 MIN_EDGE_GAIN_POWER: float = 0.1
 MAX_EDGE_GAIN_POWER: float = 3.0
+
+# Domain edge gain (for closed boundaries at image edges)
+DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH: float = 0.5  # Creates halos at domain boundaries
+DEFAULT_DOMAIN_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for domain edge gain
+MIN_DOMAIN_EDGE_GAIN_STRENGTH: float = -3.0
+MAX_DOMAIN_EDGE_GAIN_STRENGTH: float = 3.0
+MIN_DOMAIN_EDGE_GAIN_POWER: float = 0.1
+MAX_DOMAIN_EDGE_GAIN_POWER: float = 3.0
 
 # Post-processing defaults
 DEFAULT_HIGHPASS_SIGMA_FACTOR: float = 3.0 / 1024.0
