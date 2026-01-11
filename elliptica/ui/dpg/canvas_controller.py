@@ -465,7 +465,8 @@ class CanvasController:
                                 )
                     self._drag_accumulated_dx = 0.0
                     self._drag_accumulated_dy = 0.0
-                    self.app.canvas_renderer.mark_dirty()
+                # Always redraw on drag end to restore contour outline
+                self.app.canvas_renderer.mark_dirty()
 
             self.drag_active = False
 
