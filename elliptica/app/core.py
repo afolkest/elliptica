@@ -247,3 +247,14 @@ class AppState:
             self.render_cache.base_rgb = None
             # Note: We keep display_array_gpu and CPU cache since they're still valid for recomputing base_rgb
             # Only the derived RGB needs recomputation when colorization params change
+
+    def invalidate_gpu_mask_cache(self) -> None:
+        """Clear cached GPU mask tensors when boundaries change.
+
+        Must be called while holding state_lock. Call this when boundaries are
+        added, removed, moved, or scaled to prevent stale GPU tensors from
+        being used in postprocessing.
+        """
+        if self.render_cache is not None:
+            self.render_cache.boundary_masks_gpu = None
+            self.render_cache.interior_masks_gpu = None

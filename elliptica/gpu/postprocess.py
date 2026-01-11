@@ -287,22 +287,19 @@ def apply_full_postprocess_gpu(
     )
 
     if has_overlays and boundary_masks_cpu is not None and interior_masks_cpu is not None:
-        # Upload masks to GPU (or use pre-uploaded masks if available)
-        if boundary_masks_gpu is None or interior_masks_gpu is None:
-            boundary_masks_gpu = []
-            interior_masks_gpu = []
+        # Upload masks to GPU only if they're missing (avoid redundant transfers)
+        # Use separate checks so we don't re-upload one when only the other is missing
+        if boundary_masks_gpu is None:
+            boundary_masks_gpu = [
+                GPUContext.to_gpu(m) if m is not None else None
+                for m in boundary_masks_cpu
+            ]
 
-            for mask_cpu in boundary_masks_cpu:
-                if mask_cpu is not None:
-                    boundary_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
-                else:
-                    boundary_masks_gpu.append(None)
-
-            for mask_cpu in interior_masks_cpu:
-                if mask_cpu is not None:
-                    interior_masks_gpu.append(GPUContext.to_gpu(mask_cpu))
-                else:
-                    interior_masks_gpu.append(None)
+        if interior_masks_gpu is None:
+            interior_masks_gpu = [
+                GPUContext.to_gpu(m) if m is not None else None
+                for m in interior_masks_cpu
+            ]
         # else: use the pre-uploaded GPU masks (avoids repeated transfers!)
 
         base_rgb = apply_region_overlays_gpu(

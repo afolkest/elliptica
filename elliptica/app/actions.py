@@ -34,6 +34,7 @@ def add_boundary(state: AppState, boundary: BoundaryObject) -> None:
 
     state.field_dirty = True
     state.render_dirty = True
+    state.invalidate_gpu_mask_cache()
 
 
 def remove_boundary(state: AppState, idx: int) -> None:
@@ -59,6 +60,7 @@ def remove_boundary(state: AppState, idx: int) -> None:
 
         state.field_dirty = True
         state.render_dirty = True
+        state.invalidate_gpu_mask_cache()
 
 
 def move_boundary(state: AppState, idx: int, dx: float, dy: float) -> None:
@@ -68,6 +70,7 @@ def move_boundary(state: AppState, idx: int, dx: float, dy: float) -> None:
         boundary.position = (boundary.position[0] + dx, boundary.position[1] + dy)
         state.field_dirty = True
         state.render_dirty = True
+        state.invalidate_gpu_mask_cache()
 
 
 def set_boundary_voltage(state: AppState, idx: int, voltage: float) -> None:
@@ -218,6 +221,7 @@ def scale_boundary(state: AppState, idx: int, scale_delta: float) -> bool:
 
     state.field_dirty = True
     state.render_dirty = True
+    state.invalidate_gpu_mask_cache()
     return True
 
 

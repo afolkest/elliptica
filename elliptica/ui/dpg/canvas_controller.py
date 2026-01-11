@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional, Tuple
 import math
+import time
 
 from elliptica import defaults
 from elliptica.app import actions
@@ -66,6 +67,12 @@ class CanvasController:
         self.drag_last_pos: Tuple[float, float] = (0.0, 0.0)
         self.mouse_down_last: bool = False
         self.mouse_wheel_delta: float = 0.0
+
+        # Drag throttling - accumulate small movements and commit periodically
+        self._drag_accumulated_dx: float = 0.0
+        self._drag_accumulated_dy: float = 0.0
+        self._drag_last_commit_time: float = 0.0
+        self._DRAG_THROTTLE_SEC: float = 0.016  # ~60 FPS max update rate
 
         # Box selection state
         self.box_select_active: bool = False
@@ -201,6 +208,7 @@ class CanvasController:
                 changed = actions.scale_boundary(self.app.state, idx, factor)
                 if changed:
                     self.app.display_pipeline.texture_manager.clear_boundary_texture(idx)
+                    self.app.canvas_renderer.invalidate_boundary_contour_cache(idx)
                     any_changed = True
 
         if not any_changed:
@@ -318,6 +326,10 @@ class CanvasController:
                 if self.scale_selected_boundaries(scale_factor):
                     x, y = self.get_canvas_mouse_pos()
                     self.drag_last_pos = (x, y)
+                    # Reset accumulators to prevent position jump after scaling during drag
+                    if self.drag_active:
+                        self._drag_accumulated_dx = 0.0
+                        self._drag_accumulated_dy = 0.0
 
         # Render mode: click to select region for colorization (single-select only)
         if mode != "edit":
@@ -356,6 +368,10 @@ class CanvasController:
                     self.app.state.selected_region_type = "surface"
                     self.drag_active = True
                     self.drag_last_pos = (x, y)
+                    # Reset drag accumulators to prevent stale values from previous drags
+                    self._drag_accumulated_dx = 0.0
+                    self._drag_accumulated_dy = 0.0
+                    self._drag_last_commit_time = time.monotonic()
                 else:
                     # Clicked on empty space
                     if not self.shift_down:
@@ -381,16 +397,38 @@ class CanvasController:
                 self.app.canvas_renderer.mark_dirty()
 
             elif self.drag_active:
-                # Drag all selected boundaries
+                # Drag all selected boundaries with throttling
                 dx = x - self.drag_last_pos[0]
                 dy = y - self.drag_last_pos[1]
+
                 if abs(dx) > 0.1 or abs(dy) > 0.1:
-                    with self.app.state_lock:
-                        for idx in self.app.state.selected_indices:
-                            if 0 <= idx < len(self.app.state.project.boundary_objects):
-                                actions.move_boundary(self.app.state, idx, dx, dy)
+                    # Accumulate movement
+                    self._drag_accumulated_dx += dx
+                    self._drag_accumulated_dy += dy
                     self.drag_last_pos = (x, y)
-                    self.app.canvas_renderer.mark_dirty()
+
+                    # Check if we should commit the accumulated movement
+                    now = time.monotonic()
+                    time_since_commit = now - self._drag_last_commit_time
+                    accumulated_dist = (self._drag_accumulated_dx**2 + self._drag_accumulated_dy**2)**0.5
+
+                    # Commit if: enough time passed OR significant movement accumulated
+                    if time_since_commit >= self._DRAG_THROTTLE_SEC or accumulated_dist > 3.0:
+                        with self.app.state_lock:
+                            for idx in self.app.state.selected_indices:
+                                if 0 <= idx < len(self.app.state.project.boundary_objects):
+                                    actions.move_boundary(
+                                        self.app.state, idx,
+                                        self._drag_accumulated_dx,
+                                        self._drag_accumulated_dy
+                                    )
+
+                        # Reset accumulators
+                        self._drag_accumulated_dx = 0.0
+                        self._drag_accumulated_dy = 0.0
+                        self._drag_last_commit_time = now
+
+                        self.app.canvas_renderer.mark_dirty()
 
         # Handle release
         if released:
@@ -413,6 +451,21 @@ class CanvasController:
                 self.app.boundary_controls.update_header_labels()
                 self.app.postprocess_panel.update_region_properties_panel()
                 self.app.canvas_renderer.mark_dirty()
+
+            elif self.drag_active:
+                # Flush any remaining accumulated drag movement
+                if self._drag_accumulated_dx != 0 or self._drag_accumulated_dy != 0:
+                    with self.app.state_lock:
+                        for idx in self.app.state.selected_indices:
+                            if 0 <= idx < len(self.app.state.project.boundary_objects):
+                                actions.move_boundary(
+                                    self.app.state, idx,
+                                    self._drag_accumulated_dx,
+                                    self._drag_accumulated_dy
+                                )
+                    self._drag_accumulated_dx = 0.0
+                    self._drag_accumulated_dy = 0.0
+                    self.app.canvas_renderer.mark_dirty()
 
             self.drag_active = False
 
@@ -453,6 +506,8 @@ class CanvasController:
                     for idx in indices_to_delete:
                         actions.remove_boundary(self.app.state, idx)
                     self.app.display_pipeline.texture_manager.clear_all_boundary_textures()
+                # Invalidate contour cache (indices shift after deletion)
+                self.app.canvas_renderer.invalidate_boundary_contour_cache()
                 self.app.canvas_renderer.mark_dirty()
                 self.app.boundary_controls.rebuild_controls()
                 count = len(indices_to_delete)

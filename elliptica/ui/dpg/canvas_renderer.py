@@ -34,9 +34,12 @@ class CanvasRenderer:
         self.app = app
         self.canvas_dirty: bool = True
 
-        # Cache for selection outline contour
+        # Cache for selection outline contour (render mode)
         self._selection_contours: list[np.ndarray] | None = None
         self._selection_cache_key: tuple = ()  # (selected_idx, render_cache_id)
+
+        # Cache for boundary contours in edit mode: boundary_idx -> (mask_id, contours_at_origin)
+        self._boundary_contour_cache: dict[int, tuple[int, list[np.ndarray]]] = {}
 
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""
@@ -46,6 +49,18 @@ class CanvasRenderer:
         """Clear cached selection contour (call when selection or render changes)."""
         self._selection_contours = None
         self._selection_cache_key = ()
+
+    def invalidate_boundary_contour_cache(self, idx: int = -1) -> None:
+        """Clear contour cache for boundary (or all if idx=-1).
+
+        Note: Cache uses id(mask) for validation. This assumes masks are not
+        modified in-place. Position drags reuse the same mask object, so the
+        cache remains valid. Scaling creates a new mask object, causing a cache miss.
+        """
+        if idx < 0:
+            self._boundary_contour_cache.clear()
+        else:
+            self._boundary_contour_cache.pop(idx, None)
 
     def _extract_contours(self, mask: np.ndarray) -> list[np.ndarray]:
         """Extract ordered contour points from a mask.
@@ -169,9 +184,38 @@ class CanvasRenderer:
                 dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
             i += period
 
-    def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float) -> list[np.ndarray]:
-        """Extract contours from boundary mask and offset to canvas position."""
+    def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float, idx: int = -1) -> list[np.ndarray]:
+        """Extract contours from boundary mask and offset to canvas position.
+
+        Caches contours by mask identity to avoid recomputing during drags.
+        The cache key is id(mask), which doesn't change during position drags
+        but does change when mask is recreated (e.g., during scaling).
+
+        Args:
+            boundary: BoundaryObject with mask
+            offset_x, offset_y: Canvas position offset
+            idx: Boundary index for caching (-1 disables caching)
+        """
+        # Check cache - mask object identity doesn't change during position drag
+        mask_id = id(boundary.mask)
+        if idx >= 0 and idx in self._boundary_contour_cache:
+            cached_mask_id, cached_contours = self._boundary_contour_cache[idx]
+            if cached_mask_id == mask_id:
+                # Reuse cached contours, just apply new offset
+                result = []
+                for contour in cached_contours:
+                    offset_contour = contour.copy()
+                    offset_contour[:, 0] += offset_x
+                    offset_contour[:, 1] += offset_y
+                    result.append(offset_contour)
+                return result
+
+        # Cache miss - extract contours at origin and cache
         contours = self._extract_contours(boundary.mask)
+        if idx >= 0:
+            self._boundary_contour_cache[idx] = (mask_id, contours)
+
+        # Apply offset for return
         result = []
         for contour in contours:
             offset_contour = contour.copy()
@@ -276,7 +320,7 @@ class CanvasRenderer:
                 )
                 # Draw contour outline for selected boundaries
                 if idx in selected_indices:
-                    contours = self._get_boundary_contours(boundary, x0, y0)
+                    contours = self._get_boundary_contours(boundary, x0, y0, idx=idx)
                     for contour in contours:
                         self._draw_dashed_contour(
                             contour, self.app.canvas_layer_id,

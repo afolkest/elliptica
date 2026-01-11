@@ -72,6 +72,7 @@ class TextureManager:
         self.render_texture_size: Optional[Tuple[int, int]] = None
         self.boundary_textures: Dict[int, int] = {}  # boundary_idx -> texture_id
         self.boundary_texture_shapes: Dict[int, Tuple[int, int]] = {}  # boundary_idx -> (height, width)
+        self.boundary_mask_ids: Dict[int, int] = {}  # boundary_idx -> id(mask) for fast-path validation
 
     def create_registries(self) -> None:
         """Create texture and colormap registries in DPG."""
@@ -157,6 +158,9 @@ class TextureManager:
     def ensure_boundary_texture(self, idx: int, mask: np.ndarray, boundary_colors: list) -> int:
         """Create or update boundary texture, returns texture ID.
 
+        Uses mask object identity for fast-path cache validation. Position drags
+        reuse the same mask object, so this allows skipping DPG checks entirely.
+
         Args:
             idx: Boundary index
             mask: Boundary mask array (height, width)
@@ -167,12 +171,20 @@ class TextureManager:
         """
         assert dpg is not None and self.texture_registry_id is not None
 
+        # Fast path: if mask object identity unchanged, texture is still valid
+        mask_id = id(mask)
+        cached_mask_id = self.boundary_mask_ids.get(idx)
         tex_id = self.boundary_textures.get(idx)
+
+        if tex_id is not None and cached_mask_id == mask_id:
+            # Same mask object - position changes don't affect the texture
+            return tex_id
+
+        # Mask changed or texture doesn't exist - check/recreate
         width = mask.shape[1]
         height = mask.shape[0]
         existing_shape = self.boundary_texture_shapes.get(idx)
 
-        # Check if texture needs recreation (doesn't exist or size changed)
         if tex_id is not None:
             exists = dpg.does_item_exist(tex_id)
             if not exists or existing_shape != (height, width):
@@ -181,14 +193,14 @@ class TextureManager:
                 tex_id = None
                 self.boundary_textures.pop(idx, None)
 
-        # Only convert and upload if texture doesn't exist (avoids 45 GB/sec bandwidth waste)
+        # Only convert and upload if texture doesn't exist
         if tex_id is None:
-            # Convert mask to RGBA texture data
             rgba_flat = _mask_to_rgba(mask, boundary_colors[idx % len(boundary_colors)])
             tex_id = dpg.add_dynamic_texture(width, height, rgba_flat, parent=self.texture_registry_id)
             self.boundary_textures[idx] = tex_id
 
         self.boundary_texture_shapes[idx] = (height, width)
+        self.boundary_mask_ids[idx] = mask_id  # Track mask identity
         return tex_id
 
     def refresh_render_texture(self) -> None:
@@ -337,10 +349,18 @@ class TextureManager:
 
     def clear_boundary_texture(self, idx: int) -> None:
         """Clear cached boundary texture (forces recreation on next draw)."""
-        self.boundary_textures.pop(idx, None)
+        tex_id = self.boundary_textures.pop(idx, None)
+        if tex_id is not None and dpg is not None and dpg.does_item_exist(tex_id):
+            dpg.delete_item(tex_id)
         self.boundary_texture_shapes.pop(idx, None)
+        self.boundary_mask_ids.pop(idx, None)
 
     def clear_all_boundary_textures(self) -> None:
         """Clear all boundary textures."""
+        if dpg is not None:
+            for tex_id in self.boundary_textures.values():
+                if dpg.does_item_exist(tex_id):
+                    dpg.delete_item(tex_id)
         self.boundary_textures.clear()
         self.boundary_texture_shapes.clear()
+        self.boundary_mask_ids.clear()
