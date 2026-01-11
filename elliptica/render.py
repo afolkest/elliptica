@@ -400,7 +400,8 @@ def _write_palette_backup() -> None:
 
 
 # User palette persistence
-USER_PALETTES_PATH = Path(__file__).parent / "palettes_user.json"
+USER_DATA_DIR = Path.home() / ".elliptica"
+USER_PALETTES_PATH = USER_DATA_DIR / "palettes.json"
 
 
 def _load_user_palette_specs() -> dict[str, dict]:
@@ -444,6 +445,7 @@ def _load_user_palette_specs() -> dict[str, dict]:
 def _save_user_palette_specs(palettes: dict[str, dict]):
     """Save user palette specs to JSON."""
     import json
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     data = {
         "version": PALETTE_SCHEMA_VERSION,
         "palettes": palettes,
