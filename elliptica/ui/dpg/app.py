@@ -308,17 +308,19 @@ class EllipticaApp:
                         width=250,
                     )
                     dpg.add_spacer(height=6)
-                    dpg.add_button(label="Load Boundary...", callback=self.file_io.open_boundary_dialog)
-                    dpg.add_button(label="Insert Shape...", callback=self.shape_dialog.show_dialog)
-                    dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button")
+                    with dpg.group(horizontal=True):
+                        dpg.add_button(label="Load shape", callback=self.file_io.open_boundary_dialog, width=100)
+                        dpg.add_button(label="Create shape", callback=self.shape_dialog.show_dialog, width=100)
+                    dpg.add_spacer(height=8)
+                    dpg.add_button(label="Render Field", callback=self.render_modal.open, tag="render_field_button", width=200, height=32)
                     self.cache_panel.build_view_postprocessing_button(edit_group)
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
                     with dpg.group(horizontal=True):
                         dpg.add_text("Canvas:")
                         self.canvas_size_text_id = dpg.add_text("", tag="canvas_size_display")
-                        dpg.add_button(label="Change...", callback=self._open_canvas_size_modal, width=70)
-                        dpg.add_button(label="Fit", callback=self._fit_canvas_to_window, width=40)
+                        dpg.add_button(label="Change", callback=self._open_canvas_size_modal, width=60, small=True)
+                        dpg.add_button(label="Reset zoom", callback=self._reset_zoom, width=75, small=True)
                     dpg.add_spacer(height=10)
                     dpg.add_separator()
                     self.boundary_controls.build_container(edit_group)
@@ -580,6 +582,12 @@ class EllipticaApp:
         self._resize_canvas_window()
         self._update_canvas_transform()
         dpg.set_value("status_text", f"Display scale adjusted to {self.display_scale:.2f}×")
+
+    def _reset_zoom(self, sender=None, app_data=None) -> None:
+        """Reset zoom and pan to default (same as Home key)."""
+        if self.canvas_controller is not None:
+            self.canvas_controller.reset_zoom_pan()
+            dpg.set_value("status_text", "Zoom reset to 100%")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:
