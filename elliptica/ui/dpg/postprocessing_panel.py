@@ -436,7 +436,9 @@ class PostprocessingPanel:
                 dpg.add_spacer(height=8)
 
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
+                    lightness_expr_lbl = dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
+                    with dpg.tooltip(lightness_expr_lbl):
+                        dpg.add_text("Custom expression for lightness mapping.\nUse 'mag', 'lic', 'angle', etc.\nExample: clipnorm(mag, 1, 99)")
                     dpg.add_spacer(width=10)
                     # Enable checkbox (for global mode)
                     self.lightness_expr_checkbox_id = dpg.add_checkbox(
@@ -1777,6 +1779,12 @@ class PostprocessingPanel:
 
         preset_names = list_presets()
 
+        # Brief explanation
+        HELP_COLOR = (140, 140, 140)
+        dpg.add_text("Map field data to color using math expressions.", color=HELP_COLOR, parent=parent, wrap=280)
+        dpg.add_text("Use variables like 'mag' (field magnitude) and 'angle'.", color=HELP_COLOR, parent=parent, wrap=280)
+        dpg.add_spacer(height=8, parent=parent)
+
         # Preset selector
         with dpg.group(horizontal=True, parent=parent):
             dpg.add_text("Preset:")
@@ -1790,8 +1798,10 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=10, parent=parent)
 
-        # L expression
-        dpg.add_text("Lightness (L)  [0-1]", parent=parent)
+        # L expression - add tooltip
+        l_label = dpg.add_text("Lightness (L)  [0-1]", parent=parent)
+        with dpg.tooltip(l_label):
+            dpg.add_text("Controls brightness. 0 = black, 1 = white.")
         self.expr_L_input_id = dpg.add_input_text(
             default_value="clipnorm(lic, 0.5, 99.5)",
             width=-1,  # Fill available width
@@ -1805,8 +1815,10 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=6, parent=parent)
 
-        # C expression
-        dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
+        # C expression - add tooltip
+        c_label = dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
+        with dpg.tooltip(c_label):
+            dpg.add_text("Color intensity/saturation. 0 = grayscale.")
         self.expr_C_input_id = dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width
@@ -1820,8 +1832,10 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=6, parent=parent)
 
-        # H expression
-        dpg.add_text("Hue (H)  [0-360°]", parent=parent)
+        # H expression - add tooltip
+        h_label = dpg.add_text("Hue (H)  [0-360°]", parent=parent)
+        with dpg.tooltip(h_label):
+            dpg.add_text("Color hue angle. 0=red, 120=green, 240=blue.")
         self.expr_H_input_id = dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width

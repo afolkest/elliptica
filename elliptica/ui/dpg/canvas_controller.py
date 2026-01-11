@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple, List
 import math
 import time
 
@@ -19,22 +19,31 @@ except ImportError:
     dpg = None
 
 
-MIN_HIT_TARGET = 10  # Minimum clickable area in pixels
+MIN_HIT_TARGET = 10  # Base minimum clickable area in screen pixels
 
 
-def _point_in_boundary(boundary: BoundaryObject, x: float, y: float) -> bool:
+def _point_in_boundary(boundary: BoundaryObject, x: float, y: float, zoom: float = 1.0) -> bool:
     """Test whether canvas coordinate lands inside boundary hit area.
 
     For small boundaries, expands bounding box to MIN_HIT_TARGET for easier selection.
     For larger boundaries, uses pixel-perfect mask testing.
+    The hit target is scaled by inverse zoom to maintain consistent screen-space click area.
+
+    Args:
+        boundary: The boundary object to test
+        x, y: Canvas coordinates
+        zoom: Current zoom level (used to scale hit target)
     """
     cx, cy = boundary.position
     mask = boundary.mask
     h, w = mask.shape
 
+    # Scale hit target by inverse zoom to maintain consistent screen-space size
+    effective_hit_target = MIN_HIT_TARGET / zoom if zoom > 0 else MIN_HIT_TARGET
+
     # Calculate expanded bounds for small boundaries
-    expand_x = max(0, (MIN_HIT_TARGET - w) / 2)
-    expand_y = max(0, (MIN_HIT_TARGET - h) / 2)
+    expand_x = max(0, (effective_hit_target - w) / 2)
+    expand_y = max(0, (effective_hit_target - h) / 2)
 
     # Check expanded bounding box first
     if x < cx - expand_x or x >= cx + w + expand_x:
@@ -43,7 +52,7 @@ def _point_in_boundary(boundary: BoundaryObject, x: float, y: float) -> bool:
         return False
 
     # For small boundaries, bounding box hit is enough
-    if w <= MIN_HIT_TARGET or h <= MIN_HIT_TARGET:
+    if w <= effective_hit_target or h <= effective_hit_target:
         return True
 
     # For larger boundaries, do pixel-perfect test
@@ -91,7 +100,15 @@ class CanvasController:
         self.shift_down: bool = False
 
         # Clipboard (list for multi-select copy)
-        self.clipboard_boundaries: list[BoundaryObject] = []
+        self.clipboard_boundaries: List[BoundaryObject] = []
+
+        # Zoom/pan state
+        self.zoom: float = 1.0          # 1.0 = 100%
+        self.pan_x: float = 0.0         # Pan offset in canvas coords
+        self.pan_y: float = 0.0
+        self.panning: bool = False      # Currently in pan drag
+        self.pan_start_mouse: Tuple[float, float] = (0.0, 0.0)  # Absolute screen coords
+        self.pan_start_offset: Tuple[float, float] = (0.0, 0.0)
 
     def on_mouse_wheel(self, sender, app_data) -> None:
         """Capture mouse wheel delta from DPG handler."""
@@ -111,16 +128,25 @@ class CanvasController:
                 rect_min[1] <= mouse_y <= rect_max[1])
 
     def get_canvas_mouse_pos(self) -> Tuple[float, float]:
-        """Convert screen mouse position to canvas coordinates."""
+        """Convert screen mouse position to canvas coordinates (zoom/pan aware)."""
         assert dpg is not None and self.app.canvas_id is not None
         mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
         rect_min = dpg.get_item_rect_min(self.app.canvas_id)
-        # Get screen-space coordinates relative to canvas
+
+        # Screen coords relative to canvas widget
         screen_x = mouse_x - rect_min[0]
         screen_y = mouse_y - rect_min[1]
-        # Apply inverse scale to get canvas-space coordinates
-        canvas_x = screen_x / self.app.display_scale if self.app.display_scale > 0 else screen_x
-        canvas_y = screen_y / self.app.display_scale if self.app.display_scale > 0 else screen_y
+
+        # Inverse display_scale
+        scale = self.app.display_scale if self.app.display_scale > 0 else 1.0
+        screen_x /= scale
+        screen_y /= scale
+
+        # Inverse zoom and add pan offset
+        zoom = self.zoom if self.zoom > 0 else 1.0
+        canvas_x = screen_x / zoom + self.pan_x
+        canvas_y = screen_y / zoom + self.pan_y
+
         return canvas_x, canvas_y
 
     def find_hit_boundary(self, x: float, y: float) -> int:
@@ -128,7 +154,7 @@ class CanvasController:
         with self.app.state_lock:
             boundaries = self.app.state.project.boundary_objects
             for idx in reversed(range(len(boundaries))):
-                if _point_in_boundary(boundaries[idx], x, y):
+                if _point_in_boundary(boundaries[idx], x, y, self.zoom):
                     return idx
         return -1
 
@@ -230,6 +256,68 @@ class CanvasController:
             dpg.set_value("status_text", f"Scaled {count} objects by {factor:.2f}×")
         return True
 
+    def _clamp_pan(self) -> None:
+        """Soft-clamp pan to prevent losing the canvas entirely."""
+        with self.app.state_lock:
+            canvas_w, canvas_h = self.app.state.project.canvas_resolution
+
+        # Allow panning up to 50% off-canvas in any direction
+        margin_x = canvas_w * 0.5
+        margin_y = canvas_h * 0.5
+
+        self.pan_x = max(-margin_x, min(self.pan_x, canvas_w - margin_x))
+        self.pan_y = max(-margin_y, min(self.pan_y, canvas_h - margin_y))
+
+    def _zoom_toward_cursor(self, wheel_delta: float) -> None:
+        """Zoom canvas toward/away from cursor position."""
+        if dpg is None or self.app.canvas_id is None:
+            return
+
+        old_zoom = self.zoom
+
+        # Exponential zoom for smooth feel (use same sensitivity as boundary scaling)
+        zoom_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
+        new_zoom = old_zoom * zoom_factor
+
+        # Clamp zoom to reasonable bounds (10% to 1000%)
+        new_zoom = max(0.1, min(new_zoom, 10.0))
+
+        if abs(new_zoom - old_zoom) < 1e-6:
+            return
+
+        # Compute screen coords (before zoom change)
+        mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
+        rect_min = dpg.get_item_rect_min(self.app.canvas_id)
+        display_scale = self.app.display_scale if self.app.display_scale > 0 else 1.0
+        screen_x = (mouse_x - rect_min[0]) / display_scale
+        screen_y = (mouse_y - rect_min[1]) / display_scale
+
+        # Canvas point under cursor with OLD zoom
+        canvas_x = screen_x / old_zoom + self.pan_x
+        canvas_y = screen_y / old_zoom + self.pan_y
+
+        # Update zoom
+        self.zoom = new_zoom
+
+        # Adjust pan so same canvas point stays under cursor
+        self.pan_x = canvas_x - screen_x / new_zoom
+        self.pan_y = canvas_y - screen_y / new_zoom
+
+        # Apply soft pan bounds (allow 50% off-canvas)
+        self._clamp_pan()
+
+        self.app._update_canvas_transform()
+        self.app.canvas_renderer.mark_dirty()
+
+    def reset_zoom_pan(self) -> None:
+        """Reset zoom and pan to default values."""
+        self.zoom = 1.0
+        self.pan_x = 0.0
+        self.pan_y = 0.0
+        self.panning = False
+        self.app._update_canvas_transform()
+        self.app.canvas_renderer.mark_dirty()
+
     def is_file_dialog_showing(self) -> bool:
         """Check if any file dialog is currently showing."""
         if dpg is None:
@@ -293,9 +381,11 @@ class CanvasController:
         return False
 
     def process_canvas_mouse(self) -> None:
-        """Process mouse input on canvas (clicks, drags, wheel)."""
+        """Process mouse input on canvas (clicks, drags, wheel, pan)."""
         if dpg is None or self.app.canvas_id is None:
             return
+
+        from elliptica.ui.dpg.app import SHIFT_KEY, CTRL_KEY, SPACE_KEY
 
         mouse_down = dpg.is_mouse_button_down(dpg.mvMouseButton_Left)
 
@@ -306,6 +396,7 @@ class CanvasController:
         menu_open = self.is_menu_open()
         if file_dialog or modal_open or menu_open:
             self.mouse_down_last = mouse_down
+            self.panning = False
             return
         pressed = mouse_down and not self.mouse_down_last
         released = (not mouse_down) and self.mouse_down_last
@@ -316,9 +407,10 @@ class CanvasController:
                 self.scaling_active = False
                 self.app.canvas_renderer.mark_dirty()  # Redraw with contour
 
-        # Track shift key for multi-select
-        from elliptica.ui.dpg.app import SHIFT_KEY
+        # Track modifier keys
         self.shift_down = SHIFT_KEY is not None and dpg.is_key_down(SHIFT_KEY)
+        ctrl_down = CTRL_KEY is not None and dpg.is_key_down(CTRL_KEY)
+        space_down = SPACE_KEY is not None and dpg.is_key_down(SPACE_KEY)
 
         with self.app.state_lock:
             mode = self.app.state.view_mode
@@ -327,23 +419,64 @@ class CanvasController:
         self.mouse_wheel_delta = 0.0
         over_canvas = self.is_mouse_over_canvas()
 
-        # Mouse wheel scaling in edit mode
-        if mode == "edit" and over_canvas and abs(wheel_delta) > 1e-5:
-            with self.app.state_lock:
-                has_selection = len(self.app.state.selected_indices) > 0
-            if has_selection:
-                scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
-                scale_factor = max(0.05, min(scale_factor, 20.0))
-                if self.scale_selected_boundaries(scale_factor):
-                    x, y = self.get_canvas_mouse_pos()
-                    self.drag_last_pos = (x, y)
-                    # Track scaling gesture for contour skip
-                    self.scaling_active = True
-                    self._last_scale_time = time.monotonic()
-                    # Reset accumulators to prevent position jump after scaling during drag
-                    if self.drag_active:
-                        self._drag_accumulated_dx = 0.0
-                        self._drag_accumulated_dy = 0.0
+        # End pan when mouse released
+        if not mouse_down:
+            self.panning = False
+
+        # Pan mode: space + left-drag (check before other interactions)
+        # Don't allow pan if box selecting or dragging boundaries
+        if space_down and over_canvas and not self.box_select_active and not self.drag_active:
+            if pressed and not self.panning:
+                # Start panning - store absolute screen position
+                self.panning = True
+                mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
+                self.pan_start_mouse = (mouse_x, mouse_y)
+                self.pan_start_offset = (self.pan_x, self.pan_y)
+
+            elif self.panning and mouse_down:
+                # Continue panning
+                mouse_x, mouse_y = dpg.get_mouse_pos(local=False)
+
+                # Delta in screen space, convert to canvas space
+                display_scale = self.app.display_scale if self.app.display_scale > 0 else 1.0
+                zoom = self.zoom if self.zoom > 0 else 1.0
+                dx = (mouse_x - self.pan_start_mouse[0]) / display_scale / zoom
+                dy = (mouse_y - self.pan_start_mouse[1]) / display_scale / zoom
+
+                self.pan_x = self.pan_start_offset[0] - dx
+                self.pan_y = self.pan_start_offset[1] - dy
+
+                self._clamp_pan()
+                self.app._update_canvas_transform()
+                self.app.canvas_renderer.mark_dirty()
+
+        # Skip normal click handling when panning
+        if self.panning:
+            self.mouse_down_last = mouse_down
+            return
+
+        # Mouse wheel handling: zoom (default) or Ctrl+scroll for boundary scaling
+        if over_canvas and abs(wheel_delta) > 1e-5 and not self.box_select_active:
+            if ctrl_down and mode == "edit":
+                # Ctrl+scroll in edit mode: scale selected boundaries
+                with self.app.state_lock:
+                    has_selection = len(self.app.state.selected_indices) > 0
+                if has_selection:
+                    scale_factor = math.exp(wheel_delta * defaults.SCROLL_SCALE_SENSITIVITY)
+                    scale_factor = max(0.05, min(scale_factor, 20.0))
+                    if self.scale_selected_boundaries(scale_factor):
+                        x, y = self.get_canvas_mouse_pos()
+                        self.drag_last_pos = (x, y)
+                        # Track scaling gesture for contour skip
+                        self.scaling_active = True
+                        self._last_scale_time = time.monotonic()
+                        # Reset accumulators to prevent position jump after scaling during drag
+                        if self.drag_active:
+                            self._drag_accumulated_dx = 0.0
+                            self._drag_accumulated_dy = 0.0
+            else:
+                # Plain scroll: zoom canvas toward cursor (works in both modes)
+                self._zoom_toward_cursor(wheel_delta)
 
         # Render mode: click to select region for colorization (single-select only)
         if mode != "edit":
@@ -487,8 +620,8 @@ class CanvasController:
         self.mouse_down_last = mouse_down
 
     def process_keyboard_shortcuts(self) -> None:
-        """Process keyboard shortcuts (delete, copy, paste)."""
-        from elliptica.ui.dpg.app import BACKSPACE_KEY, CTRL_KEY, C_KEY, V_KEY
+        """Process keyboard shortcuts (delete, copy, paste, zoom reset)."""
+        from elliptica.ui.dpg.app import BACKSPACE_KEY, CTRL_KEY, C_KEY, V_KEY, HOME_KEY, ZERO_KEY
 
         if dpg is None or BACKSPACE_KEY is None:
             return
@@ -579,3 +712,12 @@ class CanvasController:
                     msg = f"Pasted {count} object{'s' if count > 1 else ''}"
                     dpg.set_value("status_text", msg)
             self.ctrl_v_down_last = ctrl_v_down
+
+        # Reset zoom/pan with Home or Ctrl+0
+        ctrl_down = CTRL_KEY is not None and dpg.is_key_down(CTRL_KEY)
+        home_pressed = HOME_KEY is not None and dpg.is_key_pressed(HOME_KEY)
+        zero_pressed = ZERO_KEY is not None and dpg.is_key_pressed(ZERO_KEY)
+
+        if home_pressed or (ctrl_down and zero_pressed):
+            self.reset_zoom_pan()
+            dpg.set_value("status_text", "Zoom reset to 100%")
