@@ -24,6 +24,9 @@ except ImportError:
 class RenderOrchestrator:
     """Controller for background render job management."""
 
+    _LOADING_MODAL_SIZE = 240
+    _LOADING_INDICATOR_FRACTION = 0.3
+
     def __init__(self, app: "EllipticaApp"):
         """Initialize orchestrator with reference to main app.
 
@@ -38,6 +41,96 @@ class RenderOrchestrator:
         # Current render job state
         self.render_future: Optional[Future] = None
         self.render_error: Optional[str] = None
+
+        # Loading modal
+        self.loading_modal_id: Optional[int] = None
+        self.loading_modal_theme_id: Optional[int] = None
+        self.loading_indicator_id: Optional[int] = None
+
+    def _ensure_loading_modal(self) -> None:
+        """Create the loading modal if it doesn't exist."""
+        if dpg is None:
+            return
+        if dpg.does_item_exist("loading_modal"):
+            self.loading_modal_id = "loading_modal"
+            return
+        self.loading_modal_id = None
+
+        modal_size = self._LOADING_MODAL_SIZE
+        if self.loading_modal_theme_id is None:
+            with dpg.theme() as theme:
+                with dpg.theme_component(dpg.mvWindowAppItem):
+                    dpg.add_theme_style(dpg.mvStyleVar_WindowPadding, 0.0, 0.0)
+                    dpg.add_theme_style(dpg.mvStyleVar_ItemSpacing, 0.0, 0.0)
+                    dpg.add_theme_style(dpg.mvStyleVar_FramePadding, 0.0, 0.0)
+            self.loading_modal_theme_id = theme
+        with dpg.window(
+            label="",
+            modal=True,
+            no_title_bar=True,
+            no_resize=True,
+            no_move=True,
+            no_close=True,
+            no_scrollbar=True,
+            no_scroll_with_mouse=True,
+            show=False,
+            tag="loading_modal",
+            width=modal_size,
+            height=modal_size,
+        ) as modal:
+            self.loading_modal_id = modal
+            self.loading_indicator_id = dpg.add_loading_indicator(
+                tag="loading_indicator",
+                style=0,
+                radius=3.0,
+            )
+        if self.loading_modal_theme_id is not None and self.loading_modal_id is not None:
+            dpg.bind_item_theme(self.loading_modal_id, self.loading_modal_theme_id)
+
+    def _show_loading_modal(self) -> None:
+        """Show centered loading modal."""
+        if dpg is None:
+            return
+
+        self._ensure_loading_modal()
+        if not dpg.does_item_exist("loading_modal"):
+            return
+
+        # Calculate center position at show time (viewport is guaranteed valid now)
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        modal_width = self._LOADING_MODAL_SIZE
+        modal_height = self._LOADING_MODAL_SIZE
+        pos_x = max(0, (viewport_width - modal_width) // 2)
+        pos_y = max(0, (viewport_height - modal_height) // 2)
+
+        # Use configure_item to set position AND show (like image_export_controller)
+        dpg.configure_item(
+            "loading_modal",
+            width=modal_width,
+            height=modal_height,
+            pos=(pos_x, pos_y),
+            show=True
+        )
+        dpg.focus_item("loading_modal")
+        if self.loading_indicator_id is not None and dpg.does_item_exist(self.loading_indicator_id):
+            text_size = dpg.get_text_size("A")
+            line_height = float(text_size[1]) if text_size else 0.0
+            if line_height <= 0.0:
+                line_height = 14.0
+            indicator_size = modal_width * self._LOADING_INDICATOR_FRACTION
+            radius = indicator_size / line_height
+            indicator_pos = int((modal_width - indicator_size) // 2)
+            dpg.configure_item(
+                self.loading_indicator_id,
+                radius=radius,
+                pos=(indicator_pos, indicator_pos),
+            )
+
+    def _hide_loading_modal(self) -> None:
+        """Hide the loading modal."""
+        if dpg is not None and dpg.does_item_exist("loading_modal"):
+            dpg.configure_item("loading_modal", show=False)
 
     def start_job(self) -> None:
         """Start a background render job with current settings.
@@ -167,6 +260,7 @@ class RenderOrchestrator:
         if self.render_future is None:
             return
         if not self.render_future.done():
+            self._show_loading_modal()
             return
 
         # Render completed - get result
@@ -178,6 +272,9 @@ class RenderOrchestrator:
             self.render_error = str(exc)
 
         self.render_future = None
+
+        # Hide loading modal
+        self._hide_loading_modal()
 
         if success:
             # Render succeeded - update UI

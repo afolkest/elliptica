@@ -70,7 +70,7 @@ class BoundaryColorSettings:
 class RenderSettings:
     """User-configurable render parameters."""
 
-    multiplier: float = defaults.RENDER_RESOLUTION_CHOICES[0]
+    multiplier: float = defaults.DEFAULT_RENDER_MULTIPLIER
     supersample: float = defaults.SUPERSAMPLE_CHOICES[0]
     num_passes: int = defaults.DEFAULT_RENDER_PASSES
     margin: float = defaults.DEFAULT_PADDING_MARGIN

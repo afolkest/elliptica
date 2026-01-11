@@ -371,6 +371,7 @@ class EllipticaApp:
         self.display_pipeline.texture_manager.refresh_render_texture()
         self._update_control_visibility()
         self.file_io.ensure_boundary_file_dialog()
+        self.render_orchestrator._ensure_loading_modal()
         self._update_canvas_inputs()
         self.boundary_controls.rebuild_controls()
 

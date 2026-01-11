@@ -3,6 +3,7 @@
 # Canvas / resolution
 DEFAULT_CANVAS_RESOLUTION: tuple[int, int] = (1024, 1024)
 RENDER_RESOLUTION_CHOICES: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+DEFAULT_RENDER_MULTIPLIER: float = 1.0
 SUPERSAMPLE_CHOICES: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
 
 # LIC render settings
@@ -12,7 +13,7 @@ DEFAULT_PADDING_MARGIN: float = 0.0
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.5
 DEFAULT_USE_MASK: bool = True  # Block streamlines at boundaries
-DEFAULT_SOLVE_SCALE: float = 1.0  # PDE solve resolution relative to render grid
+DEFAULT_SOLVE_SCALE: float = 0.8  # PDE solve resolution relative to render grid
 MIN_SOLVE_SCALE: float = 0.1
 MAX_SOLVE_SCALE: float = 1.0
 SOLVE_RELAX_BAND: int = 3  # Relaxation band width when solve_scale < 1
