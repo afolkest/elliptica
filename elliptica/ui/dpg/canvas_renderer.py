@@ -318,8 +318,8 @@ class CanvasRenderer:
                     uv_max=(1.0, 1.0),
                     parent=self.app.canvas_layer_id,
                 )
-                # Draw contour outline for selected boundaries (skip during drag for performance)
-                if idx in selected_indices and not self.app.canvas_controller.drag_active:
+                # Draw contour outline for selected boundaries (skip during drag/scale for performance)
+                if idx in selected_indices and not self.app.canvas_controller.drag_active and not self.app.canvas_controller.scaling_active:
                     contours = self._get_boundary_contours(boundary, x0, y0, idx=idx)
                     for contour in contours:
                         self._draw_dashed_contour(

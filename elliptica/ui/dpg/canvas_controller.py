@@ -74,6 +74,11 @@ class CanvasController:
         self._drag_last_commit_time: float = 0.0
         self._DRAG_THROTTLE_SEC: float = 0.016  # ~60 FPS max update rate
 
+        # Scale gesture tracking (for contour skip during scroll-to-scale)
+        self.scaling_active: bool = False
+        self._last_scale_time: float = 0.0
+        self._SCALE_DEBOUNCE_SEC: float = 0.15  # Time after last scroll to consider scaling "done"
+
         # Box selection state
         self.box_select_active: bool = False
         self.box_select_start: Tuple[float, float] = (0.0, 0.0)
@@ -305,6 +310,12 @@ class CanvasController:
         pressed = mouse_down and not self.mouse_down_last
         released = (not mouse_down) and self.mouse_down_last
 
+        # Check if scaling gesture ended (debounce timeout)
+        if self.scaling_active:
+            if (time.monotonic() - self._last_scale_time) > self._SCALE_DEBOUNCE_SEC:
+                self.scaling_active = False
+                self.app.canvas_renderer.mark_dirty()  # Redraw with contour
+
         # Track shift key for multi-select
         from elliptica.ui.dpg.app import SHIFT_KEY
         self.shift_down = SHIFT_KEY is not None and dpg.is_key_down(SHIFT_KEY)
@@ -326,6 +337,9 @@ class CanvasController:
                 if self.scale_selected_boundaries(scale_factor):
                     x, y = self.get_canvas_mouse_pos()
                     self.drag_last_pos = (x, y)
+                    # Track scaling gesture for contour skip
+                    self.scaling_active = True
+                    self._last_scale_time = time.monotonic()
                     # Reset accumulators to prevent position jump after scaling during drag
                     if self.drag_active:
                         self._drag_accumulated_dx = 0.0

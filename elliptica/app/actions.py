@@ -194,6 +194,8 @@ def scale_boundary(state: AppState, idx: int, scale_delta: float) -> bool:
     new_w = max(1, int(round(orig_w * new_scale_factor)))
 
     if new_h == old_h and new_w == old_w:
+        # Store scale factor so small scrolls accumulate, even if no visible change yet
+        boundary.scale_factor = new_scale_factor
         return False
 
     if new_h > MAX_BOUNDARY_DIM or new_w > MAX_BOUNDARY_DIM:
