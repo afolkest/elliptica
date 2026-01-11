@@ -91,6 +91,9 @@ CTRL_KEY = None
 SHIFT_KEY = None
 C_KEY = None
 V_KEY = None
+SPACE_KEY = None
+HOME_KEY = None
+ZERO_KEY = None
 if dpg is not None:
     BACKSPACE_KEY = getattr(dpg, "mvKey_Backspace", None)
     if BACKSPACE_KEY is None:
@@ -103,6 +106,11 @@ if dpg is not None:
         SHIFT_KEY = getattr(dpg, "mvKey_LShift", None)
     C_KEY = getattr(dpg, "mvKey_C", None)
     V_KEY = getattr(dpg, "mvKey_V", None)
+    SPACE_KEY = getattr(dpg, "mvKey_Spacebar", None)
+    if SPACE_KEY is None:
+        SPACE_KEY = getattr(dpg, "mvKey_Space", None)
+    HOME_KEY = getattr(dpg, "mvKey_Home", None)
+    ZERO_KEY = getattr(dpg, "mvKey_0", None)
 
 
 def _snapshot_project(project: Project) -> Project:
@@ -392,11 +400,11 @@ class EllipticaApp:
     def _on_viewport_resize(self) -> None:
         """Handle viewport resize events."""
         self._resize_canvas_window()
-        self._update_canvas_scale()
+        self._update_canvas_transform()
 
-    def _update_canvas_scale(self) -> None:
-        """Calculate and apply display scale transform to canvas layer."""
-        if dpg is None or self.canvas_layer_id is None or self.canvas_window_id is None:
+    def _update_display_scale(self) -> None:
+        """Calculate display_scale based on canvas size and window size."""
+        if dpg is None or self.canvas_window_id is None:
             return
 
         # Get window client area size (excluding titlebar, borders, scrollbars)
@@ -417,12 +425,36 @@ class EllipticaApp:
         # Calculate scale to fit canvas in window (never scale up, only down)
         scale_w = window_w / canvas_w
         scale_h = window_h / canvas_h
-        scale = min(scale_w, scale_h, 1.0)
+        self.display_scale = min(scale_w, scale_h, 1.0)
 
-        self.display_scale = scale
+    def _update_canvas_transform(self) -> None:
+        """Apply combined transform: scale and translate for zoom/pan."""
+        if dpg is None or self.canvas_layer_id is None:
+            return
 
-        # Apply scale transform to layer
-        transform = dpg.create_scale_matrix([scale, scale, 1.0])
+        # First ensure display_scale is up to date
+        self._update_display_scale()
+
+        # Get zoom/pan from controller (may not exist during init)
+        zoom = getattr(self.canvas_controller, 'zoom', 1.0) if self.canvas_controller else 1.0
+        pan_x = getattr(self.canvas_controller, 'pan_x', 0.0) if self.canvas_controller else 0.0
+        pan_y = getattr(self.canvas_controller, 'pan_y', 0.0) if self.canvas_controller else 0.0
+
+        # Combined scale = display_scale * zoom
+        total_scale = self.display_scale * zoom
+
+        # Pan offset in screen space (negative because we're moving the content)
+        screen_pan_x = -pan_x * total_scale
+        screen_pan_y = -pan_y * total_scale
+
+        # Use DearPyGui's matrix functions and multiply them together
+        # This ensures correct matrix format and composition
+        scale_matrix = dpg.create_scale_matrix([total_scale, total_scale, 1.0])
+        translation_matrix = dpg.create_translation_matrix([screen_pan_x, screen_pan_y, 0.0])
+
+        # Compose: translate first (pan), then scale (zoom)
+        # This matches the inverse calculation in get_canvas_mouse_pos()
+        transform = translation_matrix * scale_matrix
         dpg.apply_transform(self.canvas_layer_id, transform)
 
     # ------------------------------------------------------------------
@@ -537,7 +569,7 @@ class EllipticaApp:
         self._update_canvas_inputs()
         self.canvas_renderer.mark_dirty()
         self._resize_canvas_window()
-        self._update_canvas_scale()
+        self._update_canvas_transform()
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
@@ -546,7 +578,7 @@ class EllipticaApp:
         if dpg is None:
             return
         self._resize_canvas_window()
-        self._update_canvas_scale()
+        self._update_canvas_transform()
         dpg.set_value("status_text", f"Display scale adjusted to {self.display_scale:.2f}×")
 
     def _on_back_to_edit_clicked(self, sender, app_data):
@@ -572,7 +604,7 @@ class EllipticaApp:
 
         # Resize canvas window and update scale after viewport is shown and has valid dimensions
         self._resize_canvas_window()
-        self._update_canvas_scale()
+        self._update_canvas_transform()
 
         try:
             while dpg.is_dearpygui_running():

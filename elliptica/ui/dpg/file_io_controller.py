@@ -166,7 +166,7 @@ class FileIOController:
             dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
 
         self.app._update_canvas_inputs()  # Update canvas size display text
-        self.app._update_canvas_scale()  # Recalculate scale for potentially new canvas size
+        self.app._update_canvas_transform()  # Recalculate scale for potentially new canvas size
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
         self.app.boundary_controls.update_slider_labels()
@@ -206,6 +206,9 @@ class FileIOController:
         # Add demo boundary
         self.app._add_demo_boundary()
 
+        # Reset zoom/pan to defaults for new project
+        self.app.canvas_controller.reset_zoom_pan()
+
         # Update UI to reflect new state
         self.app.canvas_renderer.mark_dirty()
         self.app._update_canvas_inputs()
@@ -215,7 +218,7 @@ class FileIOController:
             canvas_w, canvas_h = self.app.state.project.canvas_resolution
             dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
 
-        self.app._update_canvas_scale()
+        self.app._update_canvas_transform()
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
         self.app.boundary_controls.update_slider_labels()
@@ -450,6 +453,9 @@ class FileIOController:
             if loaded_cache is not None:
                 self.app.cache_panel.rebuild_cache_display_fields()
 
+            # Reset zoom/pan to defaults when loading project
+            self.app.canvas_controller.reset_zoom_pan()
+
             # Update UI to reflect loaded state
             self.app.canvas_renderer.mark_dirty()
             self.app._update_canvas_inputs()  # Update canvas size input fields
@@ -459,7 +465,7 @@ class FileIOController:
                 canvas_w, canvas_h = self.app.state.project.canvas_resolution
                 dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
 
-            self.app._update_canvas_scale()  # Recalculate scale for new canvas resolution
+            self.app._update_canvas_transform()  # Recalculate scale for new canvas resolution
             self.app._update_control_visibility()
             self.app.boundary_controls.rebuild_controls()
             self.app.boundary_controls.update_slider_labels()

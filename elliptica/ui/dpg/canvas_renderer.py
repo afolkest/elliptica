@@ -150,23 +150,41 @@ class CanvasRenderer:
 
     def _draw_dashed_contour(self, contour: np.ndarray, parent,
                               dash_length: int = 8, gap_length: int = 6,
-                              color=(255, 255, 255, 220), thickness: float = 2.0) -> None:
-        """Draw a contour as a dashed white line with black outline for visibility."""
+                              color=(255, 255, 255, 220), thickness: float = 2.0,
+                              zoom: float = 1.0) -> None:
+        """Draw a contour as a dashed white line with black outline for visibility.
+
+        Args:
+            contour: Nx2 array of (x, y) points
+            parent: DearPyGui parent node
+            dash_length: Base dash length in pixels (scaled by 1/zoom)
+            gap_length: Base gap length in pixels (scaled by 1/zoom)
+            color: Line color RGBA
+            thickness: Base line thickness in pixels (scaled by 1/zoom)
+            zoom: Current zoom level (used to scale visual elements)
+        """
         if len(contour) < 2:
             return
 
+        # Scale visual parameters by inverse zoom to maintain consistent screen-space appearance
+        effective_zoom = zoom if zoom > 0 else 1.0
+        effective_dash = max(2, int(dash_length / effective_zoom))
+        effective_gap = max(2, int(gap_length / effective_zoom))
+        effective_thickness = thickness / effective_zoom
+        effective_outline_extra = 1.5 / effective_zoom
+
         # Points are roughly 1 pixel apart, so we can use point count for dash length
-        period = dash_length + gap_length
+        period = effective_dash + effective_gap
         i = 0
         while i < len(contour):
-            end = min(i + dash_length, len(contour))
+            end = min(i + effective_dash, len(contour))
             segment = contour[i:end]
             if len(segment) >= 2:
                 points = [tuple(p) for p in segment]
                 # Draw black outline first (slightly thicker)
-                dpg.draw_polyline(points, color=(0, 0, 0, 180), thickness=thickness + 1.5, parent=parent)
+                dpg.draw_polyline(points, color=(0, 0, 0, 180), thickness=effective_thickness + effective_outline_extra, parent=parent)
                 # Draw white line on top
-                dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
+                dpg.draw_polyline(points, color=color, thickness=effective_thickness, parent=parent)
             i += period
 
     def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float) -> list[np.ndarray]:
@@ -200,10 +218,11 @@ class CanvasRenderer:
             render_cache = self.app.state.render_cache
             view_mode = self.app.state.view_mode
 
-        # Get box selection state from controller
+        # Get box selection state and zoom from controller
         box_select_active = self.app.canvas_controller.box_select_active
         box_start = self.app.canvas_controller.box_select_start
         box_end = self.app.canvas_controller.box_select_end
+        zoom = self.app.canvas_controller.zoom
 
         # Clear the layer (transform persists on layer)
         dpg.delete_item(self.app.canvas_layer_id, children_only=True)
@@ -220,12 +239,17 @@ class CanvasRenderer:
             mid_x = canvas_w / 2.0
             mid_y = canvas_h / 2.0
 
+            # Scale line thickness by inverse zoom for consistent screen appearance
+            effective_zoom = zoom if zoom > 0 else 1.0
+            base_thickness = 1.0 / effective_zoom
+            midline_thickness = 2.5 / effective_zoom
+
             # Vertical grid lines
             x = 0.0
             while x <= canvas_w:
                 is_midline = abs(x - mid_x) < 0.5
                 color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
-                thickness = 2.5 if is_midline else 1.0
+                thickness = midline_thickness if is_midline else base_thickness
                 dpg.draw_line((x, 0), (x, canvas_h), color=color, thickness=thickness, parent=self.app.canvas_layer_id)
                 x += grid_spacing_x
 
@@ -234,7 +258,7 @@ class CanvasRenderer:
             while y <= canvas_h:
                 is_midline = abs(y - mid_y) < 0.5
                 color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
-                thickness = 2.5 if is_midline else 1.0
+                thickness = midline_thickness if is_midline else base_thickness
                 dpg.draw_line((0, y), (canvas_w, y), color=color, thickness=thickness, parent=self.app.canvas_layer_id)
                 y += grid_spacing_y
 
@@ -258,7 +282,7 @@ class CanvasRenderer:
                 contours = self._get_selection_contours(selected_idx, selected_region_type, render_cache, canvas_w, canvas_h)
                 if contours:
                     for contour in contours:
-                        self._draw_dashed_contour(contour, self.app.canvas_layer_id)
+                        self._draw_dashed_contour(contour, self.app.canvas_layer_id, zoom=zoom)
 
         if view_mode == "edit" or render_cache is None:
             for idx, boundary in enumerate(boundaries):
@@ -281,18 +305,22 @@ class CanvasRenderer:
                         self._draw_dashed_contour(
                             contour, self.app.canvas_layer_id,
                             color=(255, 255, 100, 220),  # Yellow selection color
-                            thickness=2.0
+                            thickness=2.0,
+                            zoom=zoom
                         )
 
             # Draw box selection rectangle
             if box_select_active:
                 x1, y1 = box_start
                 x2, y2 = box_end
+                # Scale thickness by inverse zoom for consistent screen appearance
+                effective_zoom = zoom if zoom > 0 else 1.0
+                box_thickness = 1.5 / effective_zoom
                 dpg.draw_rectangle(
                     (min(x1, x2), min(y1, y2)),
                     (max(x1, x2), max(y1, y2)),
                     color=(100, 150, 255, 200),
                     fill=(100, 150, 255, 40),
-                    thickness=1.5,
+                    thickness=box_thickness,
                     parent=self.app.canvas_layer_id,
                 )
