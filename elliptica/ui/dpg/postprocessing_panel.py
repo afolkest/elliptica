@@ -2433,7 +2433,16 @@ class PostprocessingPanel:
 
         This is called when selection changes. Delegates to update_context_ui.
         """
-        # Cancel ALL pending debounced updates - context is changing
+        # Apply pending lightness expression updates before clearing them
+        # (don't lose user changes when context changes)
+        if self.lightness_expr_pending_update:
+            if isinstance(self.lightness_expr_pending_target, tuple):
+                boundary_id, region_type = self.lightness_expr_pending_target
+                self._apply_region_lightness_expr_update(boundary_id, region_type)
+            elif self.lightness_expr_pending_target == "global":
+                self._apply_lightness_expr_update()
+
+        # Now safe to clear pending states
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
         self.smear_pending_value = None
