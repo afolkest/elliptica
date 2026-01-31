@@ -274,6 +274,21 @@ class CanvasRenderer:
         # Draw background
         dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.app.canvas_layer_id)
 
+        # Draw canvas boundary indicator (edit mode only)
+        # This provides visual feedback about the logical canvas bounds
+        if view_mode == "edit":
+            effective_zoom = zoom if zoom > 0 else 1.0
+            boundary_thickness = 2.0 / effective_zoom
+
+            # Subtle blue-gray border around canvas bounds
+            dpg.draw_rectangle(
+                (0, 0), (canvas_w, canvas_h),
+                color=(100, 120, 150, 200),
+                fill=(0, 0, 0, 0),  # No fill, just border
+                thickness=boundary_thickness,
+                parent=self.app.canvas_layer_id,
+            )
+
         # Draw grid in edit mode (based on physical units, not pixels)
         if view_mode == "edit":
             # Grid every 0.1 canvas units (10% of canvas dimension)
@@ -351,6 +366,21 @@ class CanvasRenderer:
                             color=(255, 255, 100, 220),  # Yellow selection color
                             thickness=2.0,
                             zoom=zoom
+                        )
+
+                # Draw off-canvas warning indicator for selected boundaries
+                if idx in selected_indices:
+                    is_off_canvas = (x0 < 0 or y0 < 0 or
+                                     x0 + width > canvas_w or y0 + height > canvas_h)
+                    if is_off_canvas:
+                        effective_zoom = zoom if zoom > 0 else 1.0
+                        warn_thickness = 1.5 / effective_zoom
+                        dpg.draw_rectangle(
+                            (x0, y0), (x0 + width, y0 + height),
+                            color=(255, 180, 0, 150),  # Orange warning
+                            fill=(0, 0, 0, 0),
+                            thickness=warn_thickness,
+                            parent=self.app.canvas_layer_id,
                         )
 
             # Draw box selection rectangle

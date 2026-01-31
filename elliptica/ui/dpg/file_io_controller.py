@@ -159,13 +159,11 @@ class FileIOController:
 
         self.app.canvas_renderer.mark_dirty()
 
-        # Resize drawlist widget if canvas was expanded
-        if self.app.canvas_id is not None:
-            with self.app.state_lock:
-                canvas_w, canvas_h = self.app.state.project.canvas_resolution
-            dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
+        # Note: drawlist stays window-sized, not canvas-sized.
+        # The transform system handles mapping canvas coords to screen pixels.
 
         self.app._update_canvas_inputs()  # Update canvas size display text
+        self.app._resize_canvas_window()  # Ensure drawlist matches window
         self.app._update_canvas_transform()  # Recalculate scale for potentially new canvas size
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
@@ -213,11 +211,8 @@ class FileIOController:
         self.app.canvas_renderer.mark_dirty()
         self.app._update_canvas_inputs()
 
-        # Resize drawlist widget to match new canvas resolution
-        if self.app.canvas_id is not None:
-            canvas_w, canvas_h = self.app.state.project.canvas_resolution
-            dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
-
+        # Note: drawlist stays window-sized, not canvas-sized.
+        self.app._resize_canvas_window()  # Ensure drawlist matches window
         self.app._update_canvas_transform()
         self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
@@ -460,11 +455,8 @@ class FileIOController:
             self.app.canvas_renderer.mark_dirty()
             self.app._update_canvas_inputs()  # Update canvas size input fields
 
-            # Resize drawlist widget to match loaded canvas resolution
-            if self.app.canvas_id is not None:
-                canvas_w, canvas_h = self.app.state.project.canvas_resolution
-                dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
-
+            # Note: drawlist stays window-sized, not canvas-sized.
+            self.app._resize_canvas_window()  # Ensure drawlist matches window
             self.app._update_canvas_transform()  # Recalculate scale for new canvas resolution
             self.app._update_control_visibility()
             self.app.boundary_controls.rebuild_controls()

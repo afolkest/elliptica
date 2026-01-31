@@ -358,8 +358,11 @@ class EllipticaApp:
         with dpg.window(label="Canvas", pos=(380, 10), width=880, height=800, tag="canvas_window",
                        no_scrollbar=True, no_scroll_with_mouse=True, no_title_bar=True) as canvas_window:
             self.canvas_window_id = canvas_window
-            canvas_w, canvas_h = self.state.project.canvas_resolution
-            with dpg.drawlist(width=canvas_w, height=canvas_h) as canvas:
+            # Create drawlist sized to window viewport, not canvas resolution.
+            # The transform system maps canvas coordinates to screen pixels.
+            # This avoids creating invisible areas that receive mouse events.
+            initial_w, initial_h = 880, 800  # Will be resized in _resize_canvas_window()
+            with dpg.drawlist(width=initial_w, height=initial_h) as canvas:
                 self.canvas_id = canvas
                 # Create a draw_node for applying scale transforms
                 with dpg.draw_node() as node:
@@ -379,7 +382,7 @@ class EllipticaApp:
     # Canvas window layout
     # ------------------------------------------------------------------
     def _resize_canvas_window(self) -> None:
-        """Resize canvas window to fill available viewport space."""
+        """Resize canvas window and drawlist to fill available viewport space."""
         if dpg is None or self.canvas_window_id is None:
             return
 
@@ -400,10 +403,20 @@ class EllipticaApp:
             height=canvas_window_height,
         )
 
+        # Also resize the drawlist to match window client area.
+        # The drawlist should be a viewport, not a backing store.
+        # Use the computed dimensions directly rather than querying
+        # get_item_rect_size, which returns stale (previous-frame) data.
+        if self.canvas_id is not None:
+            dpg.configure_item(self.canvas_id,
+                               width=canvas_window_width,
+                               height=canvas_window_height)
+
     def _on_viewport_resize(self) -> None:
         """Handle viewport resize events."""
         self._resize_canvas_window()
         self._update_canvas_transform()
+        self.canvas_controller._clamp_pan()
 
     def _update_display_scale(self) -> None:
         """Calculate display_scale based on canvas size and window size."""
@@ -565,14 +578,14 @@ class EllipticaApp:
                 return
             actions.set_canvas_resolution(self.state, width, height)
 
-        # Resize the actual drawlist widget to match new canvas resolution
-        if self.canvas_id is not None:
-            dpg.configure_item(self.canvas_id, width=width, height=height)
+        # Note: drawlist stays window-sized, not canvas-sized.
+        # The transform system handles mapping canvas coords to screen pixels.
 
         self._update_canvas_inputs()
         self.canvas_renderer.mark_dirty()
         self._resize_canvas_window()
         self._update_canvas_transform()
+        self.canvas_controller._clamp_pan()
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 

@@ -257,16 +257,51 @@ class CanvasController:
         return True
 
     def _clamp_pan(self) -> None:
-        """Soft-clamp pan to prevent losing the canvas entirely."""
+        """Zoom-aware pan clamping to allow viewing any part of the canvas.
+
+        At zoom=1, allows panning with ~10% margin beyond edges.
+        At higher zoom, expands limits so user can view canvas edges and corners.
+        """
         with self.app.state_lock:
             canvas_w, canvas_h = self.app.state.project.canvas_resolution
 
-        # Allow panning up to 50% off-canvas in any direction
-        margin_x = canvas_w * 0.5
-        margin_y = canvas_h * 0.5
+        # Get current scale factors
+        display_scale = self.app.display_scale if self.app.display_scale > 0 else 1.0
+        zoom = self.zoom if self.zoom > 0 else 1.0
+        total_scale = display_scale * zoom
 
-        self.pan_x = max(-margin_x, min(self.pan_x, canvas_w - margin_x))
-        self.pan_y = max(-margin_y, min(self.pan_y, canvas_h - margin_y))
+        # Get window size (drawlist size) to calculate visible area
+        window_w, window_h = canvas_w, canvas_h  # Fallback
+        if self.app.canvas_id is not None and dpg is not None:
+            rect = dpg.get_item_rect_size(self.app.canvas_id)
+            if rect and rect[0] > 0 and rect[1] > 0:
+                window_w, window_h = rect
+
+        # Calculate visible area in canvas coordinates
+        visible_w = window_w / total_scale
+        visible_h = window_h / total_scale
+
+        # Margin: allow 10% of canvas beyond edges for breathing room
+        margin_x = canvas_w * 0.1
+        margin_y = canvas_h * 0.1
+
+        # Pan limits: allow seeing entire canvas edge-to-edge plus margin.
+        # When pan_x = min_pan_x, left edge of canvas is near screen center.
+        # When pan_x = max_pan_x, right edge of canvas is near screen center.
+        min_pan_x = -visible_w / 2 - margin_x
+        max_pan_x = canvas_w - visible_w / 2 + margin_x
+        min_pan_y = -visible_h / 2 - margin_y
+        max_pan_y = canvas_h - visible_h / 2 + margin_y
+
+        # Handle case where visible area > canvas + margin (zoomed out far)
+        # In this case, center the canvas
+        if min_pan_x > max_pan_x:
+            min_pan_x = max_pan_x = (canvas_w - visible_w) / 2
+        if min_pan_y > max_pan_y:
+            min_pan_y = max_pan_y = (canvas_h - visible_h) / 2
+
+        self.pan_x = max(min_pan_x, min(self.pan_x, max_pan_x))
+        self.pan_y = max(min_pan_y, min(self.pan_y, max_pan_y))
 
     def _zoom_toward_cursor(self, wheel_delta: float) -> None:
         """Zoom canvas toward/away from cursor position."""
@@ -303,7 +338,7 @@ class CanvasController:
         self.pan_x = canvas_x - screen_x / new_zoom
         self.pan_y = canvas_y - screen_y / new_zoom
 
-        # Apply soft pan bounds (allow 50% off-canvas)
+        # Apply zoom-aware pan bounds (10% margin beyond canvas edges)
         self._clamp_pan()
 
         self.app._update_canvas_transform()
