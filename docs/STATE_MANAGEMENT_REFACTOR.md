@@ -343,11 +343,11 @@ Migrate each debounced feature one at a time. Each migration: rewrite callback â
 - [x] Verify: smear slider works
 
 #### 4c: Expression updates
-- [ ] Rewrite expression callback with validation before `state_manager.update()`
-- [ ] Delete `expr_pending_update`, `expr_last_update_time`, `expr_debounce_delay`
-- [ ] Delete `check_expression_debounce()`, `_apply_expression_update()`
-- [ ] Remove `check_expression_debounce()` call from main loop
-- [ ] Verify: expression input works, invalid expressions show errors immediately
+- [x] Rewrite expression callback with validation before `state_manager.update()`
+- [x] Delete `expr_pending_update`, `expr_last_update_time` (kept `expr_debounce_delay` â€” shared with 4d)
+- [x] Delete `check_expression_debounce()`, rewrite `_update_color_config_from_expressions()`
+- [x] Remove `check_expression_debounce()` call from main loop
+- [x] Verify: expression input works, invalid expressions show errors immediately
 
 #### 4d: Lightness expression
 - [ ] Rewrite `on_lightness_expr_change` with validation + global vs per-region routing

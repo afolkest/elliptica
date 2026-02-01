@@ -146,9 +146,7 @@ class PostprocessingPanel:
         self.pending_delete_palette: Optional[str] = None
 
 
-        # Debouncing for expression updates
-        self.expr_pending_update: bool = False
-        self.expr_last_update_time: float = 0.0
+        # Shared debounce delay for expression updates (used by lightness expr debounce)
         self.expr_debounce_delay: float = 0.3  # 300ms delay
 
         # Debouncing for lightness expression updates
@@ -2437,7 +2435,7 @@ class PostprocessingPanel:
         # Now safe to clear pending states
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
-        self.expr_pending_update = False  # Clear expression editor debounce too
+        # Expression editor debounce is handled by StateManager (global, not per-region)
         self.update_context_ui()
 
     # ------------------------------------------------------------------
@@ -3086,15 +3084,10 @@ class PostprocessingPanel:
             self.palette_editor_refresh_pending = False
 
         # Update color_config based on mode
-        with self.app.state_lock:
-            if self.color_mode == "palette":
-                # Clear color_config to use legacy palette mode
-                self.app.state.color_config = None
-            else:
-                # Build ColorConfig from current expressions
-                self._update_color_config_from_expressions()
-
-        self.app.display_pipeline.refresh_display()
+        if self.color_mode == "palette":
+            self.app.state_manager.update(StateKey.COLOR_CONFIG, None)
+        else:
+            self._update_color_config_from_expressions()
 
     def on_expression_preset_change(self, sender=None, app_data=None) -> None:
         """Handle preset selection change."""
@@ -3107,23 +3100,15 @@ class PostprocessingPanel:
         """Handle expression text change (debounced)."""
         if dpg is None:
             return
+        self._update_color_config_from_expressions(debounce=0.3)
 
-        # Mark pending update and record time
-        self.expr_pending_update = True
-        self.expr_last_update_time = time.time()
+    def _update_color_config_from_expressions(self, *, debounce: float = 0.0) -> None:
+        """Build ColorConfig from current expression inputs and update via StateManager.
 
-    def check_expression_debounce(self) -> None:
-        """Check if expression update should be applied (called every frame)."""
-        if not self.expr_pending_update:
-            return
-
-        current_time = time.time()
-        if current_time - self.expr_last_update_time >= self.expr_debounce_delay:
-            self._update_color_config_from_expressions()
-            self.expr_pending_update = False
-
-    def _update_color_config_from_expressions(self) -> None:
-        """Build ColorConfig from current expression inputs and update state."""
+        Validation runs immediately (instant error feedback). Only valid configs
+        enter the StateManager update path. The refresh signal is deferred when
+        ``debounce > 0``.
+        """
         if dpg is None:
             return
 
@@ -3138,20 +3123,13 @@ class PostprocessingPanel:
         C_expr = dpg.get_value("expr_C_input").strip()
         H_expr = dpg.get_value("expr_H_input").strip()
 
-        # Try to build ColorConfig
         try:
             config = ColorConfig(
                 global_mapping=ColorMapping(L=L_expr, C=C_expr, H=H_expr),
             )
-
-            # Success - clear error and update state
-            dpg.set_value("expr_error_text", "")
-
-            with self.app.state_lock:
-                self.app.state.color_config = config
-
-            self.app.display_pipeline.refresh_display()
-
         except ExprError as e:
-            # Show error but don't update config
             dpg.set_value("expr_error_text", f"Error: {e}")
+            return
+
+        dpg.set_value("expr_error_text", "")
+        self.app.state_manager.update(StateKey.COLOR_CONFIG, config, debounce=debounce)

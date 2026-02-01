@@ -640,7 +640,7 @@ class EllipticaApp:
 
                 self.postprocess_panel.check_histogram_debounce()  # Handle throttled histogram updates
 
-                self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates
+
                 self.postprocess_panel.check_lightness_expr_debounce()  # Handle debounced lightness expr updates
                 self.postprocess_panel.check_palette_editor_debounce()  # Handle throttled palette editor refreshes
                 if self.state_manager.needs_refresh():
