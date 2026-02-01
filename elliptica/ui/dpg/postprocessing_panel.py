@@ -146,20 +146,9 @@ class PostprocessingPanel:
         self.pending_delete_palette: Optional[str] = None
 
 
-        # Shared debounce delay for expression updates (used by lightness expr debounce)
-        self.expr_debounce_delay: float = 0.3  # 300ms delay
-
-        # Debouncing for lightness expression updates
-        self.lightness_expr_pending_update: bool = False
-        self.lightness_expr_last_update_time: float = 0.0
-        # Target for pending lightness expr update: "global", or (boundary_id, region_type) tuple
-        self.lightness_expr_pending_target: str | tuple[int, str] | None = None
-
-        # Cache for custom lightness expressions (preserved when switching to Global mode)
-        # Key: (boundary_id, region_type), Value: expression string
+        # UI draft memory for lightness expressions (NOT state caches — these store
+        # values intentionally removed from AppState so toggle on/off can restore them)
         self._cached_custom_lightness_exprs: dict[tuple[int, str], str] = {}
-
-        # Cache for global lightness expression (preserved when disabling)
         self._cached_global_lightness_expr: str | None = None
 
         # Themes for grayed-out appearance
@@ -2423,19 +2412,9 @@ class PostprocessingPanel:
 
         This is called when selection changes. Delegates to update_context_ui.
         """
-        # Apply pending lightness expression updates before clearing them
-        # (don't lose user changes when context changes)
-        if self.lightness_expr_pending_update:
-            if isinstance(self.lightness_expr_pending_target, tuple):
-                boundary_id, region_type = self.lightness_expr_pending_target
-                self._apply_region_lightness_expr_update(boundary_id, region_type)
-            elif self.lightness_expr_pending_target == "global":
-                self._apply_lightness_expr_update()
-
-        # Now safe to clear pending states
-        self.lightness_expr_pending_update = False
-        self.lightness_expr_pending_target = None
-        # Expression editor debounce is handled by StateManager (global, not per-region)
+        # Flush any pending debounced updates so deferred refresh signals
+        # fire before the context switch (state was already mutated immediately).
+        self.app.state_manager.flush_pending()
         self.update_context_ui()
 
     # ------------------------------------------------------------------
@@ -2447,6 +2426,8 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
+        # Flush pending debounced updates for the previous region before switching
+        self.app.state_manager.flush_pending()
         with self.app.state_lock:
             self.app.state.selected_region_type = "surface" if app_data == "Surface" else "interior"
         self.app.canvas_renderer.invalidate_selection_contour()
@@ -2543,78 +2524,26 @@ class PostprocessingPanel:
     # ------------------------------------------------------------------
 
     def on_lightness_expr_toggle(self, sender=None, app_data=None) -> None:
-        """Handle lightness expression checkbox toggle."""
+        """Handle lightness expression checkbox toggle (immediate, no debounce)."""
         if dpg is None:
             return
 
         is_enabled = bool(app_data)
-
-        # Show/hide the input field
         dpg.configure_item("lightness_expr_group", show=is_enabled)
 
         if is_enabled:
-            # Enable - use cached global expr or default (NOT the input field, which may show region expr)
             expr = self._cached_global_lightness_expr or "clipnorm(mag, 1, 99)"
-            with self.app.state_lock:
-                self.app.state.display_settings.lightness_expr = expr
-            # Update input to show the global expression
             dpg.set_value("lightness_expr_input", expr)
+            self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr)
         else:
-            # Disable - cache current global expr first
             with self.app.state_lock:
-                if self.app.state.display_settings.lightness_expr:
-                    self._cached_global_lightness_expr = self.app.state.display_settings.lightness_expr
-                self.app.state.display_settings.lightness_expr = None
-
-        self.app.display_pipeline.refresh_display()
+                current = self.app.state.display_settings.lightness_expr
+            if current:
+                self._cached_global_lightness_expr = current
+            self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, None)
 
     def on_lightness_expr_change(self, sender=None, app_data=None) -> None:
-        """Handle lightness expression text change (debounced)."""
-        if dpg is None:
-            return
-
-        # Capture the target NOW based on UI state (radio button), not region_style state
-        # The radio button reflects the user's intent directly
-        if self._is_boundary_selected():
-            mode = dpg.get_value("lightness_expr_mode_radio")
-            if mode == "Custom":
-                with self.app.state_lock:
-                    selected = self.app.state.get_selected()
-                    region_type = self.app.state.selected_region_type
-                    if selected and selected.id is not None:
-                        self.lightness_expr_pending_target = (selected.id, region_type)
-                    else:
-                        self.lightness_expr_pending_target = "global"
-            else:
-                self.lightness_expr_pending_target = "global"
-        else:
-            self.lightness_expr_pending_target = "global"
-
-        # Mark pending update and record time
-        self.lightness_expr_pending_update = True
-        self.lightness_expr_last_update_time = time.time()
-
-    def check_lightness_expr_debounce(self) -> None:
-        """Check if lightness expression update should be applied (called every frame)."""
-        if not self.lightness_expr_pending_update:
-            return
-
-        current_time = time.time()
-        if current_time - self.lightness_expr_last_update_time >= self.expr_debounce_delay:
-            # Use the target captured at input time (not current state)
-            target = self.lightness_expr_pending_target
-            if isinstance(target, tuple):
-                # Per-region update
-                boundary_id, region_type = target
-                self._apply_region_lightness_expr_update(boundary_id, region_type)
-            else:
-                # Global update
-                self._apply_lightness_expr_update()
-            self.lightness_expr_pending_update = False
-            self.lightness_expr_pending_target = None
-
-    def _apply_lightness_expr_update(self) -> None:
-        """Apply the current lightness expression from the input field."""
+        """Handle lightness expression text change (debounced via StateManager)."""
         if dpg is None:
             return
 
@@ -2622,12 +2551,27 @@ class PostprocessingPanel:
         if not expr:
             return
 
-        with self.app.state_lock:
-            self.app.state.display_settings.lightness_expr = expr
-        # Also update cache so toggling off/on preserves the latest edit
-        self._cached_global_lightness_expr = expr
+        # Route based on UI state captured NOW (radio button reflects user intent)
+        if self._is_boundary_selected():
+            mode = dpg.get_value("lightness_expr_mode_radio")
+            if mode == "Custom":
+                with self.app.state_lock:
+                    selected = self.app.state.get_selected()
+                    region_type = self.app.state.selected_region_type
+                if selected and selected.id is not None:
+                    cache_key = (selected.id, region_type)
+                    self._cached_custom_lightness_exprs[cache_key] = expr
+                    self.app.state_manager.update(
+                        StateKey.REGION_STYLE,
+                        {"lightness_expr": expr},
+                        context=(selected.id, region_type),
+                        debounce=0.3,
+                    )
+                    return
 
-        self.app.display_pipeline.refresh_display()
+        # Global update (no boundary, or Global mode, or fallback)
+        self._cached_global_lightness_expr = expr
+        self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr, debounce=0.3)
 
     # ------------------------------------------------------------------
     # Lightness expression mode (Global/Custom) callback
@@ -2638,9 +2582,8 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        # Cancel any pending debounced updates - mode is changing
-        self.lightness_expr_pending_update = False
-        self.lightness_expr_pending_target = None
+        # Flush any pending debounced lightness expr updates before mode change
+        self.app.state_manager.flush_pending()
 
         is_custom = (app_data == "Custom")
 
@@ -2648,64 +2591,37 @@ class PostprocessingPanel:
             selected = self.app.state.get_selected()
             if selected is None or selected.id is None:
                 return
-
-            # Ensure BoundaryColorSettings exists for this boundary
-            from elliptica.app.core import BoundaryColorSettings
-            if selected.id not in self.app.state.boundary_color_settings:
-                self.app.state.boundary_color_settings[selected.id] = BoundaryColorSettings()
-
-            settings = self.app.state.boundary_color_settings[selected.id]
             region_type = self.app.state.selected_region_type
-            region_style = settings.surface if region_type == "surface" else settings.interior
-            cache_key = (selected.id, region_type)
 
-            if is_custom:
-                # Switch to custom - check cache first, then global, then default
-                cached_expr = self._cached_custom_lightness_exprs.get(cache_key)
-                if cached_expr is not None:
-                    region_style.lightness_expr = cached_expr
-                else:
-                    global_expr = self.app.state.display_settings.lightness_expr
-                    region_style.lightness_expr = global_expr or "clipnorm(mag, 1, 99)"
-            else:
-                # Switch to global - cache current expr before clearing
-                if region_style.lightness_expr is not None:
-                    self._cached_custom_lightness_exprs[cache_key] = region_style.lightness_expr
-                region_style.lightness_expr = None
+        cache_key = (selected.id, region_type)
+
+        if is_custom:
+            # Switch to custom - check cache first, then global, then default
+            cached_expr = self._cached_custom_lightness_exprs.get(cache_key)
+            if cached_expr is None:
+                with self.app.state_lock:
+                    cached_expr = self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)"
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE,
+                {"lightness_expr": cached_expr},
+                context=(selected.id, region_type),
+            )
+        else:
+            # Switch to global - cache current custom expr before clearing
+            with self.app.state_lock:
+                from elliptica.app.core import BoundaryColorSettings
+                bcs = self.app.state.boundary_color_settings.get(selected.id)
+                if bcs is not None:
+                    rs = bcs.surface if region_type == "surface" else bcs.interior
+                    if rs.lightness_expr is not None:
+                        self._cached_custom_lightness_exprs[cache_key] = rs.lightness_expr
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE,
+                {"lightness_expr": None},
+                context=(selected.id, region_type),
+            )
 
         self.update_context_ui()
-        self.app.display_pipeline.refresh_display()
-
-    def _apply_region_lightness_expr_update(self, boundary_id: int, region_type: str) -> None:
-        """Apply the current per-region lightness expression.
-
-        Args:
-            boundary_id: The boundary ID to update
-            region_type: "surface" or "interior"
-        """
-        if dpg is None:
-            return
-
-        expr = dpg.get_value("lightness_expr_input").strip()
-        if not expr:
-            return
-
-        with self.app.state_lock:
-            # Ensure settings exist
-            from elliptica.app.core import BoundaryColorSettings
-            if boundary_id not in self.app.state.boundary_color_settings:
-                self.app.state.boundary_color_settings[boundary_id] = BoundaryColorSettings()
-
-            settings = self.app.state.boundary_color_settings[boundary_id]
-            region_style = settings.surface if region_type == "surface" else settings.interior
-
-            # Set the expression (we're targeting this region, so apply it)
-            region_style.lightness_expr = expr
-            # Also update cache so switching Global->Custom restores latest edit
-            cache_key = (boundary_id, region_type)
-            self._cached_custom_lightness_exprs[cache_key] = expr
-
-        self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
     # Color and palette callbacks

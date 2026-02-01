@@ -350,14 +350,16 @@ Migrate each debounced feature one at a time. Each migration: rewrite callback â
 - [x] Verify: expression input works, invalid expressions show errors immediately
 
 #### 4d: Lightness expression
-- [ ] Rewrite `on_lightness_expr_change` with validation + global vs per-region routing
-- [ ] Delete `lightness_expr_pending_update`, `lightness_expr_pending_target`, `lightness_expr_last_update_time`
-- [ ] Delete `_cached_global_lightness_expr`, `_cached_custom_lightness_exprs`
-- [ ] Delete `check_lightness_expr_debounce()`, `_apply_lightness_expr_update()`, `_apply_region_lightness_expr_update()`
-- [ ] Remove `check_lightness_expr_debounce()` call from main loop
-- [ ] Verify: global lightness expression works
-- [ ] Verify: per-region custom lightness expression works
-- [ ] Verify: switching between global and custom mode preserves values
+- [x] Rewrite `on_lightness_expr_change` with validation + global vs per-region routing
+- [x] Delete `lightness_expr_pending_update`, `lightness_expr_pending_target`, `lightness_expr_last_update_time`, `expr_debounce_delay`
+- [x] Kept `_cached_global_lightness_expr`, `_cached_custom_lightness_exprs` as UI draft memory (not state caches â€” store values removed from AppState for toggle UX)
+- [x] Delete `check_lightness_expr_debounce()`, `_apply_lightness_expr_update()`, `_apply_region_lightness_expr_update()`
+- [x] Remove `check_lightness_expr_debounce()` call from main loop
+- [x] Rewrite `on_lightness_expr_toggle`, `on_lightness_expr_mode_change` to route through StateManager
+- [x] Add `flush_pending()` to `on_region_toggle` and `update_region_properties_panel` for context-switch safety
+- [x] Verify: global lightness expression works
+- [x] Verify: per-region custom lightness expression works
+- [x] Verify: switching between global and custom mode preserves values
 
 #### 4e: Histogram throttle
 - [ ] Adapt histogram throttle to StateManager (may need a throttle variant or remain as-is if it doesn't touch display settings)
