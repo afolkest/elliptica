@@ -265,10 +265,10 @@ if manager.needs_refresh():
 Add StateManager to `EllipticaApp`. Add `poll_debounce()` and refresh flag flush to the main loop **alongside** existing `check_*` calls. Nothing changes yet — this is pure plumbing.
 
 **Checklist:**
-- [ ] Create `StateManager` in `EllipticaApp.__init__()`, passing `self.state` and `self.state_lock`
-- [ ] Add `state_manager.poll_debounce()` to main loop (before existing `check_*` calls)
-- [ ] Add refresh flag flush after `poll_debounce()` (before `dpg.render_dearpygui_frame()`)
-- [ ] Verify app runs identically — no behavior changes
+- [x] Create `StateManager` in `EllipticaApp.__init__()`, passing `self.state` and `self.state_lock`
+- [x] Add `state_manager.poll_debounce()` to main loop (before existing `check_*` calls)
+- [x] Add refresh flag flush after `poll_debounce()` (before `dpg.render_dearpygui_frame()`)
+- [x] Verify app runs identically — no behavior changes
 
 **Done when:** App starts, runs, and behaves exactly as before. StateManager exists but nothing uses it yet.
 
@@ -299,12 +299,12 @@ while dpg.is_dearpygui_running():
 Migrate brightness, contrast, gamma, saturation. These currently set state directly and call `refresh_display()` inline — no debounce. Simplest possible migration, proves the full StateManager flow.
 
 **Checklist:**
-- [ ] Rewrite `on_brightness_slider` to call `state_manager.update(StateKey.BRIGHTNESS, ...)`
-- [ ] Rewrite `on_contrast_slider` to call `state_manager.update(StateKey.CONTRAST, ...)`
-- [ ] Rewrite `on_gamma_slider` to call `state_manager.update(StateKey.GAMMA, ...)`
-- [ ] Rewrite `on_saturation_slider` to call `state_manager.update(StateKey.SATURATION, ...)`
-- [ ] Remove direct `self.app.state.display_settings.brightness = ...` from callbacks
-- [ ] Remove direct `self.app.display_pipeline.refresh_display()` from these callbacks
+- [x] Rewrite `on_brightness_slider` to call `state_manager.update(StateKey.BRIGHTNESS, ...)`
+- [x] Rewrite `on_contrast_slider` to call `state_manager.update(StateKey.CONTRAST, ...)`
+- [x] Rewrite `on_gamma_slider` to call `state_manager.update(StateKey.GAMMA, ...)`
+- [x] Rewrite `on_saturation_slider` to call `state_manager.update(StateKey.SATURATION, ...)`
+- [x] Remove direct `self.app.state.display_settings.brightness = ...` from callbacks
+- [x] Remove direct `self.app.display_pipeline.refresh_display()` from these callbacks
 - [ ] Verify sliders still work: drag slider → display updates
 
 **Done when:** Four sliders route through StateManager. Refresh happens via per-frame flag, not inline `refresh_display()`.

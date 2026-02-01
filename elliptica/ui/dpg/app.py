@@ -60,6 +60,7 @@ from elliptica.pde.register import register_all_pdes
 from elliptica.pde import PDERegistry
 from elliptica.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 from elliptica.app.core import AppState
+from elliptica.app.state_manager import StateManager
 from elliptica.app import actions
 from elliptica.ui.dpg.render_modal import RenderModalController
 from elliptica.ui.dpg.render_orchestrator import RenderOrchestrator
@@ -184,6 +185,7 @@ class EllipticaApp:
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
         self.boundary_controls = BoundaryControlsPanel(self)
+        self.state_manager = StateManager(self.state, self.state_lock)
 
         # Seed a demo boundary if project is empty so the canvas has content for manual testing.
         if not self.state.project.boundary_objects:
@@ -634,12 +636,16 @@ class EllipticaApp:
                 self.canvas_controller.process_keyboard_shortcuts()
                 self.render_orchestrator.poll()
                 self.display_pipeline.poll()  # Handle async postprocessing completion
+                self.state_manager.poll_debounce()
                 self.postprocess_panel.check_clip_debounce()  # Handle debounced clip% updates
                 self.postprocess_panel.check_histogram_debounce()  # Handle throttled histogram updates
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
                 self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates
                 self.postprocess_panel.check_lightness_expr_debounce()  # Handle debounced lightness expr updates
                 self.postprocess_panel.check_palette_editor_debounce()  # Handle throttled palette editor refreshes
+                if self.state_manager.needs_refresh():
+                    invalidate = self.state_manager.consume_refresh()
+                    self.display_pipeline.refresh_display(invalidate_cache=invalidate)
                 if self.canvas_renderer.canvas_dirty:
                     self.canvas_renderer.draw()
                 dpg.render_dearpygui_frame()

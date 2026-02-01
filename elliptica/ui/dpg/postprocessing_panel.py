@@ -8,6 +8,7 @@ from typing import Optional, Literal, TYPE_CHECKING
 from elliptica import defaults
 from elliptica.app import actions
 from elliptica.app.core import resolve_region_postprocess_params
+from elliptica.app.state_manager import StateKey
 from elliptica.colorspace import (
     build_oklch_lut,
     gamut_map_to_srgb,
@@ -2513,14 +2514,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_brightness(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.brightness = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"brightness": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.BRIGHTNESS, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
@@ -2531,14 +2532,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_contrast(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.contrast = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"contrast": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.CONTRAST, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
@@ -2549,14 +2550,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_gamma(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.gamma = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"gamma": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.GAMMA, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_saturation_change(self, sender=None, app_data=None) -> None:
@@ -2564,11 +2565,7 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.saturation = value
-
-        self.app.display_pipeline.refresh_display()
+        self.app.state_manager.update(StateKey.SATURATION, float(app_data))
 
     # ------------------------------------------------------------------
     # Lightness expression callbacks (palette mode)
