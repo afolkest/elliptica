@@ -361,19 +361,15 @@ Migrate each debounced feature one at a time. Each migration: rewrite callback �
 - [x] Verify: per-region custom lightness expression works
 - [x] Verify: switching between global and custom mode preserves values
 
-#### 4e: Histogram throttle
-- [ ] Adapt histogram throttle to StateManager (may need a throttle variant or remain as-is if it doesn't touch display settings)
-- [ ] Delete `hist_pending_update`, `hist_last_update_time`, `hist_debounce_delay`
-- [ ] Delete `check_histogram_debounce()`
-- [ ] Remove `check_histogram_debounce()` call from main loop
+#### 4e: Histogram throttle — EXEMPT
+- [x] Evaluated: histogram throttle is a UI-side rate limiter (reads AppState, writes only to DPG drawlist widgets). No state mutation — does not belong in StateManager.
+- Retains: `hist_pending_update`, `hist_last_update_time`, `hist_debounce_delay`, `check_histogram_debounce()`, main loop call
 
-#### 4f: Palette editor throttle
-- [ ] Adapt palette editor refresh throttle to StateManager
-- [ ] Delete `palette_editor_refresh_pending`, `palette_editor_last_refresh_time`, `palette_editor_refresh_throttle`
-- [ ] Delete `check_palette_editor_debounce()`
-- [ ] Remove `check_palette_editor_debounce()` call from main loop
+#### 4f: Palette editor throttle — EXEMPT
+- [x] Evaluated: palette editor throttle is a UI-side rate limiter (reads state, redraws palette preview widgets). No state mutation — does not belong in StateManager.
+- Retains: `palette_editor_refresh_pending`, `palette_editor_last_refresh_time`, `palette_editor_refresh_throttle`, `check_palette_editor_debounce()`, main loop call
 
-**Done when:** All 6 `check_*` calls removed from main loop. Only `state_manager.poll_debounce()` remains. No `*_pending_*` or `_cached_*` variables in PostprocessingPanel.
+**Done when:** All state-mutating `check_*` calls removed from main loop. Only `state_manager.poll_debounce()` remains for state mutations. UI-side throttles (`check_histogram_debounce`, `check_palette_editor_debounce`) remain in main loop as read-only rate limiters. No state-caching `_cached_*` variables in PostprocessingPanel (UI draft memory like `_cached_global_lightness_expr` is exempt — stores values removed from AppState for toggle UX).
 
 ---
 
