@@ -218,19 +218,19 @@ def on_lightness_expr_change(self, sender=None, app_data=None):
 Create `elliptica/app/state_manager.py` with `StateKey`, `StateManager`, per-frame refresh flag logic (decision 2). Write unit tests. No UI changes.
 
 **Checklist:**
-- [ ] Create `StateKey` enum with all display setting keys
-- [ ] Create `StateManager` class with `update()`, `poll_debounce()`, `flush_pending()`
-- [ ] Implement `_set_value()` / `_get_value()` for all `StateKey` members
-- [ ] Implement `_set_region_style()` for per-boundary region updates
-- [ ] Implement `subscribe()` / `unsubscribe()` / `_notify()`
-- [ ] Implement `_needs_refresh` / `_needs_invalidate` flags with `needs_refresh()` / `consume_refresh()`
-- [ ] Define `_refresh_keys` and `_invalidate_keys` sets
-- [ ] Write tests: immediate update applies to state
-- [ ] Write tests: debounced update not applied until `poll_debounce()`
-- [ ] Write tests: `flush_pending()` applies all pending immediately
-- [ ] Write tests: subscriber notified on change
-- [ ] Write tests: `_needs_refresh` flag set for refresh keys
-- [ ] Write tests: `_needs_invalidate` flag set for invalidate keys
+- [x] Create `StateKey` enum with all display setting keys
+- [x] Create `StateManager` class with `update()`, `poll_debounce()`, `flush_pending()`
+- [x] Implement `_set_value()` / `_get_value()` for all `StateKey` members
+- [x] Implement `_set_region_style()` for per-boundary region updates
+- [x] Implement `subscribe()` / `unsubscribe()` / `_notify()`
+- [x] Implement `_needs_refresh` / `_needs_invalidate` flags with `needs_refresh()` / `consume_refresh()`
+- [x] Define `_refresh_keys` and `_invalidate_keys` sets
+- [x] Write tests: immediate update applies to state
+- [x] Write tests: debounced update not applied until `poll_debounce()`
+- [x] Write tests: `flush_pending()` applies all pending immediately
+- [x] Write tests: subscriber notified on change
+- [x] Write tests: `_needs_refresh` flag set for refresh keys
+- [x] Write tests: `_needs_invalidate` flag set for invalidate keys
 
 **Done when:** All tests pass. StateManager works in isolation with no UI dependencies.
 
