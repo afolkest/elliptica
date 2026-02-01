@@ -333,14 +333,14 @@ Migrate each debounced feature one at a time. Each migration: rewrite callback �
 - [x] Delete `clip_pending_range`, `clip_last_update_time`, `clip_debounce_delay`
 - [x] Delete `check_clip_debounce()`, `_apply_clip_update()`
 - [x] Remove `check_clip_debounce()` call from main loop
-- [ ] Verify: drag clip slider → display updates after debounce
+- [x] Verify: drag clip slider → display updates after debounce
 
 #### 4b: Smear sigma
-- [ ] Rewrite smear callback to call `state_manager.update(..., debounce=0.3)`
-- [ ] Delete `smear_pending_value`, `smear_last_update_time`, `smear_debounce_delay`
-- [ ] Delete `check_smear_debounce()`, `_apply_smear_update()`
-- [ ] Remove `check_smear_debounce()` call from main loop
-- [ ] Verify: smear slider works
+- [x] Rewrite smear callback to call `state_manager.update(..., debounce=0.3)`
+- [x] Delete `smear_pending_value`, `smear_last_update_time`, `smear_debounce_delay`
+- [x] Delete `check_smear_debounce()`, `_apply_smear_update()`
+- [x] Remove `check_smear_debounce()` call from main loop
+- [x] Verify: smear slider works
 
 #### 4c: Expression updates
 - [ ] Rewrite expression callback with validation before `state_manager.update()`

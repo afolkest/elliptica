@@ -145,11 +145,6 @@ class PostprocessingPanel:
         self.delete_confirmation_modal_id: Optional[int] = None
         self.pending_delete_palette: Optional[str] = None
 
-        # Debouncing for expensive smear updates
-        self.smear_pending_value: Optional[float] = None
-        self.smear_last_update_time: float = 0.0
-        self.smear_debounce_delay: float = 0.3  # 300ms delay
-
 
         # Debouncing for expression updates
         self.expr_pending_update: bool = False
@@ -2442,7 +2437,6 @@ class PostprocessingPanel:
         # Now safe to clear pending states
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
-        self.smear_pending_value = None
         self.expr_pending_update = False  # Clear expression editor debounce too
         self.update_context_ui()
 
@@ -3041,48 +3035,32 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        with self.app.state_lock:
-            region_style = self._get_current_region_style_unlocked()
-            if region_style is not None:
-                region_style.smear_enabled = bool(app_data)
-
+        selected = self.app.state.get_selected()
+        if selected is None or selected.id is None:
+            return
+        context = (selected.id, self.app.state.selected_region_type)
+        self.app.state_manager.update(
+            StateKey.REGION_STYLE,
+            {"smear_enabled": bool(app_data)},
+            context=context,
+        )
         self.update_context_ui()
-        self.app.display_pipeline.refresh_display()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
-        """Adjust smear blur sigma for selected region (debounced for performance)."""
+        """Adjust smear blur sigma for selected region (debounced)."""
         if dpg is None:
             return
 
-        # Always update the value immediately (for UI responsiveness)
-        with self.app.state_lock:
-            region_style = self._get_current_region_style_unlocked()
-            if region_style is not None:
-                region_style.smear_sigma = float(app_data)
-
-        # Mark that we have a pending update (defers expensive render refresh)
-        self.smear_pending_value = float(app_data)
-
-        # Record the time of THIS slider change (not the last render)
-        self.smear_last_update_time = time.time()
-
-
-    def _apply_smear_update(self) -> None:
-        """Apply smear refresh (state already updated in on_smear_sigma)."""
-        self.app.display_pipeline.refresh_display()
-
-
-    def check_smear_debounce(self) -> None:
-        """Check if smear update should be applied (called every frame)."""
-        if self.smear_pending_value is None:
+        selected = self.app.state.get_selected()
+        if selected is None or selected.id is None:
             return
-
-        current_time = time.time()
-        # Only apply if enough time has passed since the last slider movement
-        if current_time - self.smear_last_update_time >= self.smear_debounce_delay:
-            self._apply_smear_update()
-            self.smear_last_update_time = current_time
-            self.smear_pending_value = None
+        context = (selected.id, self.app.state.selected_region_type)
+        self.app.state_manager.update(
+            StateKey.REGION_STYLE,
+            {"smear_sigma": float(app_data)},
+            debounce=0.3,
+            context=context,
+        )
 
     # ------------------------------------------------------------------
     # Expression editor callbacks
