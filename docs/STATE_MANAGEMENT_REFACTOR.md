@@ -1,6 +1,6 @@
 # State Management Refactor Plan
 
-A 4-week plan to fix the root cause of state synchronization bugs without a full rewrite.
+Plan to fix the root cause of state synchronization bugs without a full rewrite.
 
 ---
 
@@ -94,591 +94,318 @@ UI panels NEVER:
 
 ---
 
-## Week 1: StateManager Foundation
+## Design Decisions
 
-### Day 1-2: Create StateManager Class
+### 1. StateManager scope: display settings only, not structural mutations
 
+**Decision:** `actions.py` continues to handle structural/project mutations (`move_boundary()`, `add_boundary()`, `set_palette()`, etc.). StateManager handles **display settings with debounced UI input** only.
+
+**Rationale:**
+- `actions.py` functions modify project topology (add/remove boundaries), geometry (move/scale), and set dirty flags (`field_dirty`, `render_dirty`). These are fundamentally different from "user drags a slider" updates.
+- Forcing structural mutations through `StateManager.update(StateKey.BOUNDARY_POSITION, ...)` would bloat the StateKey enum, turn `_set_value()` into a massive switch handling unrelated operations, and add indirection with no benefit — these calls aren't debounced and don't need subscriptions.
+- The dirty flag domains are independent: `field_dirty`/`render_dirty` (actions.py) trigger full recomputation, while display settings trigger postprocessing refresh. No conflict.
+- The real problem this refactor solves is PostprocessingPanel's 6 parallel debounce systems and scattered UI caches — not that `move_boundary()` is a plain function.
+
+**Boundary rule:** If it sets `field_dirty` or `render_dirty`, it goes through `actions.py`. If it triggers `refresh_display()`, it goes through StateManager.
+
+### 2. Refresh coalescing: per-frame flag, not explicit batching
+
+**Decision:** StateManager does not call `refresh_display()` directly from `_apply_update()`. Instead, it sets a `_needs_refresh` flag. The main loop flushes this flag once per frame, resulting in at most one `refresh_display()` call per frame regardless of how many state keys changed.
+
+**Rationale:**
+- Without this, updating brightness + contrast + gamma in quick succession (e.g., reset/load) starts a postprocess job on the first update with a partial state snapshot, then queues a second job via `_pending_refresh`. That's wasted GPU work.
+- A `batch()` context manager would also solve this but adds API surface (nesting depth counter, batched key tracking) for a problem that the flag handles with zero ceremony.
+- The 1-frame delay (~16ms at 60fps) is imperceptible. Current debounced paths already add 300ms.
+- If expensive per-key subscriber work is added later, `batch()` can be introduced at that point with a concrete use case to design against.
+
+**Implementation:**
 ```python
-# elliptica/app/state_manager.py
+# In _apply_update():
+if key in self._refresh_keys:
+    self._needs_refresh = True
+    if requires_invalidation:
+        self._needs_invalidate = True
 
-from __future__ import annotations
-import threading
-import time
-from dataclasses import replace
-from typing import Any, Callable, Optional, TYPE_CHECKING
-from enum import Enum, auto
-
-if TYPE_CHECKING:
-    from elliptica.app.core import AppState
-
-
-class StateKey(Enum):
-    """All observable state paths."""
-    # Display settings
-    LIGHTNESS_EXPR = auto()
-    BRIGHTNESS = auto()
-    CONTRAST = auto()
-    GAMMA = auto()
-    SATURATION = auto()
-    CLIP_LOW = auto()
-    CLIP_HIGH = auto()
-    PALETTE = auto()
-    COLOR_ENABLED = auto()
-
-    # Region-specific
-    REGION_STYLE = auto()  # Takes (boundary_id, region_type) as context
-
-    # Render settings
-    RENDER_MULTIPLIER = auto()
-
-    # View state
-    VIEW_MODE = auto()
-    SELECTION = auto()
-
-
-class StateManager:
-    """Centralized state management with subscriptions and debouncing.
-
-    Usage:
-        manager = StateManager(app_state, lock)
-
-        # Update state (immediate)
-        manager.update(StateKey.BRIGHTNESS, 1.2)
-
-        # Update state (debounced)
-        manager.update(StateKey.LIGHTNESS_EXPR, "clipnorm(mag, 1, 99)", debounce=0.3)
-
-        # Subscribe to changes
-        manager.subscribe(StateKey.BRIGHTNESS, my_callback)
-
-        # Flush all pending updates
-        manager.flush_pending()
-    """
-
-    def __init__(self, state: "AppState", lock: threading.RLock):
-        self.state = state
-        self.lock = lock
-
-        # Subscribers: key -> list of callbacks
-        self._subscribers: dict[StateKey, list[Callable[[Any], None]]] = {}
-
-        # Debounce state: key -> (value, timestamp, delay)
-        self._pending: dict[StateKey, tuple[Any, float, float]] = {}
-
-        # Context for region-specific keys: key -> context
-        self._pending_context: dict[StateKey, Any] = {}
-
-    def update(
-        self,
-        key: StateKey,
-        value: Any,
-        debounce: float = 0.0,
-        context: Any = None,
-    ) -> None:
-        """Update a state value.
-
-        Args:
-            key: Which state to update
-            value: New value
-            debounce: If > 0, delay application by this many seconds
-            context: Additional context (e.g., boundary_id for region styles)
-        """
-        if debounce > 0:
-            self._pending[key] = (value, time.time(), debounce)
-            if context is not None:
-                self._pending_context[key] = context
-        else:
-            self._apply_update(key, value, context)
-
-    def _apply_update(self, key: StateKey, value: Any, context: Any = None) -> None:
-        """Actually apply the state update."""
-        with self.lock:
-            self._set_value(key, value, context)
-
-        # Notify subscribers (outside lock to prevent deadlock)
-        self._notify(key, value)
-
-    def _set_value(self, key: StateKey, value: Any, context: Any = None) -> None:
-        """Set the actual state value. Must be called with lock held."""
-        ds = self.state.display_settings
-
-        if key == StateKey.LIGHTNESS_EXPR:
-            self.state.display_settings = replace(ds, lightness_expr=value)
-        elif key == StateKey.BRIGHTNESS:
-            self.state.display_settings = replace(ds, brightness=value)
-        elif key == StateKey.CONTRAST:
-            self.state.display_settings = replace(ds, contrast=value)
-        elif key == StateKey.GAMMA:
-            self.state.display_settings = replace(ds, gamma=value)
-        elif key == StateKey.SATURATION:
-            self.state.display_settings = replace(ds, saturation=value)
-        elif key == StateKey.CLIP_LOW:
-            self.state.display_settings = replace(ds, clip_low_percent=value)
-        elif key == StateKey.CLIP_HIGH:
-            self.state.display_settings = replace(ds, clip_high_percent=value)
-        elif key == StateKey.PALETTE:
-            self.state.display_settings = replace(ds, palette=value)
-        elif key == StateKey.COLOR_ENABLED:
-            self.state.display_settings = replace(ds, color_enabled=value)
-        elif key == StateKey.REGION_STYLE:
-            boundary_id, region_type = context
-            # Update boundary_color_settings...
-            self._set_region_style(boundary_id, region_type, value)
-        elif key == StateKey.VIEW_MODE:
-            self.state.view_mode = value
-        elif key == StateKey.SELECTION:
-            self.state.selected_indices = value
-        # Add more as needed
-
-    def _set_region_style(self, boundary_id: int, region_type: str, style_updates: dict) -> None:
-        """Update region-specific style settings."""
-        from elliptica.app.core import BoundaryColorSettings, RegionStyle
-
-        if boundary_id not in self.state.boundary_color_settings:
-            self.state.boundary_color_settings[boundary_id] = BoundaryColorSettings()
-
-        bcs = self.state.boundary_color_settings[boundary_id]
-        current = bcs.surface if region_type == "surface" else bcs.interior
-
-        if current is None:
-            current = RegionStyle()
-
-        # Apply updates
-        updated = replace(current, **style_updates)
-
-        if region_type == "surface":
-            self.state.boundary_color_settings[boundary_id] = replace(bcs, surface=updated)
-        else:
-            self.state.boundary_color_settings[boundary_id] = replace(bcs, interior=updated)
-
-    def get(self, key: StateKey, context: Any = None) -> Any:
-        """Read a state value."""
-        with self.lock:
-            return self._get_value(key, context)
-
-    def _get_value(self, key: StateKey, context: Any = None) -> Any:
-        """Get the actual state value. Must be called with lock held."""
-        ds = self.state.display_settings
-
-        if key == StateKey.LIGHTNESS_EXPR:
-            return ds.lightness_expr
-        elif key == StateKey.BRIGHTNESS:
-            return ds.brightness
-        elif key == StateKey.CONTRAST:
-            return ds.contrast
-        elif key == StateKey.GAMMA:
-            return ds.gamma
-        elif key == StateKey.SATURATION:
-            return ds.saturation
-        elif key == StateKey.CLIP_LOW:
-            return ds.clip_low_percent
-        elif key == StateKey.CLIP_HIGH:
-            return ds.clip_high_percent
-        elif key == StateKey.PALETTE:
-            return ds.palette
-        elif key == StateKey.COLOR_ENABLED:
-            return ds.color_enabled
-        elif key == StateKey.VIEW_MODE:
-            return self.state.view_mode
-        elif key == StateKey.SELECTION:
-            return self.state.selected_indices.copy()
-        # Add more as needed
-
-        return None
-
-    def subscribe(self, key: StateKey, callback: Callable[[Any], None]) -> None:
-        """Subscribe to changes for a state key."""
-        if key not in self._subscribers:
-            self._subscribers[key] = []
-        self._subscribers[key].append(callback)
-
-    def unsubscribe(self, key: StateKey, callback: Callable[[Any], None]) -> None:
-        """Unsubscribe from changes."""
-        if key in self._subscribers:
-            self._subscribers[key] = [cb for cb in self._subscribers[key] if cb != callback]
-
-    def _notify(self, key: StateKey, value: Any) -> None:
-        """Notify subscribers of a change."""
-        for callback in self._subscribers.get(key, []):
-            try:
-                callback(value)
-            except Exception as e:
-                import logging
-                logging.getLogger(__name__).exception(
-                    "Subscriber callback failed for %s: %s", key, e
-                )
-
-    def flush_pending(self) -> None:
-        """Apply all pending debounced updates immediately."""
-        pending_copy = list(self._pending.items())
-        self._pending.clear()
-
-        for key, (value, _, _) in pending_copy:
-            context = self._pending_context.pop(key, None)
-            self._apply_update(key, value, context)
-
-    def poll_debounce(self) -> None:
-        """Check and apply any debounced updates that are ready.
-
-        Call this once per frame from the main loop.
-        """
-        now = time.time()
-        ready_keys = []
-
-        for key, (value, timestamp, delay) in self._pending.items():
-            if now - timestamp >= delay:
-                ready_keys.append(key)
-
-        for key in ready_keys:
-            value, _, _ = self._pending.pop(key)
-            context = self._pending_context.pop(key, None)
-            self._apply_update(key, value, context)
-
-    def has_pending(self) -> bool:
-        """Check if there are any pending updates."""
-        return len(self._pending) > 0
+# In main loop (after poll_debounce):
+if state_manager.needs_refresh():
+    invalidate = state_manager.consume_refresh()
+    display_pipeline.refresh_display(invalidate_cache=invalidate)
 ```
 
-### Day 3-4: Integrate with App
+**Caveats to handle:**
+- Carry a second `_needs_invalidate` flag for settings that must invalidate `base_rgb` (e.g., palette changes). Call `refresh_display(invalidate_cache=True)` when set.
+- Flush must happen **after** `poll_debounce()` in the main loop so the snapshot sees final state for the frame.
+- This does not address the subscriber threading issue (decision 3).
+
+### 3. Threading model: main-thread only for StateManager
+
+**Decision:** `update()`, `poll_debounce()`, `flush_pending()`, and all subscriber notifications run on the main thread only. This is a contract, not enforced at runtime.
+
+**Rationale:**
+- The existing codebase is already single-threaded for all UI and state mutation work. DearPyGui callbacks, slider handlers, and debounce poll methods all run on the main thread.
+- Background threads (render orchestrator, display pipeline) do computation but post results back via `poll()` methods that check futures on the main thread. They write into `RenderCache` under the lock and set flags — they never modify display settings.
+- UISync subscribers call `dpg.set_value()`, which is not thread-safe. Main-thread-only notifications make this safe without deferred queuing.
+- No existing code path requires calling `state_manager.update()` from a background thread. If one arises, the right fix is to post a callback to the main thread, not to make StateManager thread-safe for writes.
+
+**Rule:** Background threads must never call `state_manager.update()`. If a background thread needs to trigger a state change, it sets a flag/result that the main-thread `poll()` picks up and routes through StateManager.
+
+### 4. Validation lives in callbacks, not StateManager
+
+**Decision:** StateManager assumes all values passed to `update()` are already validated. Validation and error display are the responsibility of the UI callback that calls `update()`.
+
+**Rationale:**
+- StateManager is a generic setter/subscriber system. Embedding expression parsing or domain-specific validation would break that abstraction and make it harder to test.
+- The UI panel already owns error display (showing "invalid expression" messages, highlighting fields). Validation naturally belongs alongside that.
+- With debouncing, this gives better UX: validation runs immediately on keystroke (instant error feedback), but only valid values enter the debounce queue. Invalid expressions never overwrite the last valid state.
+
+**Invariant:** Any code path that calls `state_manager.update()` must validate first. StateManager will apply whatever it receives.
+
+**Implementation:**
+- Validation functions (e.g., `validate_lightness_expr()`) live in a shared module (not in the panel) so non-UI callers can reuse them.
+- The panel calls the validator and owns error display.
 
 ```python
-# In elliptica/ui/dpg/app.py
-
-class EllipticaApp:
-    def __init__(self):
-        # ... existing init ...
-        self.state_manager = StateManager(self.state, self.state_lock)
-
-    def render(self):
-        # ... in main loop ...
-        while dpg.is_dearpygui_running():
-            # Poll debounced updates (replaces all the individual check_*_debounce calls)
-            self.state_manager.poll_debounce()
-
-            # ... rest of loop ...
-```
-
-### Day 5: Add Refresh Trigger
-
-```python
-# StateManager needs to trigger display refresh on relevant changes
-
-class StateManager:
-    def __init__(self, state, lock, display_pipeline=None):
-        # ...
-        self.display_pipeline = display_pipeline
-        self._refresh_keys = {
-            StateKey.LIGHTNESS_EXPR,
-            StateKey.BRIGHTNESS,
-            StateKey.CONTRAST,
-            StateKey.GAMMA,
-            StateKey.SATURATION,
-            StateKey.CLIP_LOW,
-            StateKey.CLIP_HIGH,
-            StateKey.PALETTE,
-            StateKey.COLOR_ENABLED,
-            StateKey.REGION_STYLE,
-        }
-
-    def _apply_update(self, key, value, context=None):
-        with self.lock:
-            self._set_value(key, value, context)
-
-        self._notify(key, value)
-
-        # Auto-refresh display for visual settings
-        if key in self._refresh_keys and self.display_pipeline:
-            self.display_pipeline.refresh_display()
-```
-
----
-
-## Week 2: Migrate UI Panels
-
-### Goal: Remove all local caches and pending flags from PostprocessingPanel
-
-### Day 1-2: Migrate Lightness Expression
-
-**Before:**
-```python
-# Old pattern in postprocessing_panel.py
-def on_lightness_expr_change(self, sender=None, app_data=None):
-    # Complex logic with pending flags, caches, targets...
-    self.lightness_expr_pending_update = True
-    self.lightness_expr_pending_target = "global"
-    self.lightness_expr_last_update_time = time.time()
-```
-
-**After:**
-```python
-# New pattern
+# In callback:
 def on_lightness_expr_change(self, sender=None, app_data=None):
     expr = dpg.get_value("lightness_expr_input").strip()
     if not expr:
         return
 
-    # Determine target
-    if self._is_boundary_selected() and self._get_lightness_mode() == "Custom":
-        boundary_id = self._get_selected_boundary_id()
-        region_type = self.app.state.selected_region_type
-        self.app.state_manager.update(
-            StateKey.REGION_STYLE,
-            {"lightness_expr": expr},
-            debounce=0.3,
-            context=(boundary_id, region_type),
-        )
-    else:
-        self.app.state_manager.update(
-            StateKey.LIGHTNESS_EXPR,
-            expr,
-            debounce=0.3,
-        )
+    error = validate_lightness_expr(expr)  # shared module
+    if error:
+        self._show_expr_error(error)       # UI concern
+        return
+
+    self._clear_expr_error()
+    self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr, debounce=0.3)
 ```
 
-### Day 3-4: Migrate Other Sliders
+### 5. Scope: PostprocessingPanel display settings only
 
+**Decision:** This refactor targets PostprocessingPanel's display settings (the 6 debounce patterns and UI caches). CanvasController, BoundaryControlsPanel, and RenderOrchestrator are out of scope.
+
+**Rationale:**
+- **CanvasController** drag throttling is input rate limiting (~60fps accumulated deltas), not debounced state updates. It doesn't have the scattered-cache problem. The pattern is appropriate for what it does.
+- **BoundaryControlsPanel** modifies boundary parameters that set `field_dirty` — that's `actions.py` territory per decision 1.
+- **RenderOrchestrator** has a clean async pattern with futures and polling. No debounce sprawl to fix.
+- The actual pain point is PostprocessingPanel's 6 parallel debounce systems and duplicated UI caches. Expanding scope to other controllers adds risk without solving real bugs.
+
+**Migration checklist adjustment:** BoundaryControlsPanel and CanvasController checklist items are reduced to "audit for consistency" — verify they don't bypass `actions.py` or hold stale caches. No migration to StateManager required.
+
+### 6. Migration order: simplest-first, one feature at a time
+
+**Decision:** Migrate immediate (non-debounced) sliders first to prove the architecture, then migrate debounced features one at a time. During migration, the old `check_*_debounce()` calls coexist alongside `state_manager.poll_debounce()` and are removed individually as each feature migrates.
+
+**Order:**
+1. Brightness, contrast, gamma, saturation (no debounce — trivial migration, proves the full flow)
+2. Clip range (debounced, straightforward)
+3. Smear sigma (debounced, straightforward)
+4. Expression updates (debounced, moderate complexity)
+5. Lightness expression (debounced, most complex — global vs per-region targeting)
+6. Histogram throttle, palette editor throttle (throttles, not debounces — may need slight adaptation)
+
+**Rationale:**
+- Starting with immediate sliders is low-risk and validates the entire path: StateManager update → per-frame refresh flag → `refresh_display()`.
+- Each subsequent migration deletes one `check_*` call from the main loop and one set of pending vars from PostprocessingPanel. Progress is visible and incremental.
+- Lightness expression is last because it's the most complex (global vs custom mode, validation, per-region context). By the time we get there, the pattern is proven.
+
+---
+
+## Implementation Milestones
+
+### Milestone 1: StateManager core + tests
+
+Create `elliptica/app/state_manager.py` with `StateKey`, `StateManager`, per-frame refresh flag logic (decision 2). Write unit tests. No UI changes.
+
+**Checklist:**
+- [ ] Create `StateKey` enum with all display setting keys
+- [ ] Create `StateManager` class with `update()`, `poll_debounce()`, `flush_pending()`
+- [ ] Implement `_set_value()` / `_get_value()` for all `StateKey` members
+- [ ] Implement `_set_region_style()` for per-boundary region updates
+- [ ] Implement `subscribe()` / `unsubscribe()` / `_notify()`
+- [ ] Implement `_needs_refresh` / `_needs_invalidate` flags with `needs_refresh()` / `consume_refresh()`
+- [ ] Define `_refresh_keys` and `_invalidate_keys` sets
+- [ ] Write tests: immediate update applies to state
+- [ ] Write tests: debounced update not applied until `poll_debounce()`
+- [ ] Write tests: `flush_pending()` applies all pending immediately
+- [ ] Write tests: subscriber notified on change
+- [ ] Write tests: `_needs_refresh` flag set for refresh keys
+- [ ] Write tests: `_needs_invalidate` flag set for invalidate keys
+
+**Done when:** All tests pass. StateManager works in isolation with no UI dependencies.
+
+**Reference — StateManager API:**
 ```python
-# Brightness (same pattern for contrast, gamma, saturation)
+manager = StateManager(app_state, lock)
+
+# Immediate update
+manager.update(StateKey.BRIGHTNESS, 1.2)
+
+# Debounced update
+manager.update(StateKey.LIGHTNESS_EXPR, "clipnorm(mag, 1, 99)", debounce=0.3)
+
+# Region-specific update
+manager.update(StateKey.REGION_STYLE, {"lightness_expr": expr},
+               debounce=0.3, context=(boundary_id, region_type))
+
+# Subscribe to changes
+manager.subscribe(StateKey.BRIGHTNESS, my_callback)
+
+# Per-frame polling (main loop)
+manager.poll_debounce()
+if manager.needs_refresh():
+    invalidate = manager.consume_refresh()
+    display_pipeline.refresh_display(invalidate_cache=invalidate)
+```
+
+---
+
+### Milestone 2: Wire into main loop
+
+Add StateManager to `EllipticaApp`. Add `poll_debounce()` and refresh flag flush to the main loop **alongside** existing `check_*` calls. Nothing changes yet — this is pure plumbing.
+
+**Checklist:**
+- [ ] Create `StateManager` in `EllipticaApp.__init__()`, passing `self.state` and `self.state_lock`
+- [ ] Add `state_manager.poll_debounce()` to main loop (before existing `check_*` calls)
+- [ ] Add refresh flag flush after `poll_debounce()` (before `dpg.render_dearpygui_frame()`)
+- [ ] Verify app runs identically — no behavior changes
+
+**Done when:** App starts, runs, and behaves exactly as before. StateManager exists but nothing uses it yet.
+
+**Reference — main loop during migration:**
+```python
+while dpg.is_dearpygui_running():
+    # New: StateManager polling
+    self.state_manager.poll_debounce()
+    if self.state_manager.needs_refresh():
+        invalidate = self.state_manager.consume_refresh()
+        self.display_pipeline.refresh_display(invalidate_cache=invalidate)
+
+    # Old: remove these one at a time as each feature migrates
+    self.postprocess_panel.check_clip_debounce()
+    self.postprocess_panel.check_smear_debounce()
+    self.postprocess_panel.check_expression_debounce()
+    self.postprocess_panel.check_lightness_expr_debounce()
+    self.postprocess_panel.check_histogram_debounce()
+    self.postprocess_panel.check_palette_editor_debounce()
+
+    # ... rest of loop ...
+```
+
+---
+
+### Milestone 3: Migrate immediate sliders
+
+Migrate brightness, contrast, gamma, saturation. These currently set state directly and call `refresh_display()` inline — no debounce. Simplest possible migration, proves the full StateManager flow.
+
+**Checklist:**
+- [ ] Rewrite `on_brightness_slider` to call `state_manager.update(StateKey.BRIGHTNESS, ...)`
+- [ ] Rewrite `on_contrast_slider` to call `state_manager.update(StateKey.CONTRAST, ...)`
+- [ ] Rewrite `on_gamma_slider` to call `state_manager.update(StateKey.GAMMA, ...)`
+- [ ] Rewrite `on_saturation_slider` to call `state_manager.update(StateKey.SATURATION, ...)`
+- [ ] Remove direct `self.app.state.display_settings.brightness = ...` from callbacks
+- [ ] Remove direct `self.app.display_pipeline.refresh_display()` from these callbacks
+- [ ] Verify sliders still work: drag slider → display updates
+
+**Done when:** Four sliders route through StateManager. Refresh happens via per-frame flag, not inline `refresh_display()`.
+
+**Reference — before/after:**
+```python
+# Before:
+def on_brightness_slider(self, sender=None, app_data=None):
+    with self.app.state_lock:
+        self.app.state.display_settings.brightness = float(app_data)
+    self.app.display_pipeline.refresh_display()
+
+# After:
 def on_brightness_slider(self, sender=None, app_data=None):
     self.app.state_manager.update(StateKey.BRIGHTNESS, float(app_data))
-
-# Clip range (with debounce since percentile computation is expensive)
-def on_clip_low_slider(self, sender=None, app_data=None):
-    self.app.state_manager.update(StateKey.CLIP_LOW, float(app_data), debounce=0.3)
-```
-
-### Day 5: Remove Dead Code
-
-Delete from PostprocessingPanel:
-- `_cached_global_lightness_expr`
-- `_cached_custom_lightness_exprs`
-- `lightness_expr_pending_update`
-- `lightness_expr_pending_target`
-- `lightness_expr_last_update_time`
-- `check_lightness_expr_debounce()`
-- `_apply_lightness_expr_update()`
-- `_apply_region_lightness_expr_update()`
-- Similar for clip, smear, etc.
-
----
-
-## Week 3: UI Synchronization
-
-### Goal: UI always reflects state, never caches independently
-
-### Day 1-2: Create UI Sync System
-
-```python
-# elliptica/ui/dpg/ui_sync.py
-
-class UISync:
-    """Keeps UI widgets synchronized with state.
-
-    Instead of UI caching state, state notifies UI of changes.
-    """
-
-    def __init__(self, state_manager: StateManager):
-        self.state_manager = state_manager
-        self._bindings: dict[StateKey, list[tuple[str, Callable]]] = {}
-
-    def bind(
-        self,
-        key: StateKey,
-        widget_tag: str,
-        transform: Callable[[Any], Any] = lambda x: x,
-    ) -> None:
-        """Bind a widget to a state key.
-
-        When state changes, widget is automatically updated.
-
-        Args:
-            key: State key to watch
-            widget_tag: DearPyGui widget tag
-            transform: Optional transform from state value to widget value
-        """
-        if key not in self._bindings:
-            self._bindings[key] = []
-            # Subscribe to state changes
-            self.state_manager.subscribe(key, lambda v: self._on_state_change(key, v))
-
-        self._bindings[key].append((widget_tag, transform))
-
-    def _on_state_change(self, key: StateKey, value: Any) -> None:
-        """Handle state change by updating bound widgets."""
-        for widget_tag, transform in self._bindings.get(key, []):
-            if dpg.does_item_exist(widget_tag):
-                try:
-                    dpg.set_value(widget_tag, transform(value))
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "Failed to update widget %s: %s", widget_tag, e
-                    )
-
-    def sync_all(self) -> None:
-        """Force sync all widgets to current state values."""
-        for key in self._bindings:
-            value = self.state_manager.get(key)
-            self._on_state_change(key, value)
-```
-
-### Day 3-4: Apply Bindings
-
-```python
-# In postprocessing_panel.py build method:
-
-def build_postprocessing_ui(self, parent, colormaps):
-    # ... create widgets ...
-
-    # Bind widgets to state
-    self.ui_sync = UISync(self.app.state_manager)
-
-    self.ui_sync.bind(StateKey.BRIGHTNESS, "brightness_slider")
-    self.ui_sync.bind(StateKey.CONTRAST, "contrast_slider")
-    self.ui_sync.bind(StateKey.GAMMA, "gamma_slider")
-    self.ui_sync.bind(StateKey.SATURATION, "saturation_slider")
-    self.ui_sync.bind(StateKey.CLIP_LOW, "clip_low_slider")
-    self.ui_sync.bind(StateKey.CLIP_HIGH, "clip_high_slider")
-
-    # Lightness expression checkbox (transform: expr -> bool)
-    self.ui_sync.bind(
-        StateKey.LIGHTNESS_EXPR,
-        "lightness_expr_checkbox",
-        transform=lambda expr: expr is not None,
-    )
-
-    # Lightness expression input
-    self.ui_sync.bind(
-        StateKey.LIGHTNESS_EXPR,
-        "lightness_expr_input",
-        transform=lambda expr: expr or "clipnorm(mag, 1, 99)",
-    )
-```
-
-### Day 5: Simplify update_context_ui
-
-With bindings in place, `update_context_ui()` becomes much simpler:
-
-```python
-def update_context_ui(self) -> None:
-    """Update UI based on current context (global vs boundary mode)."""
-    is_boundary = self._is_boundary_selected()
-
-    # Just toggle visibility - values are auto-synced
-    dpg.configure_item("global_palette_group", show=not is_boundary)
-    dpg.configure_item("region_palette_group", show=is_boundary)
-    dpg.configure_item("lightness_expr_checkbox", show=not is_boundary)
-    dpg.configure_item("lightness_expr_mode_toggle", show=is_boundary)
-
-    # ... minimal visibility logic only ...
 ```
 
 ---
 
-## Week 4: Testing and Cleanup
+### Milestone 4: Migrate debounced features
 
-### Day 1-2: Add Integration Tests
+Migrate each debounced feature one at a time. Each migration: rewrite callback → delete old pending vars/methods → remove `check_*` call from main loop → test.
 
-```python
-# tests/test_state_manager.py
+#### 4a: Clip range
+- [ ] Rewrite `on_clip_low_slider` / `on_clip_high_slider` to call `state_manager.update(..., debounce=0.3)`
+- [ ] Delete `clip_pending_range`, `clip_last_update_time`, `clip_debounce_delay`
+- [ ] Delete `check_clip_debounce()`, `_apply_clip_update()`
+- [ ] Remove `check_clip_debounce()` call from main loop
+- [ ] Verify: drag clip slider → display updates after debounce
 
-def test_debounced_update_applied():
-    """Debounced updates should be applied after delay."""
-    state = AppState()
-    lock = threading.RLock()
-    manager = StateManager(state, lock)
+#### 4b: Smear sigma
+- [ ] Rewrite smear callback to call `state_manager.update(..., debounce=0.3)`
+- [ ] Delete `smear_pending_value`, `smear_last_update_time`, `smear_debounce_delay`
+- [ ] Delete `check_smear_debounce()`, `_apply_smear_update()`
+- [ ] Remove `check_smear_debounce()` call from main loop
+- [ ] Verify: smear slider works
 
-    manager.update(StateKey.LIGHTNESS_EXPR, "test_expr", debounce=0.1)
+#### 4c: Expression updates
+- [ ] Rewrite expression callback with validation before `state_manager.update()`
+- [ ] Delete `expr_pending_update`, `expr_last_update_time`, `expr_debounce_delay`
+- [ ] Delete `check_expression_debounce()`, `_apply_expression_update()`
+- [ ] Remove `check_expression_debounce()` call from main loop
+- [ ] Verify: expression input works, invalid expressions show errors immediately
 
-    # Not applied yet
-    assert state.display_settings.lightness_expr is None
+#### 4d: Lightness expression
+- [ ] Rewrite `on_lightness_expr_change` with validation + global vs per-region routing
+- [ ] Delete `lightness_expr_pending_update`, `lightness_expr_pending_target`, `lightness_expr_last_update_time`
+- [ ] Delete `_cached_global_lightness_expr`, `_cached_custom_lightness_exprs`
+- [ ] Delete `check_lightness_expr_debounce()`, `_apply_lightness_expr_update()`, `_apply_region_lightness_expr_update()`
+- [ ] Remove `check_lightness_expr_debounce()` call from main loop
+- [ ] Verify: global lightness expression works
+- [ ] Verify: per-region custom lightness expression works
+- [ ] Verify: switching between global and custom mode preserves values
 
-    # Wait for debounce
-    time.sleep(0.15)
-    manager.poll_debounce()
+#### 4e: Histogram throttle
+- [ ] Adapt histogram throttle to StateManager (may need a throttle variant or remain as-is if it doesn't touch display settings)
+- [ ] Delete `hist_pending_update`, `hist_last_update_time`, `hist_debounce_delay`
+- [ ] Delete `check_histogram_debounce()`
+- [ ] Remove `check_histogram_debounce()` call from main loop
 
-    # Now applied
-    assert state.display_settings.lightness_expr == "test_expr"
+#### 4f: Palette editor throttle
+- [ ] Adapt palette editor refresh throttle to StateManager
+- [ ] Delete `palette_editor_refresh_pending`, `palette_editor_last_refresh_time`, `palette_editor_refresh_throttle`
+- [ ] Delete `check_palette_editor_debounce()`
+- [ ] Remove `check_palette_editor_debounce()` call from main loop
 
-
-def test_flush_applies_pending():
-    """flush_pending should apply all pending updates immediately."""
-    state = AppState()
-    lock = threading.RLock()
-    manager = StateManager(state, lock)
-
-    manager.update(StateKey.BRIGHTNESS, 1.5, debounce=10.0)  # Long debounce
-    manager.update(StateKey.CONTRAST, 2.0, debounce=10.0)
-
-    assert state.display_settings.brightness == 1.0  # Default
-    assert state.display_settings.contrast == 1.0  # Default
-
-    manager.flush_pending()
-
-    assert state.display_settings.brightness == 1.5
-    assert state.display_settings.contrast == 2.0
-
-
-def test_subscriber_notified():
-    """Subscribers should be called on state change."""
-    state = AppState()
-    lock = threading.RLock()
-    manager = StateManager(state, lock)
-
-    received = []
-    manager.subscribe(StateKey.BRIGHTNESS, lambda v: received.append(v))
-
-    manager.update(StateKey.BRIGHTNESS, 1.5)
-
-    assert received == [1.5]
-```
-
-### Day 3-4: Remove Old Code
-
-1. Delete all `check_*_debounce()` methods
-2. Delete all `_apply_*_update()` methods
-3. Delete all `*_pending_*` instance variables
-4. Delete all `_cached_*` instance variables
-5. Simplify callbacks to just call `state_manager.update()`
-
-### Day 5: Documentation and Review
-
-1. Document StateManager API
-2. Document migration guide for any remaining old patterns
-3. Code review for any remaining direct state access
-4. Update any tests that relied on old patterns
+**Done when:** All 6 `check_*` calls removed from main loop. Only `state_manager.poll_debounce()` remains. No `*_pending_*` or `_cached_*` variables in PostprocessingPanel.
 
 ---
 
-## Migration Checklist
+### Milestone 5: UISync bindings (optional — can defer)
 
-### PostprocessingPanel
-- [ ] Remove `_cached_global_lightness_expr`
-- [ ] Remove `_cached_custom_lightness_exprs`
-- [ ] Remove `lightness_expr_pending_*` variables
-- [ ] Remove `clip_pending_*` variables
-- [ ] Remove `smear_pending_*` variables
-- [ ] Remove `expr_pending_*` variables
-- [ ] Remove `check_lightness_expr_debounce()`
-- [ ] Remove `check_clip_debounce()`
-- [ ] Remove `check_smear_debounce()`
-- [ ] Simplify `update_context_ui()` to visibility-only
-- [ ] Simplify `update_region_properties_panel()` to visibility-only
+Create UISync system so widgets auto-update from state subscriptions. This eliminates manual `dpg.set_value()` calls scattered through `update_context_ui()` and similar methods.
 
-### BoundaryControlsPanel
-- [ ] Audit for direct state access
-- [ ] Migrate to state_manager.update()
+**Checklist:**
+- [ ] Create `UISync` class in `elliptica/ui/dpg/ui_sync.py`
+- [ ] Implement `bind(key, widget_tag, transform)` and `sync_all()`
+- [ ] Bind brightness/contrast/gamma/saturation sliders
+- [ ] Bind clip low/high sliders
+- [ ] Bind lightness expression checkbox and input
+- [ ] Simplify `update_context_ui()` to visibility-only logic
+- [ ] Simplify `update_region_properties_panel()` to visibility-only logic
 
-### CanvasController
-- [ ] Audit for direct state access
-- [ ] Migrate selection changes to state_manager
+**Done when:** Widget values are driven by state subscriptions. `update_context_ui()` only toggles visibility.
 
-### DisplayPipelineController
-- [ ] Call `state_manager.flush_pending()` before snapshot
-- [ ] Remove reliance on external flush calls
+---
 
-### Main Loop (app.py)
-- [ ] Replace all `check_*_debounce()` calls with single `state_manager.poll_debounce()`
+### Milestone 6: Cleanup + audit
+
+Remove any remaining dead code. Audit out-of-scope controllers for consistency.
+
+**Checklist:**
+- [ ] Grep for any remaining `_cached_*` variables in PostprocessingPanel
+- [ ] Grep for any remaining `*_pending_*` variables in PostprocessingPanel
+- [ ] Grep for any remaining `check_*_debounce` methods
+- [ ] Audit BoundaryControlsPanel: verify all mutations go through `actions.py`, no stale caches
+- [ ] Audit CanvasController: verify drag throttling is self-consistent, no stale caches
+- [ ] Verify `DisplayPipelineController` calls `state_manager.flush_pending()` before snapshot
+- [ ] Update any existing tests that relied on old patterns
+
+**Done when:** No old debounce/cache patterns remain. Audits pass.
 
 ---
 
@@ -686,25 +413,25 @@ def test_subscriber_notified():
 
 After refactor:
 
-1. **No UI caches** - All state lives in AppState only
-2. **No manual debounce patterns** - StateManager handles all debouncing
-3. **Single update path** - All state changes go through StateManager
-4. **Auto-sync UI** - UI bindings keep widgets in sync automatically
-5. **Testable** - StateManager can be unit tested in isolation
-6. **Debuggable** - Single place to log/breakpoint all state changes
+1. **No UI caches** — All state lives in AppState only
+2. **No manual debounce patterns** — StateManager handles all debouncing
+3. **Single update path** — All display setting changes go through StateManager
+4. **Per-frame refresh coalescing** — At most one `refresh_display()` per frame
+5. **Testable** — StateManager can be unit tested in isolation
+6. **Debuggable** — Single place to log/breakpoint all display setting changes
 
 ---
 
 ## Risks and Mitigations
 
 ### Risk: Breaking existing functionality
-**Mitigation:** Migrate one feature at a time, test thoroughly before moving to next
+**Mitigation:** Migrate one feature at a time (milestones 3-4). Each step is independently testable. Old and new systems coexist during migration.
 
 ### Risk: Performance regression from notifications
-**Mitigation:** Profile before/after, batch notifications if needed
+**Mitigation:** Per-frame refresh coalescing (decision 2) prevents redundant postprocess jobs. Profile before/after if needed.
 
 ### Risk: Deadlocks from notification callbacks
-**Mitigation:** Always notify outside the lock, document threading model
+**Mitigation:** Always notify outside the lock. Main-thread-only contract (decision 3) eliminates cross-thread lock contention.
 
-### Risk: Month timeline too aggressive
-**Mitigation:** Week 4 is buffer; core functionality in weeks 1-3
+### Risk: Histogram/palette throttles don't fit debounce model
+**Mitigation:** Evaluate during milestone 4e/4f. These may remain as simple frame-based throttles if they don't touch display settings through StateManager.
