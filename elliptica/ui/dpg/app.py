@@ -637,7 +637,7 @@ class EllipticaApp:
                 self.render_orchestrator.poll()
                 self.display_pipeline.poll()  # Handle async postprocessing completion
                 self.state_manager.poll_debounce()
-                self.postprocess_panel.check_clip_debounce()  # Handle debounced clip% updates
+
                 self.postprocess_panel.check_histogram_debounce()  # Handle throttled histogram updates
                 self.postprocess_panel.check_smear_debounce()  # Handle debounced smear updates
                 self.postprocess_panel.check_expression_debounce()  # Handle debounced expression updates

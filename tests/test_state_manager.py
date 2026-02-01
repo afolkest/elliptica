@@ -113,38 +113,47 @@ class TestImmediateUpdate:
 # ---------------------------------------------------------------------------
 
 class TestDebouncedUpdate:
-    """Debounce queue behaviour with injectable clock."""
+    """Debounce behaviour: state applied immediately, refresh flags deferred."""
 
-    def test_not_applied_immediately(self, state, timed_manager):
+    def test_state_applied_immediately_flags_deferred(self, state, timed_manager):
         timed_manager.update(StateKey.BRIGHTNESS, 9.9, debounce=0.3)
-        assert state.display_settings.brightness != 9.9
+        assert state.display_settings.brightness == 9.9
+        assert timed_manager.needs_refresh() is False
 
-    def test_applied_after_poll_when_delay_elapsed(self, state, timed_manager, fake_clock):
+    def test_flags_set_after_poll_when_delay_elapsed(self, state, timed_manager, fake_clock):
         timed_manager.update(StateKey.BRIGHTNESS, 9.9, debounce=0.3)
+        assert state.display_settings.brightness == 9.9
+        assert timed_manager.needs_refresh() is False
         fake_clock.advance(0.3)
         timed_manager.poll_debounce()
-        assert state.display_settings.brightness == 9.9
+        assert timed_manager.needs_refresh() is True
 
-    def test_not_applied_before_delay(self, state, timed_manager, fake_clock):
+    def test_flags_not_set_before_delay(self, state, timed_manager, fake_clock):
         timed_manager.update(StateKey.BRIGHTNESS, 9.9, debounce=0.3)
+        assert state.display_settings.brightness == 9.9
         fake_clock.advance(0.2)
         timed_manager.poll_debounce()
-        assert state.display_settings.brightness != 9.9
+        assert timed_manager.needs_refresh() is False
 
     def test_last_value_wins(self, state, timed_manager, fake_clock):
         timed_manager.update(StateKey.BRIGHTNESS, 1.0, debounce=0.3)
+        assert state.display_settings.brightness == 1.0
         fake_clock.advance(0.1)
         timed_manager.update(StateKey.BRIGHTNESS, 2.0, debounce=0.3)
+        assert state.display_settings.brightness == 2.0
         fake_clock.advance(0.3)
         timed_manager.poll_debounce()
         assert state.display_settings.brightness == 2.0
+        assert timed_manager.needs_refresh() is True
 
-    def test_flush_applies_all(self, state, timed_manager):
+    def test_flush_sets_flags(self, state, timed_manager):
         timed_manager.update(StateKey.BRIGHTNESS, 5.0, debounce=1.0)
         timed_manager.update(StateKey.CONTRAST, 3.0, debounce=1.0)
-        timed_manager.flush_pending()
         assert state.display_settings.brightness == 5.0
         assert state.display_settings.contrast == 3.0
+        assert timed_manager.needs_refresh() is False
+        timed_manager.flush_pending()
+        assert timed_manager.needs_refresh() is True
 
     def test_flush_clears_queue(self, state, timed_manager, fake_clock):
         timed_manager.update(StateKey.BRIGHTNESS, 5.0, debounce=1.0)
@@ -157,16 +166,18 @@ class TestDebouncedUpdate:
 
     def test_timestamp_reset_on_reupdate(self, state, timed_manager, fake_clock):
         timed_manager.update(StateKey.BRIGHTNESS, 1.0, debounce=0.5)
+        assert state.display_settings.brightness == 1.0
         fake_clock.advance(0.4)
         # Re-update resets the timestamp.
         timed_manager.update(StateKey.BRIGHTNESS, 2.0, debounce=0.5)
+        assert state.display_settings.brightness == 2.0
         fake_clock.advance(0.4)
         timed_manager.poll_debounce()
-        # Only 0.4s since reset — should NOT have applied yet.
-        assert state.display_settings.brightness != 2.0
+        # Only 0.4s since reset — flags should NOT be set yet.
+        assert timed_manager.needs_refresh() is False
         fake_clock.advance(0.1)
         timed_manager.poll_debounce()
-        assert state.display_settings.brightness == 2.0
+        assert timed_manager.needs_refresh() is True
 
 
 # ---------------------------------------------------------------------------
@@ -240,10 +251,13 @@ class TestRegionStyle:
             debounce=0.3,
             context=(1, "surface"),
         )
-        assert 1 not in state.boundary_color_settings
+        # State is applied immediately.
+        assert state.boundary_color_settings[1].surface.brightness == 0.5
+        # But refresh flags are deferred.
+        assert timed_manager.needs_refresh() is False
         fake_clock.advance(0.3)
         timed_manager.poll_debounce()
-        assert state.boundary_color_settings[1].surface.brightness == 0.5
+        assert timed_manager.needs_refresh() is True
 
 
 # ---------------------------------------------------------------------------
@@ -361,13 +375,11 @@ class TestSubscribers:
         # Second subscriber still called despite first raising.
         assert calls == [1.5]
 
-    def test_called_after_debounce_not_before(self, timed_manager, fake_clock):
+    def test_called_immediately_for_debounced(self, timed_manager, fake_clock):
         calls = []
         timed_manager.subscribe(StateKey.BRIGHTNESS, lambda k, v, c: calls.append(v))
         timed_manager.update(StateKey.BRIGHTNESS, 1.5, debounce=0.3)
-        assert calls == []
-        fake_clock.advance(0.3)
-        timed_manager.poll_debounce()
+        # Subscriber is called immediately (state is applied right away).
         assert calls == [1.5]
 
     def test_not_called_for_other_keys(self, manager):
@@ -401,12 +413,14 @@ class TestFlushPending:
         timed_manager.flush_pending()
         assert state.boundary_color_settings[1].surface.brightness == 0.2
 
-    def test_triggers_subscribers(self, timed_manager):
+    def test_triggers_subscribers_immediately(self, timed_manager):
         calls = []
         timed_manager.subscribe(StateKey.BRIGHTNESS, lambda k, v, c: calls.append(v))
         timed_manager.update(StateKey.BRIGHTNESS, 3.0, debounce=1.0)
-        assert calls == []
+        # Subscriber is called immediately (not deferred to flush).
+        assert calls == [3.0]
         timed_manager.flush_pending()
+        # No additional call from flush.
         assert calls == [3.0]
 
     def test_sets_refresh_flags(self, timed_manager):
@@ -474,40 +488,31 @@ class TestDebounceThenImmediate:
 # TestPollDebounceExceptionHandling
 # ---------------------------------------------------------------------------
 
-class TestPollDebounceExceptionHandling:
-    """poll_debounce processes all ready entries even if one raises."""
+class TestPollDebounceFlags:
+    """poll_debounce sets correct refresh/invalidation flags."""
 
-    def test_sibling_entries_still_applied(self, state, timed_manager, fake_clock):
-        # Queue a REGION_STYLE with missing context (will raise ValueError)
-        # and a normal BRIGHTNESS update. Both should be ready at the same time.
-        # We need to manually inject the bad entry since update() validates
-        # debounce path doesn't call _apply_update.
-        from elliptica.app.state_manager import _PendingEntry
-
-        timed_manager._pending[(StateKey.REGION_STYLE, None)] = _PendingEntry(
-            value={"brightness": 0.5}, timestamp=0.0, delay=0.3,
-        )
-        timed_manager.update(StateKey.BRIGHTNESS, 5.0, debounce=0.3)
+    def test_invalidation_flag_propagated(self, state, timed_manager, fake_clock):
+        timed_manager.update(StateKey.CLIP_LOW_PERCENT, 2.0, debounce=0.3)
+        assert timed_manager.needs_refresh() is False
         fake_clock.advance(0.3)
-
-        # poll_debounce should apply BRIGHTNESS even though REGION_STYLE raises.
-        # The exception is logged, not propagated.
         timed_manager.poll_debounce()
-        assert state.display_settings.brightness == 5.0
+        assert timed_manager.needs_refresh() is True
+        assert timed_manager.consume_refresh() is True  # CLIP_LOW -> invalidate
 
-    def test_bad_entry_consumed_from_queue(self, state, timed_manager, fake_clock):
-        from elliptica.app.state_manager import _PendingEntry
-
-        timed_manager._pending[(StateKey.REGION_STYLE, None)] = _PendingEntry(
-            value={"brightness": 0.5}, timestamp=0.0, delay=0.3,
-        )
+    def test_non_invalidation_flag(self, state, timed_manager, fake_clock):
+        timed_manager.update(StateKey.SATURATION, 0.5, debounce=0.3)
         fake_clock.advance(0.3)
-
-        # The exception is caught and logged inside poll_debounce.
         timed_manager.poll_debounce()
+        assert timed_manager.needs_refresh() is True
+        assert timed_manager.consume_refresh() is False  # SATURATION -> no invalidate
 
-        # The bad entry should have been consumed (not retried on next poll).
-        assert (StateKey.REGION_STYLE, None) not in timed_manager._pending
+    def test_multiple_entries_merged(self, state, timed_manager, fake_clock):
+        timed_manager.update(StateKey.SATURATION, 0.5, debounce=0.3)
+        timed_manager.update(StateKey.CLIP_LOW_PERCENT, 2.0, debounce=0.3)
+        fake_clock.advance(0.3)
+        timed_manager.poll_debounce()
+        # CLIP_LOW requires invalidation, so merged result is True.
+        assert timed_manager.consume_refresh() is True
 
 
 # ---------------------------------------------------------------------------

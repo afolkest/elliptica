@@ -305,7 +305,7 @@ Migrate brightness, contrast, gamma, saturation. These currently set state direc
 - [x] Rewrite `on_saturation_slider` to call `state_manager.update(StateKey.SATURATION, ...)`
 - [x] Remove direct `self.app.state.display_settings.brightness = ...` from callbacks
 - [x] Remove direct `self.app.display_pipeline.refresh_display()` from these callbacks
-- [ ] Verify sliders still work: drag slider → display updates
+- [x] Verify sliders still work: drag slider → display updates
 
 **Done when:** Four sliders route through StateManager. Refresh happens via per-frame flag, not inline `refresh_display()`.
 
@@ -329,10 +329,10 @@ def on_brightness_slider(self, sender=None, app_data=None):
 Migrate each debounced feature one at a time. Each migration: rewrite callback → delete old pending vars/methods → remove `check_*` call from main loop → test.
 
 #### 4a: Clip range
-- [ ] Rewrite `on_clip_low_slider` / `on_clip_high_slider` to call `state_manager.update(..., debounce=0.3)`
-- [ ] Delete `clip_pending_range`, `clip_last_update_time`, `clip_debounce_delay`
-- [ ] Delete `check_clip_debounce()`, `_apply_clip_update()`
-- [ ] Remove `check_clip_debounce()` call from main loop
+- [x] Rewrite `on_clip_low_slider` / `on_clip_high_slider` to call `state_manager.update(..., debounce=0.3)`
+- [x] Delete `clip_pending_range`, `clip_last_update_time`, `clip_debounce_delay`
+- [x] Delete `check_clip_debounce()`, `_apply_clip_update()`
+- [x] Remove `check_clip_debounce()` call from main loop
 - [ ] Verify: drag clip slider → display updates after debounce
 
 #### 4b: Smear sigma

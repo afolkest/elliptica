@@ -150,10 +150,6 @@ class PostprocessingPanel:
         self.smear_last_update_time: float = 0.0
         self.smear_debounce_delay: float = 0.3  # 300ms delay
 
-        # Debouncing for expensive clip updates (percentile computation at high res)
-        self.clip_pending_range: Optional[tuple[float, float]] = None
-        self.clip_last_update_time: float = 0.0
-        self.clip_debounce_delay: float = 0.3  # 300ms delay
 
         # Debouncing for expression updates
         self.expr_pending_update: bool = False
@@ -2447,7 +2443,6 @@ class PostprocessingPanel:
         self.lightness_expr_pending_update = False
         self.lightness_expr_pending_target = None
         self.smear_pending_value = None
-        self.clip_pending_range = None
         self.expr_pending_update = False  # Clear expression editor debounce too
         self.update_context_ui()
 
@@ -2471,40 +2466,24 @@ class PostprocessingPanel:
     # ------------------------------------------------------------------
 
     def on_clip_low_slider(self, sender=None, app_data=None) -> None:
-        """Handle low clip slider change with debouncing (percentile computation is expensive at high res)."""
+        """Handle low clip slider change (debounced — percentile computation is expensive)."""
         if dpg is None:
             return
 
-        value = float(app_data)
-
-        # IMMEDIATELY update state so other refreshes use the correct value
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_low_percent = value
-            clip_low = self.app.state.display_settings.clip_low_percent
-            clip_high = self.app.state.display_settings.clip_high_percent
-            self.app.state.invalidate_base_rgb()
-
-        # Mark pending to trigger refresh after debounce delay
-        self.clip_pending_range = (clip_low, clip_high)
-        self.clip_last_update_time = time.time()
+        self.app.state_manager.update(
+            StateKey.CLIP_LOW_PERCENT, float(app_data), debounce=0.3,
+        )
+        self._request_histogram_update()
 
     def on_clip_high_slider(self, sender=None, app_data=None) -> None:
-        """Handle high clip slider change with debouncing (percentile computation is expensive at high res)."""
+        """Handle high clip slider change (debounced — percentile computation is expensive)."""
         if dpg is None:
             return
 
-        value = float(app_data)
-
-        # IMMEDIATELY update state so other refreshes use the correct value
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_high_percent = value
-            clip_low = self.app.state.display_settings.clip_low_percent
-            clip_high = self.app.state.display_settings.clip_high_percent
-            self.app.state.invalidate_base_rgb()
-
-        # Mark pending to trigger refresh after debounce delay
-        self.clip_pending_range = (clip_low, clip_high)
-        self.clip_last_update_time = time.time()
+        self.app.state_manager.update(
+            StateKey.CLIP_HIGH_PERCENT, float(app_data), debounce=0.3,
+        )
+        self._request_histogram_update()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
         """Handle brightness slider change (real-time with GPU acceleration)."""
@@ -3087,26 +3066,11 @@ class PostprocessingPanel:
         # Record the time of THIS slider change (not the last render)
         self.smear_last_update_time = time.time()
 
-    def _apply_clip_update(self) -> None:
-        """Apply clip refresh (state already updated in slider callbacks)."""
-        self.app.display_pipeline.refresh_display()
-        self._request_histogram_update(force=True)
 
     def _apply_smear_update(self) -> None:
         """Apply smear refresh (state already updated in on_smear_sigma)."""
         self.app.display_pipeline.refresh_display()
 
-    def check_clip_debounce(self) -> None:
-        """Check if clip update should be applied (called every frame)."""
-        if self.clip_pending_range is None:
-            return
-
-        current_time = time.time()
-        # Only apply if enough time has passed since the last slider movement
-        if current_time - self.clip_last_update_time >= self.clip_debounce_delay:
-            self._apply_clip_update()
-            self.clip_last_update_time = current_time
-            self.clip_pending_range = None
 
     def check_smear_debounce(self) -> None:
         """Check if smear update should be applied (called every frame)."""

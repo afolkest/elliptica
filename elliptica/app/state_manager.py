@@ -51,20 +51,25 @@ class StateKey(enum.Enum):
 
 @dataclass
 class _PendingEntry:
-    """A queued debounced update waiting to be applied."""
+    """A deferred refresh signal for a debounced update.
 
-    value: Any
+    State is mutated and subscribers notified immediately when
+    ``update()`` is called with ``debounce > 0``.  Only the
+    refresh/invalidation flags are deferred until the delay elapses.
+    """
+
     timestamp: float
     delay: float
+    requires_invalidation: bool
 
 
 class StateManager:
     """Centralized mutation and notification hub for display settings.
 
-    All display-setting changes flow through ``update()``.  Immediate
-    updates are applied under the lock and subscribers notified right
-    away.  Debounced updates are queued and applied when
-    ``poll_debounce()`` finds their delay has elapsed.
+    All display-setting changes flow through ``update()``.  State is
+    always mutated immediately (so reads see the latest value).  For
+    debounced updates, only the refresh/invalidation signals are
+    deferred until ``poll_debounce()`` finds the delay has elapsed.
 
     The manager never calls ``refresh_display()`` directly.  Instead it
     sets ``_needs_refresh`` (and optionally ``_needs_invalidate``).  The
@@ -144,26 +149,39 @@ class StateManager:
         Args:
             key: Which setting to change.
             value: New value (assumed already validated).
-            debounce: Seconds to wait before applying.  ``<= 0`` means
-                immediate.
+            debounce: Seconds to defer the refresh signal.  ``<= 0``
+                means immediate.  State is always mutated right away
+                regardless of debounce.
             context: Required for ``REGION_STYLE`` — a
                 ``(boundary_id, region_type)`` tuple.
         """
         if debounce <= 0:
-            # Clear any pending debounced entry so it can't revert this
-            # immediate value when poll_debounce fires later.
+            # Clear any pending debounced entry so its deferred refresh
+            # doesn't fire redundantly after this immediate update.
             self._pending.pop((key, context), None)
             self._apply_update(key, value, context)
         else:
+            # Mutate state and notify immediately so reads are always
+            # current.  Only the refresh/invalidation flags are deferred.
+            requires_invalidation = self._apply_update(
+                key, value, context, set_flags=False,
+            )
             pending_key = (key, context)
+            existing = self._pending.get(pending_key)
             self._pending[pending_key] = _PendingEntry(
-                value=value,
                 timestamp=self._clock(),
                 delay=debounce,
+                requires_invalidation=requires_invalidation or (
+                    existing.requires_invalidation if existing else False
+                ),
             )
 
     def poll_debounce(self) -> None:
-        """Apply any pending debounced updates whose delay has elapsed."""
+        """Set refresh/invalidation flags for debounced entries whose delay has elapsed.
+
+        State was already mutated when ``update()`` was called; this
+        method only fires the deferred display-refresh signals.
+        """
         if not self._pending:
             return
         now = self._clock()
@@ -173,25 +191,27 @@ class StateManager:
             if now - self._pending[pk].timestamp >= self._pending[pk].delay
         ]
         for pending_key, entry in ready:
-            # Delete before apply — entry is consumed regardless of outcome.
-            # Collected into a separate list first so an exception in one
-            # entry doesn't prevent the others from being attempted.
             self._pending.pop(pending_key, None)
         for pending_key, entry in ready:
-            key, context = pending_key
-            try:
-                self._apply_update(key, entry.value, context)
-            except Exception:
-                logger.warning(
-                    "Debounced update %s raised", key, exc_info=True,
-                )
+            key, _context = pending_key
+            if key in self._REFRESH_KEYS:
+                self._needs_refresh = True
+                if entry.requires_invalidation:
+                    self._needs_invalidate = True
 
     def flush_pending(self) -> None:
-        """Apply all pending debounced updates immediately."""
+        """Fire all pending deferred refresh signals immediately.
+
+        State was already mutated when each ``update()`` was called;
+        this method only sets the refresh/invalidation flags.
+        """
         pending = dict(self._pending)
         self._pending.clear()
-        for (key, context), entry in pending.items():
-            self._apply_update(key, entry.value, context)
+        for (key, _context), entry in pending.items():
+            if key in self._REFRESH_KEYS:
+                self._needs_refresh = True
+                if entry.requires_invalidation:
+                    self._needs_invalidate = True
 
     def subscribe(self, key: StateKey, callback: Callable) -> None:
         """Register *callback* for notifications when *key* changes.
@@ -234,8 +254,13 @@ class StateManager:
         key: StateKey,
         value: Any,
         context: Optional[tuple],
-    ) -> None:
-        """Mutate state under lock, then notify subscribers and set flags."""
+        *,
+        set_flags: bool = True,
+    ) -> bool:
+        """Mutate state under lock, then notify subscribers and optionally set flags.
+
+        Returns whether the update requires cache invalidation.
+        """
         requires_invalidation = False
 
         with self._lock:
@@ -256,11 +281,14 @@ class StateManager:
         # Notify subscribers (outside lock to avoid deadlocks).
         self._notify(key, value, context)
 
-        # Set per-frame flags.
-        if key in self._REFRESH_KEYS:
+        # Set per-frame flags (skipped for debounced updates — deferred
+        # to poll_debounce / flush_pending).
+        if set_flags and key in self._REFRESH_KEYS:
             self._needs_refresh = True
             if requires_invalidation:
                 self._needs_invalidate = True
+
+        return requires_invalidation
 
     def _set_value(self, key: StateKey, value: Any) -> None:
         """Write *value* to the appropriate DisplaySettings attribute."""
