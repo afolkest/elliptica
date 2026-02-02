@@ -567,13 +567,6 @@ def delete_palette(name: str):
     set_palette_spec(name, {"deleted": True})
 
 
-def add_palette(name: str, colors: list[tuple[float, float, float]] | np.ndarray):
-    """Add or update a palette in user library."""
-    if not isinstance(colors, np.ndarray):
-        colors = np.array(colors, dtype=np.float32)
-    spec = _rgb_palette_spec_from_colors(colors)
-    set_palette_spec(name, spec)
-
 
 def generate_noise(
     shape: tuple[int, int],

@@ -591,14 +591,6 @@ class EllipticaApp:
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
-    def _fit_canvas_to_window(self, sender=None, app_data=None) -> None:
-        """Recalculate display scale to fit canvas in window (useful after moving to another screen)."""
-        if dpg is None:
-            return
-        self._resize_canvas_window()
-        self._update_canvas_transform()
-        dpg.set_value("status_text", f"Display scale adjusted to {self.display_scale:.2f}×")
-
     def _reset_zoom(self, sender=None, app_data=None) -> None:
         """Reset zoom and pan to default (same as Home key)."""
         if self.canvas_controller is not None:

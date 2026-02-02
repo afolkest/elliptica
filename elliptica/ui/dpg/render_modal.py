@@ -19,17 +19,6 @@ except ImportError:
 # Constants for render settings
 RESOLUTION_CHOICES = [1.0, 1.5, 2.0, 3.0, 4.0, 6.0, 8.0]
 RESOLUTION_LABELS = ["1× (canvas)", "1.5×", "2×", "3×", "4×", "6×", "8×"]
-RESOLUTION_LOOKUP = dict(zip(RESOLUTION_LABELS, RESOLUTION_CHOICES))
-
-
-def _label_for_multiplier(value: float) -> str:
-    """Get radio button label for multiplier value."""
-    try:
-        idx = RESOLUTION_CHOICES.index(value)
-        return RESOLUTION_LABELS[idx]
-    except (ValueError, IndexError):
-        return RESOLUTION_LABELS[0]
-
 
 class RenderModalController:
     """Controller for render settings modal dialog."""

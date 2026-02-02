@@ -291,33 +291,6 @@ def set_region_palette(state: AppState, boundary_id: int, region: str, palette: 
     return True
 
 
-def set_region_solid_color(state: AppState, boundary_id: int, region: str, rgb: tuple[float, float, float]) -> bool:
-    """Set solid color for region (implies use_palette=False and enabled=True).
-
-    Args:
-        boundary_id: Boundary object ID
-        region: "surface" or "interior"
-        rgb: RGB tuple in [0, 1]
-
-    Returns:
-        True if successful, False if boundary_color_settings missing for this boundary
-    """
-    settings = state.boundary_color_settings.get(boundary_id)
-    if settings is None:
-        print(f"⚠️  set_region_solid_color: no settings for boundary {boundary_id}")
-        return False
-
-    if region == "surface":
-        settings.surface.enabled = True  # Auto-enable when color is selected
-        settings.surface.use_palette = False
-        settings.surface.solid_color = rgb
-    elif region == "interior":
-        settings.interior.enabled = True  # Auto-enable when color is selected
-        settings.interior.use_palette = False
-        settings.interior.solid_color = rgb
-    return True
-
-
 def set_region_brightness(state: AppState, boundary_id: int, region: str, brightness: float | None) -> bool:
     """Set per-region brightness override (None = inherit from global).
 

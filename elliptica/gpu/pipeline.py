@@ -1,9 +1,7 @@
 """GPU-accelerated postprocessing pipeline functions."""
 
 import torch
-import numpy as np
 from typing import Tuple
-from scipy.ndimage import gaussian_filter, zoom
 
 from elliptica.gpu import GPUContext
 from elliptica.gpu.ops import (
@@ -103,47 +101,7 @@ def build_base_rgb_gpu(
     return rgb
 
 
-def downsample_lic_hybrid(
-    arr: np.ndarray,
-    target_shape: Tuple[int, int],
-    supersample: float,
-    sigma: float,
-    use_gpu: bool = True,
-) -> np.ndarray:
-    """Hybrid downsample with automatic GPU/CPU fallback.
-
-    This is a drop-in replacement for the CPU-only downsample_lic.
-
-    Args:
-        arr: Input array (H, W)
-        target_shape: Target (height, width)
-        supersample: Supersample factor (not used in GPU path)
-        sigma: Gaussian blur sigma
-        use_gpu: Whether to attempt GPU acceleration
-
-    Returns:
-        Downsampled array (target_H, target_W)
-    """
-    if use_gpu and GPUContext.is_available():
-        # GPU path
-        tensor = GPUContext.to_gpu(arr)
-        result_tensor = downsample_lic_gpu(tensor, target_shape, sigma)
-        return GPUContext.to_cpu(result_tensor)
-    else:
-        # CPU fallback
-        sigma = max(sigma, 0.0)
-        filtered = gaussian_filter(arr, sigma=sigma) if sigma > 0 else arr
-
-        if arr.shape == target_shape:
-            return filtered.copy() if filtered is arr else filtered
-
-        scale_y = target_shape[0] / filtered.shape[0]
-        scale_x = target_shape[1] / filtered.shape[1]
-        return zoom(filtered, (scale_y, scale_x), order=1)
-
-
 __all__ = [
     'downsample_lic_gpu',
     'build_base_rgb_gpu',
-    'downsample_lic_hybrid',
 ]
