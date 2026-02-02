@@ -85,11 +85,6 @@ AVAILABLE_VARIABLES = [
 
 # PDE-specific variables (availability depends on active PDE)
 PDE_SPECIFIC_VARIABLES = {
-    "eikonal": [
-        ("phi", "Travel time / wavefront phase"),
-        ("amplitude", "Ray intensity (caustics appear as high values)"),
-        ("n_field", "Refractive index field"),
-    ],
     "poisson": [
         ("phi", "Electric potential"),
     ],

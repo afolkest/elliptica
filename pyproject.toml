@@ -17,7 +17,6 @@ dependencies = [
     "pyamg>=5.0.0",
     "pillow>=9.0.0",
     "scikit-image>=0.20.0",
-    "scikit-fmm>=2022.0.0",
     "dearpygui>=1.9.0",
     "torch>=2.0.0",
     "torchvision>=0.15.0",
