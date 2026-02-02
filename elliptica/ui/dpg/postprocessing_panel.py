@@ -6,7 +6,6 @@ from PIL import Image
 from typing import Optional, TYPE_CHECKING
 
 from elliptica import defaults
-from elliptica.app import actions
 from elliptica.app.core import resolve_region_postprocess_params
 from elliptica.app.state_manager import StateKey
 from elliptica.colorspace import (
@@ -1164,8 +1163,6 @@ class PostprocessingPanel:
         spec = self._palette_editor_build_spec()
         with self.app.state_lock:
             set_palette_spec(self.palette_editor_palette_name, spec, persist=persist)
-            if runtime_dirty:
-                self.app.state.invalidate_base_rgb()
 
         if runtime_dirty:
             updated = self.app.display_pipeline.texture_manager.update_palette_colormap(self.palette_editor_palette_name)
@@ -1199,7 +1196,7 @@ class PostprocessingPanel:
         if had_persist_changes:
             self.palette_editor_needs_colormap_rebuild = True
         if changed:
-            self.app.display_pipeline.refresh_display()
+            self.app.state_manager.update(StateKey.PALETTE, self.palette_editor_palette_name)
             self.palette_editor_last_refresh_time = time.time()
         self.palette_editor_refresh_pending = False
 
@@ -2665,21 +2662,26 @@ class PostprocessingPanel:
         self.app.display_pipeline.texture_manager.rebuild_colormaps()
         self._rebuild_palette_popup()
 
-        with self.app.state_lock:
-            if for_region:
+        if for_region:
+            with self.app.state_lock:
                 selected = self.app.state.get_selected()
                 region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    actions.set_region_palette(self.app.state, selected.id, region_type, new_name)
-                    global_b = self.app.state.display_settings.brightness
-                    global_c = self.app.state.display_settings.contrast
-                    global_g = self.app.state.display_settings.gamma
-                    actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
-                    actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
-                    actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
-            else:
-                actions.set_color_enabled(self.app.state, True)
-                actions.set_palette(self.app.state, new_name)
+                boundary_id = selected.id if selected else None
+                global_b = self.app.state.display_settings.brightness
+                global_c = self.app.state.display_settings.contrast
+                global_g = self.app.state.display_settings.gamma
+            if boundary_id is not None:
+                self.app.state_manager.update(StateKey.REGION_STYLE, {
+                    "enabled": True,
+                    "use_palette": True,
+                    "palette": new_name,
+                    "brightness": global_b,
+                    "contrast": global_c,
+                    "gamma": global_g,
+                }, context=(boundary_id, region_type))
+        else:
+            self.app.state_manager.update(StateKey.COLOR_ENABLED, True)
+            self.app.state_manager.update(StateKey.PALETTE, new_name)
 
         self.update_context_ui()
         self._update_palette_preview_buttons()
@@ -2690,7 +2692,6 @@ class PostprocessingPanel:
 
         self._set_palette_editor_state(True, new_name, for_region)
         self._palette_editor_load_palette(new_name)
-        self.app.display_pipeline.refresh_display()
 
     def on_global_grayscale(self, sender=None, app_data=None) -> None:
         """Handle global 'Grayscale (No Color)' button."""
@@ -2699,13 +2700,10 @@ class PostprocessingPanel:
         if self.palette_editor_active:
             return
 
-        with self.app.state_lock:
-            actions.set_color_enabled(self.app.state, False)
+        self.app.state_manager.update(StateKey.COLOR_ENABLED, False)
 
         self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
 
     def on_global_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle global colormap button click."""
@@ -2715,15 +2713,11 @@ class PostprocessingPanel:
             return
 
         palette_name = user_data
-        with self.app.state_lock:
-            # Auto-enable color when a palette is selected
-            actions.set_color_enabled(self.app.state, True)
-            actions.set_palette(self.app.state, palette_name)
+        self.app.state_manager.update(StateKey.COLOR_ENABLED, True)
+        self.app.state_manager.update(StateKey.PALETTE, palette_name)
 
         self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
 
     def on_region_use_global(self, sender=None, app_data=None) -> None:
         """Handle region 'Use Global' button - disables override."""
@@ -2735,18 +2729,19 @@ class PostprocessingPanel:
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             region_type = self.app.state.selected_region_type
-            if selected and selected.id is not None:
-                # Disable palette override
-                actions.set_region_style_enabled(self.app.state, selected.id, region_type, False)
-                # Also clear B/C/G (disables slider override)
-                actions.set_region_brightness(self.app.state, selected.id, region_type, None)
-                actions.set_region_contrast(self.app.state, selected.id, region_type, None)
-                actions.set_region_gamma(self.app.state, selected.id, region_type, None)
+            boundary_id = selected.id if selected else None
+
+        if boundary_id is not None:
+            self.app.state_manager.update(StateKey.REGION_STYLE, {
+                "enabled": False,
+                "brightness": None,
+                "contrast": None,
+                "gamma": None,
+            }, context=(boundary_id, region_type))
 
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
-        self.app.display_pipeline.refresh_display()
 
     def on_region_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle region colormap button click - also enables override."""
@@ -2759,21 +2754,24 @@ class PostprocessingPanel:
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             region_type = self.app.state.selected_region_type
-            if selected and selected.id is not None:
-                # Set palette (this also sets enabled=True)
-                actions.set_region_palette(self.app.state, selected.id, region_type, palette_name)
-                # Also initialize B/C/G with global values (enables slider override)
-                global_b = self.app.state.display_settings.brightness
-                global_c = self.app.state.display_settings.contrast
-                global_g = self.app.state.display_settings.gamma
-                actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
-                actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
-                actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
+            boundary_id = selected.id if selected else None
+            global_b = self.app.state.display_settings.brightness
+            global_c = self.app.state.display_settings.contrast
+            global_g = self.app.state.display_settings.gamma
+
+        if boundary_id is not None:
+            self.app.state_manager.update(StateKey.REGION_STYLE, {
+                "enabled": True,
+                "use_palette": True,
+                "palette": palette_name,
+                "brightness": global_b,
+                "contrast": global_c,
+                "gamma": global_g,
+            }, context=(boundary_id, region_type))
 
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
-        self.app.display_pipeline.refresh_display()
 
     def _ensure_delete_confirmation_modal(self) -> None:
         """Create the delete confirmation modal if it doesn't exist."""
