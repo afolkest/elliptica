@@ -38,12 +38,8 @@ MAX_DOMAIN_EDGE_GAIN_STRENGTH: float = 3.0
 MIN_DOMAIN_EDGE_GAIN_POWER: float = 0.1
 MAX_DOMAIN_EDGE_GAIN_POWER: float = 3.0
 
-# Post-processing defaults
-DEFAULT_HIGHPASS_SIGMA_FACTOR: float = 3.0 / 1024.0
-
 # Downsampling defaults
 DEFAULT_DOWNSAMPLE_SIGMA: float = 0.6
-MAX_DOWNSAMPLE_SIGMA: float = 2.0
 
 # Display postprocessing defaults
 DEFAULT_CLIP_LOW_PERCENT: float = 0.5

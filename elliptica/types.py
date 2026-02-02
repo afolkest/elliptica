@@ -88,18 +88,10 @@ def clone_boundary_object(boundary: BoundaryObject, preserve_id: bool = True) ->
 
 
 @dataclass
-class RenderInfo:
-    multiplier: float
-    filepath: str
-    timestamp: str
-
-
-@dataclass
 class Project:
     boundary_objects: list[BoundaryObject] = field(default_factory=list)
     canvas_resolution: tuple[int, int] = defaults.DEFAULT_CANVAS_RESOLUTION
     streamlength_factor: float = defaults.DEFAULT_STREAMLENGTH_FACTOR
-    renders: list[RenderInfo] = field(default_factory=list)
     next_boundary_id: int = 0  # Incremental counter for boundary object IDs
     # Boundary conditions for Poisson solver (DIRICHLET=0 or NEUMANN=1)
     boundary_top: int = DIRICHLET
@@ -116,11 +108,6 @@ class Project:
     def shape(self) -> tuple[int, int]:
         """Grid shape for PDE solving (height, width)."""
         return self.canvas_resolution
-
-    @property
-    def solve_scale(self) -> float:
-        """Scale factor for PDE solver (always 1.0 for now)."""
-        return 1.0
 
     @property
     def boundary_conditions(self) -> dict:

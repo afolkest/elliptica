@@ -79,14 +79,6 @@ from elliptica.types import BoundaryObject, Project, clone_boundary_object
 from elliptica import defaults
 
 
-SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
-SUPERSAMPLE_LABELS = tuple(f"{value:.1f}\u00d7" for value in SUPERSAMPLE_CHOICES)
-SUPERSAMPLE_LOOKUP = {label: value for label, value in zip(SUPERSAMPLE_LABELS, SUPERSAMPLE_CHOICES)}
-
-RESOLUTION_CHOICES = defaults.RENDER_RESOLUTION_CHOICES
-RESOLUTION_LABELS = tuple(f"{value:g}\u00d7" for value in RESOLUTION_CHOICES)
-RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RESOLUTION_CHOICES)}
-
 BACKSPACE_KEY = None
 CTRL_KEY = None
 SHIFT_KEY = None
@@ -120,7 +112,6 @@ def _snapshot_project(project: Project) -> Project:
         boundary_objects=[clone_boundary_object(b, preserve_id=True) for b in project.boundary_objects],
         canvas_resolution=project.canvas_resolution,
         streamlength_factor=project.streamlength_factor,
-        renders=list(project.renders),
         boundary_top=project.boundary_top,
         boundary_bottom=project.boundary_bottom,
         boundary_left=project.boundary_left,
@@ -151,10 +142,6 @@ class EllipticaApp:
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
 
-    # Debouncing for expensive slider operations
-    downsample_debounce_timer: Optional[threading.Timer] = None
-    postprocess_debounce_timer: Optional[threading.Timer] = None
-    mouse_handler_registry_id: Optional[int] = None
     pde_label_map: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -290,7 +277,6 @@ class EllipticaApp:
                                  tag="export_menu_item")
 
         with dpg.handler_registry() as handler_reg:
-            self.mouse_handler_registry_id = handler_reg
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
 
         # Set viewport resize callback

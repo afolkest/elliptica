@@ -3,7 +3,7 @@
 import time
 import numpy as np
 from PIL import Image
-from typing import Optional, Literal, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from elliptica import defaults
 from elliptica.app import actions
@@ -43,28 +43,6 @@ class PostprocessingPanel:
         """
         self.app = app
 
-        # Widget IDs for postprocessing sliders
-        self.postprocess_clip_low_slider_id: Optional[int] = None
-        self.postprocess_clip_high_slider_id: Optional[int] = None
-        self.postprocess_brightness_slider_id: Optional[int] = None
-        self.postprocess_contrast_slider_id: Optional[int] = None
-        self.postprocess_gamma_slider_id: Optional[int] = None
-
-        # Widget IDs for smear controls
-        self.smear_enabled_checkbox_id: Optional[int] = None
-        self.smear_sigma_slider_id: Optional[int] = None
-
-        # Widget IDs for expression editor
-        self.expr_L_input_id: Optional[int] = None
-        self.expr_C_input_id: Optional[int] = None
-        self.expr_H_input_id: Optional[int] = None
-        self.expr_error_text_id: Optional[int] = None
-        self.expr_preset_combo_id: Optional[int] = None
-
-        # Widget IDs for lightness expression (palette mode)
-        self.lightness_expr_checkbox_id: Optional[int] = None
-        self.lightness_expr_input_id: Optional[int] = None
-
         # Palette preview + histogram UI
         self.palette_preview_width = 320
         self.palette_preview_height = 22
@@ -88,7 +66,6 @@ class PostprocessingPanel:
         self.palette_editor_for_region: bool = False
         self.palette_editor_group_id: Optional[int] = None
         self.palette_editor_title_id: Optional[int] = None
-        self.palette_editor_done_button_id: Optional[int] = None
         self.palette_editor_gradient_drawlist_id: Optional[int] = None
         self.palette_editor_slice_drawlist_id: Optional[int] = None
         self.palette_editor_l_gradient_drawlist_id: Optional[int] = None
@@ -357,7 +334,7 @@ class PostprocessingPanel:
                 # Sliders (fixed position)
                 dpg.add_spacer(height=10)
 
-                self.postprocess_clip_low_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Clip low %",
                     default_value=self.app.state.display_settings.clip_low_percent,
                     min_value=0.0,
@@ -367,7 +344,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="clip_low_slider",
                 )
-                self.postprocess_clip_high_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Clip high %",
                     default_value=self.app.state.display_settings.clip_high_percent,
                     min_value=0.0,
@@ -378,7 +355,7 @@ class PostprocessingPanel:
                     tag="clip_high_slider",
                 )
 
-                self.postprocess_brightness_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Brightness",
                     default_value=self.app.state.display_settings.brightness,
                     min_value=defaults.MIN_BRIGHTNESS,
@@ -388,7 +365,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="brightness_slider",
                 )
-                self.postprocess_contrast_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Contrast",
                     default_value=self.app.state.display_settings.contrast,
                     min_value=defaults.MIN_CONTRAST,
@@ -398,7 +375,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="contrast_slider",
                 )
-                self.postprocess_gamma_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Gamma",
                     default_value=self.app.state.display_settings.gamma,
                     min_value=defaults.MIN_GAMMA,
@@ -420,7 +397,7 @@ class PostprocessingPanel:
                         dpg.add_text("Custom expression for lightness mapping.\nUse 'mag', 'lic', 'angle', etc.\nExample: clipnorm(mag, 1, 99)")
                     dpg.add_spacer(width=10)
                     # Enable checkbox (for global mode)
-                    self.lightness_expr_checkbox_id = dpg.add_checkbox(
+                    dpg.add_checkbox(
                         label="",
                         default_value=self.app.state.display_settings.lightness_expr is not None,
                         callback=self.on_lightness_expr_toggle,
@@ -438,7 +415,7 @@ class PostprocessingPanel:
                     )
 
                 with dpg.group(tag="lightness_expr_group", show=self.app.state.display_settings.lightness_expr is not None):
-                    self.lightness_expr_input_id = dpg.add_input_text(
+                    dpg.add_input_text(
                         default_value=self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)",
                         width=200,
                         callback=self.on_lightness_expr_change,
@@ -473,12 +450,12 @@ class PostprocessingPanel:
         with dpg.collapsing_header(label="Effects", default_open=True,
                                    tag="effects_header", parent=parent, show=False):
             dpg.add_text("Smear", tag="smear_label")
-            self.smear_enabled_checkbox_id = dpg.add_checkbox(
+            dpg.add_checkbox(
                 label="Enable smear",
                 callback=self.on_smear_enabled,
                 tag="smear_enabled_checkbox",
             )
-            self.smear_sigma_slider_id = dpg.add_slider_float(
+            dpg.add_slider_float(
                 label="Blur strength",
                 min_value=defaults.MIN_SMEAR_SIGMA,
                 max_value=defaults.MAX_SMEAR_SIGMA,
@@ -679,7 +656,7 @@ class PostprocessingPanel:
                     color=(150, 200, 255),
                 )
                 dpg.add_spacer(width=8)
-                self.palette_editor_done_button_id = dpg.add_button(
+                dpg.add_button(
                     label="Done",
                     width=60,
                     callback=self.on_palette_editor_done,
@@ -1767,7 +1744,7 @@ class PostprocessingPanel:
         # Preset selector
         with dpg.group(horizontal=True, parent=parent):
             dpg.add_text("Preset:")
-            self.expr_preset_combo_id = dpg.add_combo(
+            dpg.add_combo(
                 items=preset_names,
                 default_value=preset_names[0] if preset_names else "",
                 width=-1,  # Fill available width
@@ -1781,7 +1758,7 @@ class PostprocessingPanel:
         l_label = dpg.add_text("Lightness (L)  [0-1]", parent=parent)
         with dpg.tooltip(l_label):
             dpg.add_text("Controls brightness. 0 = black, 1 = white.")
-        self.expr_L_input_id = dpg.add_input_text(
+        dpg.add_input_text(
             default_value="clipnorm(lic, 0.5, 99.5)",
             width=-1,  # Fill available width
             height=45,
@@ -1798,7 +1775,7 @@ class PostprocessingPanel:
         c_label = dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
         with dpg.tooltip(c_label):
             dpg.add_text("Color intensity/saturation. 0 = grayscale.")
-        self.expr_C_input_id = dpg.add_input_text(
+        dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width
             height=45,
@@ -1815,7 +1792,7 @@ class PostprocessingPanel:
         h_label = dpg.add_text("Hue (H)  [0-360°]", parent=parent)
         with dpg.tooltip(h_label):
             dpg.add_text("Color hue angle. 0=red, 120=green, 240=blue.")
-        self.expr_H_input_id = dpg.add_input_text(
+        dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width
             height=45,
@@ -1827,7 +1804,7 @@ class PostprocessingPanel:
         )
 
         # Error display
-        self.expr_error_text_id = dpg.add_text(
+        dpg.add_text(
             "",
             color=(255, 100, 100),
             tag="expr_error_text",
