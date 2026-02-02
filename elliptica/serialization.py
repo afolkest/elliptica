@@ -293,6 +293,8 @@ def _render_settings_to_dict(settings: RenderSettings) -> dict[str, Any]:
         'use_mask': settings.use_mask,
         'edge_gain_strength': settings.edge_gain_strength,
         'edge_gain_power': settings.edge_gain_power,
+        'domain_edge_gain_strength': settings.domain_edge_gain_strength,
+        'domain_edge_gain_power': settings.domain_edge_gain_power,
         'solve_scale': settings.solve_scale,
     }
 
@@ -309,6 +311,8 @@ def _dict_to_render_settings(data: dict[str, Any]) -> RenderSettings:
         use_mask=data['use_mask'],
         edge_gain_strength=data['edge_gain_strength'],
         edge_gain_power=data['edge_gain_power'],
+        domain_edge_gain_strength=data.get('domain_edge_gain_strength', defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH),
+        domain_edge_gain_power=data.get('domain_edge_gain_power', defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER),
         solve_scale=data['solve_scale'],
     )
 
