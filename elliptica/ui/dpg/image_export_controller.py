@@ -56,6 +56,10 @@ class ImageExportController:
         if dpg is None:
             return
 
+        # Fire any deferred refresh signals so the display pipeline can
+        # process them while the user interacts with the file dialog.
+        self.app.state_manager.flush_pending()
+
         with self.app.state_lock:
             cache = self.app.state.render_cache
             if cache is None or cache.result is None:

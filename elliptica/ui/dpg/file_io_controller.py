@@ -535,18 +535,7 @@ class FileIOController:
             if self.app.canvas_height_input_id is not None:
                 dpg.set_value(self.app.canvas_height_input_id, self.app.state.project.canvas_resolution[1])
 
-            # Display settings
-            panel = self.app.postprocess_panel
-            if panel.postprocess_clip_low_slider_id is not None:
-                dpg.set_value(panel.postprocess_clip_low_slider_id, self.app.state.display_settings.clip_low_percent)
-            if panel.postprocess_clip_high_slider_id is not None:
-                dpg.set_value(panel.postprocess_clip_high_slider_id, self.app.state.display_settings.clip_high_percent)
-            if panel.postprocess_brightness_slider_id is not None:
-                dpg.set_value(panel.postprocess_brightness_slider_id, self.app.state.display_settings.brightness)
-            if panel.postprocess_contrast_slider_id is not None:
-                dpg.set_value(panel.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
-            if panel.postprocess_gamma_slider_id is not None:
-                dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
+            # Saturation (not handled by update_context_ui)
             if dpg.does_item_exist("saturation_slider"):
                 dpg.set_value("saturation_slider", self.app.state.display_settings.saturation)
 
@@ -557,6 +546,7 @@ class FileIOController:
                     dpg.set_value(self.app.pde_combo_id, label)
 
             # Color mode radio - restore expressions mode if color_config was set
+            panel = self.app.postprocess_panel
             has_color_config = self.app.state.color_config is not None
             if dpg.does_item_exist("color_mode_radio"):
                 mode_value = "Expressions" if has_color_config else "Palette"
@@ -565,15 +555,6 @@ class FileIOController:
                 # Update visibility of mode groups
                 dpg.configure_item("palette_mode_group", show=(panel.color_mode == "palette"))
                 dpg.configure_item("expressions_mode_group", show=(panel.color_mode == "expressions"))
-
-            # Lightness expression checkbox and input (global mode)
-            lightness_expr = self.app.state.display_settings.lightness_expr
-            if dpg.does_item_exist("lightness_expr_checkbox"):
-                dpg.set_value("lightness_expr_checkbox", lightness_expr is not None)
-            if dpg.does_item_exist("lightness_expr_group"):
-                dpg.configure_item("lightness_expr_group", show=(lightness_expr is not None))
-            if dpg.does_item_exist("lightness_expr_input") and lightness_expr is not None:
-                dpg.set_value("lightness_expr_input", lightness_expr)
 
         # Sync global palette UI text (outside lock - no state modification)
         self.sync_palette_ui()
