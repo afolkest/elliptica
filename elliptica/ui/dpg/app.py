@@ -368,6 +368,11 @@ class EllipticaApp:
         self._update_canvas_inputs()
         self.boundary_controls.rebuild_controls()
 
+        # Wire subscribers that manipulate DPG widgets (must be after widget creation)
+        self.state_manager.subscribe(StateKey.VIEW_MODE, self._on_view_mode_changed)
+        self.boundary_controls.wire_subscribers()
+        self.postprocess_panel.wire_subscribers()
+
     # ------------------------------------------------------------------
     # Canvas window layout
     # ------------------------------------------------------------------
@@ -591,7 +596,6 @@ class EllipticaApp:
         if should_switch:
             self.state_manager.update(StateKey.VIEW_MODE, "edit")
             self.canvas_controller.drag_active = False
-        self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
 
     # ------------------------------------------------------------------
@@ -632,6 +636,10 @@ class EllipticaApp:
             self.image_export.shutdown()
             dpg.destroy_context()
 
+
+    def _on_view_mode_changed(self, key, value, context) -> None:
+        """Subscriber callback: update control visibility when view mode changes."""
+        self._update_control_visibility()
 
     def _update_control_visibility(self) -> None:
         if dpg is None:

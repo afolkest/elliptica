@@ -271,6 +271,16 @@ class PostprocessingPanel:
             region_style = settings.surface if region_type == "surface" else settings.interior
             return (region_style.enabled, selected.id, region_type)
 
+    def wire_subscribers(self) -> None:
+        """Register StateManager subscribers (call after UI widgets exist)."""
+        for key in (StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            self.app.state_manager.subscribe(key, self._on_selection_changed)
+
+    def _on_selection_changed(self, key, value, context) -> None:
+        """Subscriber callback: refresh context UI when selection changes."""
+        self.app.state_manager.flush_pending()
+        self.update_context_ui()
+
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
 
@@ -2381,16 +2391,6 @@ class PostprocessingPanel:
         self._update_palette_preview_buttons()
         self._request_histogram_update()
 
-    def update_region_properties_panel(self) -> None:
-        """Update region properties panel based on current selection.
-
-        This is called when selection changes. Delegates to update_context_ui.
-        """
-        # Flush any pending debounced updates so deferred refresh signals
-        # fire before the context switch (state was already mutated immediately).
-        self.app.state_manager.flush_pending()
-        self.update_context_ui()
-
     # ------------------------------------------------------------------
     # Region toggle callback
     # ------------------------------------------------------------------
@@ -2404,8 +2404,7 @@ class PostprocessingPanel:
         self.app.state_manager.flush_pending()
         region_type = "surface" if app_data == "Surface" else "interior"
         self.app.state_manager.update(StateKey.SELECTED_REGION_TYPE, region_type)
-        self.app.canvas_renderer.invalidate_selection_contour()
-        self.update_context_ui()
+        # Subscribers handle: invalidate_selection_contour, update_context_ui
 
     # ------------------------------------------------------------------
     # Postprocessing slider callbacks

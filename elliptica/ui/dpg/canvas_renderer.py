@@ -50,6 +50,8 @@ class CanvasRenderer:
     def _on_interaction_changed(self, key, value, context) -> None:
         """Mark canvas dirty when interaction state changes."""
         self.mark_dirty()
+        if key in (StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            self.invalidate_selection_contour()
 
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""

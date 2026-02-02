@@ -158,7 +158,7 @@ class FileIOController:
             actions.add_boundary(self.app.state, boundary)
 
         self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
-        self.app.canvas_renderer.mark_dirty()
+        # Subscriber handles: _update_control_visibility, mark_dirty
 
         # Note: drawlist stays window-sized, not canvas-sized.
         # The transform system handles mapping canvas coords to screen pixels.
@@ -166,9 +166,7 @@ class FileIOController:
         self.app._update_canvas_inputs()  # Update canvas size display text
         self.app._resize_canvas_window()  # Ensure drawlist matches window
         self.app._update_canvas_transform()  # Recalculate scale for potentially new canvas size
-        self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
-        self.app.boundary_controls.update_slider_labels()
         dpg.set_value("status_text", f"Loaded boundary '{Path(path_str).name}'")
 
     # ------------------------------------------------------------------
@@ -213,15 +211,13 @@ class FileIOController:
         self.app.canvas_controller.reset_zoom_pan()
 
         # Update UI to reflect new state
-        self.app.canvas_renderer.mark_dirty()
+        # Subscribers handle: _update_control_visibility, mark_dirty, update_context_ui
         self.app._update_canvas_inputs()
 
         # Note: drawlist stays window-sized, not canvas-sized.
         self.app._resize_canvas_window()  # Ensure drawlist matches window
         self.app._update_canvas_transform()
-        self.app._update_control_visibility()
         self.app.boundary_controls.rebuild_controls()
-        self.app.boundary_controls.update_slider_labels()
         self.sync_ui_from_state()
         self.app.cache_panel.update_cache_status_display()
 
@@ -461,15 +457,13 @@ class FileIOController:
             self.app.canvas_controller.reset_zoom_pan()
 
             # Update UI to reflect loaded state
-            self.app.canvas_renderer.mark_dirty()
+            # Subscribers handle: _update_control_visibility, mark_dirty, update_context_ui
             self.app._update_canvas_inputs()  # Update canvas size input fields
 
             # Note: drawlist stays window-sized, not canvas-sized.
             self.app._resize_canvas_window()  # Ensure drawlist matches window
             self.app._update_canvas_transform()  # Recalculate scale for new canvas resolution
-            self.app._update_control_visibility()
             self.app.boundary_controls.rebuild_controls()
-            self.app.boundary_controls.update_slider_labels()
             self.sync_ui_from_state()
             self.app.cache_panel.update_cache_status_display()
 

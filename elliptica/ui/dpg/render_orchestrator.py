@@ -282,8 +282,7 @@ class RenderOrchestrator:
             self.app.canvas_controller.drag_active = False
             self.app.state_manager.update(StateKey.VIEW_MODE, "render")
             self.app.state_manager.clear_selection()
-            self.app._update_control_visibility()
-            self.app.postprocess_panel.update_context_ui()  # Update UI for no selection
+            # Subscribers handle: _update_control_visibility, update_context_ui
             self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode
             self.app.cache_panel.update_cache_status_display()
 

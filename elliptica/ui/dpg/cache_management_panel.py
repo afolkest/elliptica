@@ -137,8 +137,6 @@ class CacheManagementPanel:
             self.app.state.render_cache = None
 
         self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
-        self.app._update_control_visibility()
-        self.app.canvas_renderer.mark_dirty()
         self.update_cache_status_display()
         dpg.set_value("status_text", "Render cache discarded")
 
@@ -153,7 +151,6 @@ class CacheManagementPanel:
                 return
 
         self.app.state_manager.update(StateKey.VIEW_MODE, "render")
-        self.app._update_control_visibility()
         self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode
         self.app.display_pipeline.refresh_display()
         dpg.set_value("status_text", "Viewing cached render")
