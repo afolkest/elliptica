@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from elliptica.app import actions
+from elliptica.app.state_manager import StateKey
 from elliptica.mask_utils import load_boundary_masks
 from elliptica.pde import PDERegistry
 from elliptica.serialization import load_project, save_project, load_render_cache, save_render_cache
@@ -155,8 +156,8 @@ class FileIOController:
             pos = ((canvas_w - mask_w) / 2.0 + offset, (canvas_h - mask_h) / 2.0 + offset)
             boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, position=pos, interior_mask=interior)
             actions.add_boundary(self.app.state, boundary)
-            self.app.state.view_mode = "edit"
 
+        self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
         self.app.canvas_renderer.mark_dirty()
 
         # Note: drawlist stays window-sized, not canvas-sized.
@@ -192,11 +193,15 @@ class FileIOController:
             self.app.state.render_settings = new_state.render_settings
             self.app.state.display_settings = new_state.display_settings
             self.app.state.boundary_color_settings = new_state.boundary_color_settings
-            self.app.state.clear_selection()
+            self.app.state.selected_indices = set()
             self.app.state.view_mode = "edit"
             self.app.state.field_dirty = True
             self.app.state.render_dirty = True
             self.app.state.render_cache = None
+
+        # Notify StateManager subscribers for interaction state
+        self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
+        self.app.state_manager.update(StateKey.SELECTED_INDICES, set())
 
         # Clear current project path
         self.current_project_path = None
@@ -435,11 +440,15 @@ class FileIOController:
                 self.app.state.render_settings = new_state.render_settings
                 self.app.state.display_settings = new_state.display_settings
                 self.app.state.boundary_color_settings = new_state.boundary_color_settings
-                self.app.state.clear_selection()
+                self.app.state.selected_indices = set()
                 self.app.state.view_mode = "edit"
                 self.app.state.field_dirty = True
                 self.app.state.render_dirty = True
                 self.app.state.render_cache = loaded_cache
+
+            # Notify StateManager subscribers for interaction state
+            self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
+            self.app.state_manager.update(StateKey.SELECTED_INDICES, set())
 
             # Track current project path
             self.current_project_path = path_str

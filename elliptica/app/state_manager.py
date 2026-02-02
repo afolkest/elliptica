@@ -48,6 +48,11 @@ class StateKey(enum.Enum):
     # Per-boundary (requires context tuple)
     REGION_STYLE = "region_style"
 
+    # Interaction state (no display refresh, subscriber-driven)
+    VIEW_MODE = "view_mode"
+    SELECTED_INDICES = "selected_indices"
+    SELECTED_REGION_TYPE = "selected_region_type"
+
 
 @dataclass
 class _PendingEntry:
@@ -91,8 +96,23 @@ class StateManager:
         StateKey.DOWNSAMPLE_SIGMA: "downsample_sigma",
     }
 
-    # Every managed key triggers a display refresh.
-    _REFRESH_KEYS: frozenset[StateKey] = frozenset(StateKey)
+    # Display-setting keys that trigger a display refresh.
+    # Interaction state keys (VIEW_MODE, SELECTED_*, SELECTED_REGION_TYPE)
+    # are deliberately excluded — they only fire subscriber notifications.
+    _REFRESH_KEYS: frozenset[StateKey] = frozenset({
+        StateKey.BRIGHTNESS,
+        StateKey.CONTRAST,
+        StateKey.GAMMA,
+        StateKey.SATURATION,
+        StateKey.CLIP_LOW_PERCENT,
+        StateKey.CLIP_HIGH_PERCENT,
+        StateKey.LIGHTNESS_EXPR,
+        StateKey.COLOR_ENABLED,
+        StateKey.PALETTE,
+        StateKey.DOWNSAMPLE_SIGMA,
+        StateKey.COLOR_CONFIG,
+        StateKey.REGION_STYLE,
+    })
 
     # Keys that require base_rgb invalidation (recompute from scratch).
     _INVALIDATE_KEYS: frozenset[StateKey] = frozenset({
@@ -229,6 +249,34 @@ class StateManager:
             except ValueError:
                 pass
 
+    # ------------------------------------------------------------------
+    # Selection convenience methods
+    # ------------------------------------------------------------------
+
+    def set_selected(self, idx: int) -> None:
+        """Replace selection with single boundary at index, or clear if invalid."""
+        with self._lock:
+            new_set = set()
+            if 0 <= idx < len(self._state.project.boundary_objects):
+                new_set.add(idx)
+        self.update(StateKey.SELECTED_INDICES, new_set)
+
+    def toggle_selected(self, idx: int) -> None:
+        """Toggle boundary in/out of selection (for shift-click)."""
+        with self._lock:
+            if not (0 <= idx < len(self._state.project.boundary_objects)):
+                return
+            current = set(self._state.selected_indices)
+        if idx in current:
+            current.discard(idx)
+        else:
+            current.add(idx)
+        self.update(StateKey.SELECTED_INDICES, current)
+
+    def clear_selection(self) -> None:
+        """Clear all selection."""
+        self.update(StateKey.SELECTED_INDICES, set())
+
     def needs_refresh(self) -> bool:
         """Return whether any setting changed since the last consume."""
         return self._needs_refresh
@@ -274,6 +322,12 @@ class StateManager:
             elif key is StateKey.COLOR_CONFIG:
                 self._state.color_config = value
                 requires_invalidation = True
+            elif key is StateKey.VIEW_MODE:
+                self._state.view_mode = value
+            elif key is StateKey.SELECTED_INDICES:
+                self._state.selected_indices = value
+            elif key is StateKey.SELECTED_REGION_TYPE:
+                self._state.selected_region_type = value
             else:
                 self._set_value(key, value)
                 requires_invalidation = key in self._INVALIDATE_KEYS

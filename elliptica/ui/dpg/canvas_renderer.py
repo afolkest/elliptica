@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from scipy import ndimage
 
+from elliptica.app.state_manager import StateKey
+
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
@@ -40,6 +42,14 @@ class CanvasRenderer:
 
         # Cache for boundary contours in edit mode: boundary_idx -> (mask_id, contours_at_origin)
         self._boundary_contour_cache: dict[int, tuple[int, list[np.ndarray]]] = {}
+
+        # Subscribe to interaction state changes that require canvas redraw
+        for key in (StateKey.VIEW_MODE, StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            app.state_manager.subscribe(key, self._on_interaction_changed)
+
+    def _on_interaction_changed(self, key, value, context) -> None:
+        """Mark canvas dirty when interaction state changes."""
+        self.mark_dirty()
 
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""

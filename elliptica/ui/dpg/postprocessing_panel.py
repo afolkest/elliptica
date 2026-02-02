@@ -2402,10 +2402,9 @@ class PostprocessingPanel:
 
         # Flush pending debounced updates for the previous region before switching
         self.app.state_manager.flush_pending()
-        with self.app.state_lock:
-            self.app.state.selected_region_type = "surface" if app_data == "Surface" else "interior"
+        region_type = "surface" if app_data == "Surface" else "interior"
+        self.app.state_manager.update(StateKey.SELECTED_REGION_TYPE, region_type)
         self.app.canvas_renderer.invalidate_selection_contour()
-        self.app.canvas_renderer.mark_dirty()
         self.update_context_ui()
 
     # ------------------------------------------------------------------

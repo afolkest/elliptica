@@ -2,6 +2,8 @@
 
 from typing import TYPE_CHECKING
 
+from elliptica.app.state_manager import StateKey
+
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
@@ -174,7 +176,8 @@ class ShapeDialogController:
                 interior_mask=interior_mask,
             )
             add_boundary(self.app.state, boundary)
-            self.app.state.view_mode = "edit"
+
+        self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
 
         # Update UI
         self.app.canvas_renderer.mark_dirty()

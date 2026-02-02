@@ -60,7 +60,7 @@ from elliptica.pde.register import register_all_pdes
 from elliptica.pde import PDERegistry
 from elliptica.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 from elliptica.app.core import AppState
-from elliptica.app.state_manager import StateManager
+from elliptica.app.state_manager import StateKey, StateManager
 from elliptica.app import actions
 from elliptica.ui.dpg.render_modal import RenderModalController
 from elliptica.ui.dpg.render_orchestrator import RenderOrchestrator
@@ -160,6 +160,9 @@ class EllipticaApp:
         device_name = backend.upper() if backend else "CPU"
         print(f"GPU acceleration: {device_name}")
 
+        # StateManager must be created before controllers that subscribe to it.
+        self.state_manager = StateManager(self.state, self.state_lock)
+
         # Initialize controllers
         self.canvas_renderer = CanvasRenderer(self)
         self.display_pipeline = DisplayPipelineController(self)
@@ -172,7 +175,6 @@ class EllipticaApp:
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
         self.boundary_controls = BoundaryControlsPanel(self)
-        self.state_manager = StateManager(self.state, self.state_lock)
 
         # Seed a demo boundary if project is empty so the canvas has content for manual testing.
         if not self.state.project.boundary_objects:
@@ -585,10 +587,10 @@ class EllipticaApp:
 
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:
-            if self.state.view_mode != "edit":
-                self.state.view_mode = "edit"
-                self.canvas_controller.drag_active = False
-                self.canvas_renderer.mark_dirty()
+            should_switch = self.state.view_mode != "edit"
+        if should_switch:
+            self.state_manager.update(StateKey.VIEW_MODE, "edit")
+            self.canvas_controller.drag_active = False
         self._update_control_visibility()
         dpg.set_value("status_text", "Edit mode.")
 

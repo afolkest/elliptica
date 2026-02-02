@@ -7,6 +7,7 @@ from typing import Optional, TYPE_CHECKING
 import numpy as np
 
 from elliptica.app.core import RenderCache
+from elliptica.app.state_manager import StateKey
 from elliptica import defaults
 from elliptica.pipeline import perform_render
 from elliptica.serialization import compute_project_fingerprint
@@ -279,9 +280,8 @@ class RenderOrchestrator:
             # Render succeeded - update UI
             self.app.display_pipeline.refresh_display()
             self.app.canvas_controller.drag_active = False
-            with self.app.state_lock:
-                self.app.state.view_mode = "render"
-                self.app.state.clear_selection()  # Clear selection when entering render mode
+            self.app.state_manager.update(StateKey.VIEW_MODE, "render")
+            self.app.state_manager.clear_selection()
             self.app._update_control_visibility()
             self.app.postprocess_panel.update_context_ui()  # Update UI for no selection
             self.app.file_io.sync_palette_ui()  # Sync palette text when entering render mode
