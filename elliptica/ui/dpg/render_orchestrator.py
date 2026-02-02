@@ -2,7 +2,6 @@
 
 from concurrent.futures import ThreadPoolExecutor, Future
 from dataclasses import replace
-from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 import numpy as np

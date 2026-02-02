@@ -1,7 +1,7 @@
 """Mask rasterization and interior detection for boundary colorization."""
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt, binary_fill_holes, zoom
+from scipy.ndimage import binary_fill_holes, zoom
 from typing import Optional
 
 from elliptica.mask_utils import blur_mask

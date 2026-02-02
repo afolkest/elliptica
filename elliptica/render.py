@@ -3,9 +3,7 @@ import numpy as np
 from collections import OrderedDict
 from PIL import Image
 from pathlib import Path
-from datetime import datetime
 from scipy.ndimage import gaussian_filter, zoom
-from elliptica.types import Project
 from elliptica.lic import convolve, get_cosine_kernel
 from elliptica import defaults
 from elliptica.colorspace.oklch_palette import build_oklch_lut

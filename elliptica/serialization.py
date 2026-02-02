@@ -7,7 +7,6 @@ import zipfile
 import hashlib
 from pathlib import Path
 from typing import Any
-from dataclasses import asdict
 from datetime import datetime
 from io import BytesIO
 
