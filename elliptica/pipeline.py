@@ -11,9 +11,6 @@ from elliptica.field_pde import compute_field_pde
 from elliptica.postprocess.masks import rasterize_boundary_masks
 from elliptica.render import (
     compute_lic,
-    downsample_lic,
-    apply_gaussian_highpass,
-    list_color_palettes,
 )
 
 
@@ -40,69 +37,6 @@ class RenderResult:
     solution: dict[str, np.ndarray] | None = None
 
 
-@dataclass
-class PostProcessConfig:
-    """Configuration for post-processing."""
-
-    detail_enabled: bool = False
-    detail_sigma_factor: float = 0.02
-
-
-def get_palette_name(palette_index: int) -> str | None:
-    """Get palette name from index."""
-    palettes = list_color_palettes()
-    if not palettes:
-        return None
-    idx = palette_index % len(palettes)
-    return palettes[idx]
-
-
-def compute_reference_resolution(
-    compute_resolution: tuple[int, int],
-    canvas_resolution: tuple[int, int],
-    render_multiplier: float,
-    supersample: float,
-) -> float:
-    """Compute reference resolution for sigma calculations."""
-    compute_h, compute_w = compute_resolution
-    if compute_h > 0 and compute_w > 0:
-        return float(min(compute_h, compute_w))
-    canvas_min = float(min(canvas_resolution))
-    if render_multiplier > 0:
-        return canvas_min * render_multiplier * supersample
-    return canvas_min
-
-
-def apply_postprocess(
-    original: np.ndarray,
-    config: PostProcessConfig,
-    reference_size: float,
-) -> np.ndarray:
-    """Apply post-processing pipeline to rendered array.
-
-    Returns processed array without mutating input.
-    """
-    working = original.astype(np.float32, copy=True)
-
-    if config.detail_enabled:
-        detail_sigma = max(config.detail_sigma_factor, 0.0) * reference_size
-        if detail_sigma > 0.0:
-            working = apply_gaussian_highpass(working, detail_sigma)
-
-    return working
-
-
-def downsample_for_display(
-    highres: np.ndarray,
-    target_shape: tuple[int, int],
-    supersample: float,
-    sigma_factor: float,
-) -> np.ndarray:
-    """Downsample high-resolution array for display."""
-    sigma = sigma_factor * supersample
-    return downsample_lic(highres, target_shape, supersample, sigma)
-
-
 def perform_render(
     project: Project,
     multiplier: float,
@@ -115,6 +49,8 @@ def perform_render(
     use_mask: bool = True,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    domain_edge_gain_strength: float = 0.0,
+    domain_edge_gain_power: float = 2.0,
     solve_scale: float = 1.0,
 ) -> RenderResult | None:
     """Execute full render pipeline.
@@ -236,6 +172,8 @@ def perform_render(
         mask=lic_mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
     )
     t_lic_end = time.time()
     print(f"  LIC completed in {t_lic_end - t_lic_start:.2f}s")

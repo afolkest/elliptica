@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from scipy import ndimage
 
+from elliptica.app.state_manager import StateKey
+
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
@@ -34,9 +36,22 @@ class CanvasRenderer:
         self.app = app
         self.canvas_dirty: bool = True
 
-        # Cache for selection outline contour
+        # Cache for selection outline contour (render mode)
         self._selection_contours: list[np.ndarray] | None = None
         self._selection_cache_key: tuple = ()  # (selected_idx, render_cache_id)
+
+        # Cache for boundary contours in edit mode: boundary_idx -> (mask_id, contours_at_origin)
+        self._boundary_contour_cache: dict[int, tuple[int, list[np.ndarray]]] = {}
+
+        # Subscribe to interaction state changes that require canvas redraw
+        for key in (StateKey.VIEW_MODE, StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            app.state_manager.subscribe(key, self._on_interaction_changed)
+
+    def _on_interaction_changed(self, key, value, context) -> None:
+        """Mark canvas dirty when interaction state changes."""
+        self.mark_dirty()
+        if key in (StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            self.invalidate_selection_contour()
 
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""
@@ -47,51 +62,52 @@ class CanvasRenderer:
         self._selection_contours = None
         self._selection_cache_key = ()
 
+    def invalidate_boundary_contour_cache(self, idx: int = -1) -> None:
+        """Clear contour cache for boundary (or all if idx=-1).
+
+        Note: Cache uses id(mask) for validation. This assumes masks are not
+        modified in-place. Position drags reuse the same mask object, so the
+        cache remains valid. Scaling creates a new mask object, causing a cache miss.
+        """
+        if idx < 0:
+            self._boundary_contour_cache.clear()
+        else:
+            self._boundary_contour_cache.pop(idx, None)
+
     def _extract_contours(self, mask: np.ndarray) -> list[np.ndarray]:
         """Extract ordered contour points from a mask.
 
-        Uses skimage if available, otherwise falls back to scipy-based method.
+        Uses skimage marching squares if available, otherwise a scipy-based
+        boundary extraction with angle-sorted ordering.
         Returns list of Nx2 arrays of (x, y) points.
         """
         try:
             from skimage import measure
             contours = measure.find_contours(mask, 0.5)
-            # Convert (row, col) to (x, y)
             return [np.column_stack([c[:, 1], c[:, 0]]) for c in contours]
         except ImportError:
-            return self._extract_contours_fallback(mask)
+            pass
 
-    def _extract_contours_fallback(self, mask: np.ndarray) -> list[np.ndarray]:
-        """Extract contours using scipy (fallback when skimage unavailable)."""
+        # Fallback: boundary detection with angle-sorted ordering
         binary = (mask > 0.5).astype(np.uint8)
         eroded = ndimage.binary_erosion(binary)
         boundary = binary & ~eroded
 
-        # Label connected components of boundary
-        labeled, num_features = ndimage.label(boundary)
+        # Use 8-connectivity so diagonal boundary pixels stay connected
+        struct = ndimage.generate_binary_structure(2, 2)
+        labeled, num_features = ndimage.label(boundary, structure=struct)
 
         contours = []
         for i in range(1, num_features + 1):
             rows, cols = np.where(labeled == i)
-            if len(rows) < 20:
+            if len(rows) < 10:
                 continue
 
-            # Order points using nearest neighbor heuristic
-            points = list(zip(cols.astype(float), rows.astype(float)))
-            ordered = [points.pop(0)]
-
-            while points:
-                last = ordered[-1]
-                min_dist = float('inf')
-                min_idx = 0
-                for j, p in enumerate(points):
-                    dist = (p[0] - last[0])**2 + (p[1] - last[1])**2
-                    if dist < min_dist:
-                        min_dist = dist
-                        min_idx = j
-                ordered.append(points.pop(min_idx))
-
-            contours.append(np.array(ordered))
+            # Order points by angle from centroid (works for simple loops)
+            cx, cy = cols.mean(), rows.mean()
+            angles = np.arctan2(rows - cy, cols - cx)
+            order = np.argsort(angles)
+            contours.append(np.column_stack([cols[order].astype(float), rows[order].astype(float)]))
 
         return contours
 
@@ -150,28 +166,75 @@ class CanvasRenderer:
 
     def _draw_dashed_contour(self, contour: np.ndarray, parent,
                               dash_length: int = 8, gap_length: int = 6,
-                              color=(255, 255, 255, 220), thickness: float = 2.0) -> None:
-        """Draw a contour as a dashed white line with black outline for visibility."""
+                              color=(255, 255, 255, 220), thickness: float = 2.0,
+                              zoom: float = 1.0) -> None:
+        """Draw a contour as a dashed white line with black outline for visibility.
+
+        Args:
+            contour: Nx2 array of (x, y) points
+            parent: DearPyGui parent node
+            dash_length: Base dash length in pixels (scaled by 1/zoom)
+            gap_length: Base gap length in pixels (scaled by 1/zoom)
+            color: Line color RGBA
+            thickness: Base line thickness in pixels (scaled by 1/zoom)
+            zoom: Current zoom level (used to scale visual elements)
+        """
         if len(contour) < 2:
             return
 
+        # Scale visual parameters by inverse zoom to maintain consistent screen-space appearance
+        effective_zoom = zoom if zoom > 0 else 1.0
+        effective_dash = max(2, int(dash_length / effective_zoom))
+        effective_gap = max(2, int(gap_length / effective_zoom))
+        effective_thickness = thickness / effective_zoom
+        effective_outline_extra = 1.5 / effective_zoom
+
         # Points are roughly 1 pixel apart, so we can use point count for dash length
-        period = dash_length + gap_length
+        period = effective_dash + effective_gap
         i = 0
         while i < len(contour):
-            end = min(i + dash_length, len(contour))
+            end = min(i + effective_dash, len(contour))
             segment = contour[i:end]
             if len(segment) >= 2:
                 points = [tuple(p) for p in segment]
                 # Draw black outline first (slightly thicker)
-                dpg.draw_polyline(points, color=(0, 0, 0, 180), thickness=thickness + 1.5, parent=parent)
+                dpg.draw_polyline(points, color=(0, 0, 0, 180), thickness=effective_thickness + effective_outline_extra, parent=parent)
                 # Draw white line on top
-                dpg.draw_polyline(points, color=color, thickness=thickness, parent=parent)
+                dpg.draw_polyline(points, color=color, thickness=effective_thickness, parent=parent)
             i += period
 
-    def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float) -> list[np.ndarray]:
-        """Extract contours from boundary mask and offset to canvas position."""
+    def _get_boundary_contours(self, boundary, offset_x: float, offset_y: float, idx: int = -1) -> list[np.ndarray]:
+        """Extract contours from boundary mask and offset to canvas position.
+
+        Caches contours by mask identity to avoid recomputing during drags.
+        The cache key is id(mask), which doesn't change during position drags
+        but does change when mask is recreated (e.g., during scaling).
+
+        Args:
+            boundary: BoundaryObject with mask
+            offset_x, offset_y: Canvas position offset
+            idx: Boundary index for caching (-1 disables caching)
+        """
+        # Check cache - mask object identity doesn't change during position drag
+        mask_id = id(boundary.mask)
+        if idx >= 0 and idx in self._boundary_contour_cache:
+            cached_mask_id, cached_contours = self._boundary_contour_cache[idx]
+            if cached_mask_id == mask_id:
+                # Reuse cached contours, just apply new offset
+                result = []
+                for contour in cached_contours:
+                    offset_contour = contour.copy()
+                    offset_contour[:, 0] += offset_x
+                    offset_contour[:, 1] += offset_y
+                    result.append(offset_contour)
+                return result
+
+        # Cache miss - extract contours at origin and cache
         contours = self._extract_contours(boundary.mask)
+        if idx >= 0:
+            self._boundary_contour_cache[idx] = (mask_id, contours)
+
+        # Apply offset for return
         result = []
         for contour in contours:
             offset_contour = contour.copy()
@@ -200,16 +263,32 @@ class CanvasRenderer:
             render_cache = self.app.state.render_cache
             view_mode = self.app.state.view_mode
 
-        # Get box selection state from controller
+        # Get box selection state and zoom from controller
         box_select_active = self.app.canvas_controller.box_select_active
         box_start = self.app.canvas_controller.box_select_start
         box_end = self.app.canvas_controller.box_select_end
+        zoom = self.app.canvas_controller.zoom
 
         # Clear the layer (transform persists on layer)
         dpg.delete_item(self.app.canvas_layer_id, children_only=True)
 
         # Draw background
         dpg.draw_rectangle((0, 0), (canvas_w, canvas_h), color=(60, 60, 60, 255), fill=(20, 20, 20, 255), parent=self.app.canvas_layer_id)
+
+        # Draw canvas boundary indicator (edit mode only)
+        # This provides visual feedback about the logical canvas bounds
+        if view_mode == "edit":
+            effective_zoom = zoom if zoom > 0 else 1.0
+            boundary_thickness = 2.0 / effective_zoom
+
+            # Subtle blue-gray border around canvas bounds
+            dpg.draw_rectangle(
+                (0, 0), (canvas_w, canvas_h),
+                color=(100, 120, 150, 200),
+                fill=(0, 0, 0, 0),  # No fill, just border
+                thickness=boundary_thickness,
+                parent=self.app.canvas_layer_id,
+            )
 
         # Draw grid in edit mode (based on physical units, not pixels)
         if view_mode == "edit":
@@ -220,12 +299,17 @@ class CanvasRenderer:
             mid_x = canvas_w / 2.0
             mid_y = canvas_h / 2.0
 
+            # Scale line thickness by inverse zoom for consistent screen appearance
+            effective_zoom = zoom if zoom > 0 else 1.0
+            base_thickness = 1.0 / effective_zoom
+            midline_thickness = 2.5 / effective_zoom
+
             # Vertical grid lines
             x = 0.0
             while x <= canvas_w:
                 is_midline = abs(x - mid_x) < 0.5
                 color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
-                thickness = 2.5 if is_midline else 1.0
+                thickness = midline_thickness if is_midline else base_thickness
                 dpg.draw_line((x, 0), (x, canvas_h), color=color, thickness=thickness, parent=self.app.canvas_layer_id)
                 x += grid_spacing_x
 
@@ -234,7 +318,7 @@ class CanvasRenderer:
             while y <= canvas_h:
                 is_midline = abs(y - mid_y) < 0.5
                 color = (120, 120, 140, 180) if is_midline else (50, 50, 50, 100)
-                thickness = 2.5 if is_midline else 1.0
+                thickness = midline_thickness if is_midline else base_thickness
                 dpg.draw_line((0, y), (canvas_w, y), color=color, thickness=thickness, parent=self.app.canvas_layer_id)
                 y += grid_spacing_y
 
@@ -258,7 +342,7 @@ class CanvasRenderer:
                 contours = self._get_selection_contours(selected_idx, selected_region_type, render_cache, canvas_w, canvas_h)
                 if contours:
                     for contour in contours:
-                        self._draw_dashed_contour(contour, self.app.canvas_layer_id)
+                        self._draw_dashed_contour(contour, self.app.canvas_layer_id, zoom=zoom)
 
         if view_mode == "edit" or render_cache is None:
             for idx, boundary in enumerate(boundaries):
@@ -274,25 +358,44 @@ class CanvasRenderer:
                     uv_max=(1.0, 1.0),
                     parent=self.app.canvas_layer_id,
                 )
-                # Draw contour outline for selected boundaries
-                if idx in selected_indices:
-                    contours = self._get_boundary_contours(boundary, x0, y0)
+                # Draw contour outline for selected boundaries (skip during drag/scale for performance)
+                if idx in selected_indices and not self.app.canvas_controller.drag_active and not self.app.canvas_controller.scaling_active:
+                    contours = self._get_boundary_contours(boundary, x0, y0, idx=idx)
                     for contour in contours:
                         self._draw_dashed_contour(
                             contour, self.app.canvas_layer_id,
                             color=(255, 255, 100, 220),  # Yellow selection color
-                            thickness=2.0
+                            thickness=2.0,
+                            zoom=zoom
+                        )
+
+                # Draw off-canvas warning indicator for selected boundaries
+                if idx in selected_indices:
+                    is_off_canvas = (x0 < 0 or y0 < 0 or
+                                     x0 + width > canvas_w or y0 + height > canvas_h)
+                    if is_off_canvas:
+                        effective_zoom = zoom if zoom > 0 else 1.0
+                        warn_thickness = 1.5 / effective_zoom
+                        dpg.draw_rectangle(
+                            (x0, y0), (x0 + width, y0 + height),
+                            color=(255, 180, 0, 150),  # Orange warning
+                            fill=(0, 0, 0, 0),
+                            thickness=warn_thickness,
+                            parent=self.app.canvas_layer_id,
                         )
 
             # Draw box selection rectangle
             if box_select_active:
                 x1, y1 = box_start
                 x2, y2 = box_end
+                # Scale thickness by inverse zoom for consistent screen appearance
+                effective_zoom = zoom if zoom > 0 else 1.0
+                box_thickness = 1.5 / effective_zoom
                 dpg.draw_rectangle(
                     (min(x1, x2), min(y1, y2)),
                     (max(x1, x2), max(y1, y2)),
                     color=(100, 150, 255, 200),
                     fill=(100, 150, 255, 40),
-                    thickness=1.5,
+                    thickness=box_thickness,
                     parent=self.app.canvas_layer_id,
                 )

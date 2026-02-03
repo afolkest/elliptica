@@ -1,9 +1,30 @@
 """GPU-accelerated image processing operations."""
 
+import math
 import torch
+import torch.nn.functional as F
 import numpy as np
-from torchvision.transforms.functional import gaussian_blur
 from typing import Tuple
+
+
+def _gaussian_kernel_1d(sigma: float, kernel_size: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """Build a normalized 1D Gaussian kernel."""
+    x = torch.arange(kernel_size, device=device, dtype=dtype) - (kernel_size - 1) / 2.0
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    return kernel / kernel.sum()
+
+
+def _gaussian_blur_2d(tensor_4d: torch.Tensor, kernel_size: int, sigma: float) -> torch.Tensor:
+    """Apply separable Gaussian blur using conv2d (replaces torchvision.gaussian_blur)."""
+    k = _gaussian_kernel_1d(sigma, kernel_size, tensor_4d.device, tensor_4d.dtype)
+    # Separable: horizontal then vertical
+    k_h = k.view(1, 1, 1, kernel_size)
+    k_v = k.view(1, 1, kernel_size, 1)
+    pad_h = kernel_size // 2
+    pad_v = kernel_size // 2
+    out = F.conv2d(tensor_4d, k_h, padding=(0, pad_h))
+    out = F.conv2d(out, k_v, padding=(pad_v, 0))
+    return out
 
 
 def quantile_safe(tensor: torch.Tensor, quantiles: torch.Tensor) -> torch.Tensor:
@@ -40,7 +61,7 @@ def quantile_safe(tensor: torch.Tensor, quantiles: torch.Tensor) -> torch.Tensor
 
 
 def gaussian_blur_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
-    """Apply Gaussian blur on GPU using torchvision.
+    """Apply Gaussian blur on GPU.
 
     Args:
         tensor: 2D tensor (H, W) on GPU
@@ -52,15 +73,13 @@ def gaussian_blur_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
     if sigma <= 0:
         return tensor
 
-    # torchvision expects (B, C, H, W) format
     tensor_4d = tensor.unsqueeze(0).unsqueeze(0)
 
     # Calculate kernel size from sigma (rule of thumb: 6*sigma + 1, ensure odd)
     kernel_size = max(3, (int(6 * sigma)) | 1)
 
-    blurred_4d = gaussian_blur(tensor_4d, kernel_size=[kernel_size, kernel_size], sigma=sigma)
+    blurred_4d = _gaussian_blur_2d(tensor_4d, kernel_size, sigma)
 
-    # Return to 2D format
     return blurred_4d.squeeze(0).squeeze(0)
 
 
@@ -185,32 +204,11 @@ def grayscale_to_rgb_gpu(tensor: torch.Tensor) -> torch.Tensor:
     return rgb
 
 
-def apply_highpass_gpu(tensor: torch.Tensor, sigma: float) -> torch.Tensor:
-    """Apply Gaussian high-pass filter on GPU.
-
-    Subtracts Gaussian blur from the input tensor to emphasize high-frequency details.
-
-    Args:
-        tensor: 2D tensor (H, W) on GPU
-        sigma: Gaussian blur standard deviation
-
-    Returns:
-        High-pass filtered tensor (H, W) on GPU with unbounded range
-    """
-    if sigma <= 0:
-        return tensor.clone()
-
-    # High-pass = original - lowpass(blur)
-    blurred = gaussian_blur_gpu(tensor, sigma)
-    return tensor - blurred
-
-
 __all__ = [
     'gaussian_blur_gpu',
     'percentile_clip_gpu',
     'apply_contrast_gamma_gpu',
     'apply_palette_lut_gpu',
     'grayscale_to_rgb_gpu',
-    'apply_highpass_gpu',
     'quantile_safe',
 ]

@@ -2,6 +2,7 @@
 
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from elliptica.app import actions
+from elliptica.app.state_manager import StateKey
 from elliptica.pde import PDERegistry
 
 if TYPE_CHECKING:
@@ -32,6 +33,14 @@ class BoundaryControlsPanel:
         self.enum_choices: Dict[str, list] = {}
         # Cache for field definitions by name
         self.field_defs: Dict[str, Any] = {}
+
+    def wire_subscribers(self) -> None:
+        """Register StateManager subscribers (call after UI widgets exist)."""
+        self.app.state_manager.subscribe(StateKey.SELECTED_INDICES, self._on_selection_changed)
+
+    def _on_selection_changed(self, key, value, context) -> None:
+        """Subscriber callback: update header labels when selection changes."""
+        self.update_header_labels()
 
     def build_container(self, parent) -> None:
         """Build controls container in edit controls panel."""
@@ -115,17 +124,23 @@ class BoundaryControlsPanel:
                     if widget_id is not None:
                         self.field_ids[idx][field.name] = widget_id
 
+                # Consistent indent and width for all controls
+                INDENT = 15
+                CONTROL_WIDTH = 180
+
                 # Dynamic sliders for PDE parameters (legacy boundary_params)
                 for param in params_meta:
                     current_val = boundary.params.get(param.name, param.default_value)
 
                     with dpg.group(horizontal=True):
+                        dpg.add_spacer(width=INDENT)
                         slider_id = dpg.add_slider_float(
                             label="",
                             default_value=float(current_val),
                             min_value=param.min_value,
                             max_value=param.max_value,
                             format="%.3f",
+                            width=CONTROL_WIDTH,
                             callback=self.on_param_slider,
                             user_data={"idx": idx, "param": param.name},
                         )
@@ -135,16 +150,20 @@ class BoundaryControlsPanel:
                                 dpg.add_text(param.description)
                     self.slider_ids[idx][param.name] = slider_id
 
-                # Edge smoothing slider (inline, no header)
-                dpg.add_slider_float(
-                    label="Edge Smooth",
-                    default_value=float(boundary.edge_smooth_sigma),
-                    min_value=0.0,
-                    max_value=5.0,
-                    format="%.1f px",
-                    callback=self.on_edge_smooth_slider,
-                    user_data=idx,
-                )
+                # Edge smoothing slider
+                with dpg.group(horizontal=True):
+                    dpg.add_spacer(width=INDENT)
+                    dpg.add_slider_float(
+                        label="",
+                        default_value=float(boundary.edge_smooth_sigma),
+                        min_value=0.0,
+                        max_value=5.0,
+                        format="%.1f px",
+                        width=CONTROL_WIDTH,
+                        callback=self.on_edge_smooth_slider,
+                        user_data=idx,
+                    )
+                    dpg.add_text("Edge Smooth")
 
         # Set initial visibility based on field values
         self._update_field_visibility()
@@ -190,24 +209,40 @@ class BoundaryControlsPanel:
         if dpg is None:
             return None
 
-        # Wrap in a horizontal group: widget first, then label with tooltip
+        # Consistent indent and width for all controls
+        INDENT = 15
+        CONTROL_WIDTH = 180
+
+        # Wrap in a horizontal group: spacer + widget + label
         group_id = dpg.add_group(horizontal=True)
+        dpg.add_spacer(width=INDENT, parent=group_id)
+
+        is_bc_type = field.name == "bc_type"
 
         if field.field_type == "enum":
-            labels = [lbl for lbl, _ in field.choices]
-            # Find current label
-            current_label = labels[0] if labels else ""
+            # Create simplified labels (strip parenthetical explanations for cleaner UI)
+            # e.g., "Dirichlet (fixed V)" -> "Dirichlet"
+            short_labels = []
+            label_to_full = {}  # Map short label back to full label for lookup
+            for lbl, _ in field.choices:
+                short = lbl.split(" (")[0] if " (" in lbl else lbl
+                short_labels.append(short)
+                label_to_full[short] = lbl
+
+            # Find current short label
+            current_short = short_labels[0] if short_labels else ""
             for lbl, val in field.choices:
                 if val == current_val:
-                    current_label = lbl
+                    current_short = lbl.split(" (")[0] if " (" in lbl else lbl
                     break
-            dpg.add_combo(
+
+            combo_id = dpg.add_combo(
                 label="",
-                items=labels,
-                default_value=current_label,
-                width=180,
+                items=short_labels,
+                default_value=current_short,
+                width=CONTROL_WIDTH,
                 callback=self._on_field_changed,
-                user_data={"idx": idx, "field": field.name},
+                user_data={"idx": idx, "field": field.name, "label_map": label_to_full},
                 parent=group_id,
             )
         elif field.field_type == "bool":
@@ -222,7 +257,7 @@ class BoundaryControlsPanel:
             dpg.add_input_int(
                 label="",
                 default_value=int(current_val),
-                width=120,
+                width=CONTROL_WIDTH,
                 min_value=int(field.min_value) if field.min_value is not None else 0,
                 max_value=int(field.max_value) if field.max_value is not None else 2147483647,
                 callback=self._on_field_changed,
@@ -236,16 +271,18 @@ class BoundaryControlsPanel:
                 min_value=field.min_value if field.min_value is not None else -1e9,
                 max_value=field.max_value if field.max_value is not None else 1e9,
                 format="%.3f",
+                width=CONTROL_WIDTH,
                 callback=self._on_field_changed,
                 user_data={"idx": idx, "field": field.name},
                 parent=group_id,
             )
 
-        # Label with tooltip (after widget)
-        field_label = dpg.add_text(field.display_name, parent=group_id)
-        if field.description:
-            with dpg.tooltip(field_label):
-                dpg.add_text(field.description)
+        # Label with tooltip (after widget) - skip for bc_type
+        if not is_bc_type:
+            field_label = dpg.add_text(field.display_name, parent=group_id)
+            if field.description:
+                with dpg.tooltip(field_label):
+                    dpg.add_text(field.description)
 
         return group_id
 
@@ -262,10 +299,14 @@ class BoundaryControlsPanel:
 
         # Convert value based on field type
         if field_def.field_type == "enum":
-            # app_data is the selected label, convert to value
+            # app_data is the selected short label, need to find matching value
+            # Use label_map if available to get full label, then find value
+            label_map = user_data.get("label_map", {})
+            full_label = label_map.get(app_data, app_data)
             value = None
             for lbl, val in self.enum_choices.get(field_name, []):
-                if lbl == app_data:
+                # Match against full label or short label
+                if lbl == full_label or lbl.split(" (")[0] == app_data:
                     value = val
                     break
             if value is None:
@@ -295,10 +336,14 @@ class BoundaryControlsPanel:
         """Get the actual widget (combo/slider/etc) from a field group. Returns None if not found."""
         if dpg is None or not dpg.does_item_exist(group_id):
             return None
-        # Children are [widget, label_text] - we want the widget (first child)
+        # Children may be [spacer, widget, label_text] or [widget, label_text]
+        # Find the first non-spacer widget
         children = dpg.get_item_children(group_id, 1)  # slot 1 = most children
-        if children and len(children) >= 1:
-            return children[0]  # First child is the widget
+        for child in children:
+            item_type = dpg.get_item_type(child)
+            # Skip spacers, look for actual input widgets
+            if "Spacer" not in item_type:
+                return child
         return None
 
     def _update_field_visibility(self) -> None:
@@ -317,9 +362,11 @@ class BoundaryControlsPanel:
                 if widget_id is None:
                     continue
                 if field_def.field_type == "enum":
-                    label = dpg.get_value(widget_id)
+                    short_label = dpg.get_value(widget_id)
                     for lbl, val in self.enum_choices.get(field_name, []):
-                        if lbl == label:
+                        # Match against full label or short label (without parenthetical)
+                        full_short = lbl.split(" (")[0] if " (" in lbl else lbl
+                        if lbl == short_label or full_short == short_label:
                             current_values[field_name] = val
                             break
                 else:

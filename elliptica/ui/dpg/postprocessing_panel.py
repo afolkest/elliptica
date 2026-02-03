@@ -3,11 +3,11 @@
 import time
 import numpy as np
 from PIL import Image
-from typing import Optional, Literal, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 from elliptica import defaults
-from elliptica.app import actions
 from elliptica.app.core import resolve_region_postprocess_params
+from elliptica.app.state_manager import StateKey
 from elliptica.colorspace import (
     build_oklch_lut,
     gamut_map_to_srgb,
@@ -42,28 +42,6 @@ class PostprocessingPanel:
         """
         self.app = app
 
-        # Widget IDs for postprocessing sliders
-        self.postprocess_clip_low_slider_id: Optional[int] = None
-        self.postprocess_clip_high_slider_id: Optional[int] = None
-        self.postprocess_brightness_slider_id: Optional[int] = None
-        self.postprocess_contrast_slider_id: Optional[int] = None
-        self.postprocess_gamma_slider_id: Optional[int] = None
-
-        # Widget IDs for smear controls
-        self.smear_enabled_checkbox_id: Optional[int] = None
-        self.smear_sigma_slider_id: Optional[int] = None
-
-        # Widget IDs for expression editor
-        self.expr_L_input_id: Optional[int] = None
-        self.expr_C_input_id: Optional[int] = None
-        self.expr_H_input_id: Optional[int] = None
-        self.expr_error_text_id: Optional[int] = None
-        self.expr_preset_combo_id: Optional[int] = None
-
-        # Widget IDs for lightness expression (palette mode)
-        self.lightness_expr_checkbox_id: Optional[int] = None
-        self.lightness_expr_input_id: Optional[int] = None
-
         # Palette preview + histogram UI
         self.palette_preview_width = 320
         self.palette_preview_height = 22
@@ -87,7 +65,6 @@ class PostprocessingPanel:
         self.palette_editor_for_region: bool = False
         self.palette_editor_group_id: Optional[int] = None
         self.palette_editor_title_id: Optional[int] = None
-        self.palette_editor_done_button_id: Optional[int] = None
         self.palette_editor_gradient_drawlist_id: Optional[int] = None
         self.palette_editor_slice_drawlist_id: Optional[int] = None
         self.palette_editor_l_gradient_drawlist_id: Optional[int] = None
@@ -144,32 +121,10 @@ class PostprocessingPanel:
         self.delete_confirmation_modal_id: Optional[int] = None
         self.pending_delete_palette: Optional[str] = None
 
-        # Debouncing for expensive smear updates
-        self.smear_pending_value: Optional[float] = None
-        self.smear_last_update_time: float = 0.0
-        self.smear_debounce_delay: float = 0.3  # 300ms delay
 
-        # Debouncing for expensive clip updates (percentile computation at high res)
-        self.clip_pending_range: Optional[tuple[float, float]] = None
-        self.clip_last_update_time: float = 0.0
-        self.clip_debounce_delay: float = 0.3  # 300ms delay
-
-        # Debouncing for expression updates
-        self.expr_pending_update: bool = False
-        self.expr_last_update_time: float = 0.0
-        self.expr_debounce_delay: float = 0.3  # 300ms delay
-
-        # Debouncing for lightness expression updates
-        self.lightness_expr_pending_update: bool = False
-        self.lightness_expr_last_update_time: float = 0.0
-        # Target for pending lightness expr update: "global", or (boundary_id, region_type) tuple
-        self.lightness_expr_pending_target: str | tuple[int, str] | None = None
-
-        # Cache for custom lightness expressions (preserved when switching to Global mode)
-        # Key: (boundary_id, region_type), Value: expression string
+        # UI draft memory for lightness expressions (NOT state caches — these store
+        # values intentionally removed from AppState so toggle on/off can restore them)
         self._cached_custom_lightness_exprs: dict[tuple[int, str], str] = {}
-
-        # Cache for global lightness expression (preserved when disabling)
         self._cached_global_lightness_expr: str | None = None
 
         # Themes for grayed-out appearance
@@ -316,6 +271,16 @@ class PostprocessingPanel:
             region_style = settings.surface if region_type == "surface" else settings.interior
             return (region_style.enabled, selected.id, region_type)
 
+    def wire_subscribers(self) -> None:
+        """Register StateManager subscribers (call after UI widgets exist)."""
+        for key in (StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            self.app.state_manager.subscribe(key, self._on_selection_changed)
+
+    def _on_selection_changed(self, key, value, context) -> None:
+        """Subscriber callback: refresh context UI when selection changes."""
+        self.app.state_manager.flush_pending()
+        self.update_context_ui()
+
     def build_postprocessing_ui(self, parent, palette_colormaps: dict) -> None:
         """Build postprocessing sliders, color controls, and region properties UI.
 
@@ -378,7 +343,7 @@ class PostprocessingPanel:
                 # Sliders (fixed position)
                 dpg.add_spacer(height=10)
 
-                self.postprocess_clip_low_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Clip low %",
                     default_value=self.app.state.display_settings.clip_low_percent,
                     min_value=0.0,
@@ -388,7 +353,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="clip_low_slider",
                 )
-                self.postprocess_clip_high_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Clip high %",
                     default_value=self.app.state.display_settings.clip_high_percent,
                     min_value=0.0,
@@ -399,7 +364,7 @@ class PostprocessingPanel:
                     tag="clip_high_slider",
                 )
 
-                self.postprocess_brightness_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Brightness",
                     default_value=self.app.state.display_settings.brightness,
                     min_value=defaults.MIN_BRIGHTNESS,
@@ -409,7 +374,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="brightness_slider",
                 )
-                self.postprocess_contrast_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Contrast",
                     default_value=self.app.state.display_settings.contrast,
                     min_value=defaults.MIN_CONTRAST,
@@ -419,7 +384,7 @@ class PostprocessingPanel:
                     width=200,
                     tag="contrast_slider",
                 )
-                self.postprocess_gamma_slider_id = dpg.add_slider_float(
+                dpg.add_slider_float(
                     label="Gamma",
                     default_value=self.app.state.display_settings.gamma,
                     min_value=defaults.MIN_GAMMA,
@@ -436,10 +401,12 @@ class PostprocessingPanel:
                 dpg.add_spacer(height=8)
 
                 with dpg.group(horizontal=True):
-                    dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
+                    lightness_expr_lbl = dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
+                    with dpg.tooltip(lightness_expr_lbl):
+                        dpg.add_text("Custom expression for lightness mapping.\nUse 'mag', 'lic', 'angle', etc.\nExample: clipnorm(mag, 1, 99)")
                     dpg.add_spacer(width=10)
                     # Enable checkbox (for global mode)
-                    self.lightness_expr_checkbox_id = dpg.add_checkbox(
+                    dpg.add_checkbox(
                         label="",
                         default_value=self.app.state.display_settings.lightness_expr is not None,
                         callback=self.on_lightness_expr_toggle,
@@ -457,7 +424,7 @@ class PostprocessingPanel:
                     )
 
                 with dpg.group(tag="lightness_expr_group", show=self.app.state.display_settings.lightness_expr is not None):
-                    self.lightness_expr_input_id = dpg.add_input_text(
+                    dpg.add_input_text(
                         default_value=self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)",
                         width=200,
                         callback=self.on_lightness_expr_change,
@@ -492,12 +459,12 @@ class PostprocessingPanel:
         with dpg.collapsing_header(label="Effects", default_open=True,
                                    tag="effects_header", parent=parent, show=False):
             dpg.add_text("Smear", tag="smear_label")
-            self.smear_enabled_checkbox_id = dpg.add_checkbox(
+            dpg.add_checkbox(
                 label="Enable smear",
                 callback=self.on_smear_enabled,
                 tag="smear_enabled_checkbox",
             )
-            self.smear_sigma_slider_id = dpg.add_slider_float(
+            dpg.add_slider_float(
                 label="Blur strength",
                 min_value=defaults.MIN_SMEAR_SIGMA,
                 max_value=defaults.MAX_SMEAR_SIGMA,
@@ -698,7 +665,7 @@ class PostprocessingPanel:
                     color=(150, 200, 255),
                 )
                 dpg.add_spacer(width=8)
-                self.palette_editor_done_button_id = dpg.add_button(
+                dpg.add_button(
                     label="Done",
                     width=60,
                     callback=self.on_palette_editor_done,
@@ -1206,8 +1173,6 @@ class PostprocessingPanel:
         spec = self._palette_editor_build_spec()
         with self.app.state_lock:
             set_palette_spec(self.palette_editor_palette_name, spec, persist=persist)
-            if runtime_dirty:
-                self.app.state.invalidate_base_rgb()
 
         if runtime_dirty:
             updated = self.app.display_pipeline.texture_manager.update_palette_colormap(self.palette_editor_palette_name)
@@ -1241,7 +1206,7 @@ class PostprocessingPanel:
         if had_persist_changes:
             self.palette_editor_needs_colormap_rebuild = True
         if changed:
-            self.app.display_pipeline.refresh_display()
+            self.app.state_manager.update(StateKey.PALETTE, self.palette_editor_palette_name)
             self.palette_editor_last_refresh_time = time.time()
         self.palette_editor_refresh_pending = False
 
@@ -1777,10 +1742,16 @@ class PostprocessingPanel:
 
         preset_names = list_presets()
 
+        # Brief explanation
+        HELP_COLOR = (140, 140, 140)
+        dpg.add_text("Map field data to color using math expressions.", color=HELP_COLOR, parent=parent, wrap=280)
+        dpg.add_text("Use variables like 'mag' (field magnitude) and 'angle'.", color=HELP_COLOR, parent=parent, wrap=280)
+        dpg.add_spacer(height=8, parent=parent)
+
         # Preset selector
         with dpg.group(horizontal=True, parent=parent):
             dpg.add_text("Preset:")
-            self.expr_preset_combo_id = dpg.add_combo(
+            dpg.add_combo(
                 items=preset_names,
                 default_value=preset_names[0] if preset_names else "",
                 width=-1,  # Fill available width
@@ -1790,9 +1761,11 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=10, parent=parent)
 
-        # L expression
-        dpg.add_text("Lightness (L)  [0-1]", parent=parent)
-        self.expr_L_input_id = dpg.add_input_text(
+        # L expression - add tooltip
+        l_label = dpg.add_text("Lightness (L)  [0-1]", parent=parent)
+        with dpg.tooltip(l_label):
+            dpg.add_text("Controls brightness. 0 = black, 1 = white.")
+        dpg.add_input_text(
             default_value="clipnorm(lic, 0.5, 99.5)",
             width=-1,  # Fill available width
             height=45,
@@ -1805,9 +1778,11 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=6, parent=parent)
 
-        # C expression
-        dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
-        self.expr_C_input_id = dpg.add_input_text(
+        # C expression - add tooltip
+        c_label = dpg.add_text("Chroma (C)  [0-0.4]", parent=parent)
+        with dpg.tooltip(c_label):
+            dpg.add_text("Color intensity/saturation. 0 = grayscale.")
+        dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width
             height=45,
@@ -1820,9 +1795,11 @@ class PostprocessingPanel:
 
         dpg.add_spacer(height=6, parent=parent)
 
-        # H expression
-        dpg.add_text("Hue (H)  [0-360°]", parent=parent)
-        self.expr_H_input_id = dpg.add_input_text(
+        # H expression - add tooltip
+        h_label = dpg.add_text("Hue (H)  [0-360°]", parent=parent)
+        with dpg.tooltip(h_label):
+            dpg.add_text("Color hue angle. 0=red, 120=green, 240=blue.")
+        dpg.add_input_text(
             default_value="0",
             width=-1,  # Fill available width
             height=45,
@@ -1834,7 +1811,7 @@ class PostprocessingPanel:
         )
 
         # Error display
-        self.expr_error_text_id = dpg.add_text(
+        dpg.add_text(
             "",
             color=(255, 100, 100),
             tag="expr_error_text",
@@ -2414,19 +2391,6 @@ class PostprocessingPanel:
         self._update_palette_preview_buttons()
         self._request_histogram_update()
 
-    def update_region_properties_panel(self) -> None:
-        """Update region properties panel based on current selection.
-
-        This is called when selection changes. Delegates to update_context_ui.
-        """
-        # Cancel ALL pending debounced updates - context is changing
-        self.lightness_expr_pending_update = False
-        self.lightness_expr_pending_target = None
-        self.smear_pending_value = None
-        self.clip_pending_range = None
-        self.expr_pending_update = False  # Clear expression editor debounce too
-        self.update_context_ui()
-
     # ------------------------------------------------------------------
     # Region toggle callback
     # ------------------------------------------------------------------
@@ -2436,51 +2400,35 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        with self.app.state_lock:
-            self.app.state.selected_region_type = "surface" if app_data == "Surface" else "interior"
-        self.app.canvas_renderer.invalidate_selection_contour()
-        self.app.canvas_renderer.mark_dirty()
-        self.update_context_ui()
+        # Flush pending debounced updates for the previous region before switching
+        self.app.state_manager.flush_pending()
+        region_type = "surface" if app_data == "Surface" else "interior"
+        self.app.state_manager.update(StateKey.SELECTED_REGION_TYPE, region_type)
+        # Subscribers handle: invalidate_selection_contour, update_context_ui
 
     # ------------------------------------------------------------------
     # Postprocessing slider callbacks
     # ------------------------------------------------------------------
 
     def on_clip_low_slider(self, sender=None, app_data=None) -> None:
-        """Handle low clip slider change with debouncing (percentile computation is expensive at high res)."""
+        """Handle low clip slider change (debounced — percentile computation is expensive)."""
         if dpg is None:
             return
 
-        value = float(app_data)
-
-        # IMMEDIATELY update state so other refreshes use the correct value
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_low_percent = value
-            clip_low = self.app.state.display_settings.clip_low_percent
-            clip_high = self.app.state.display_settings.clip_high_percent
-            self.app.state.invalidate_base_rgb()
-
-        # Mark pending to trigger refresh after debounce delay
-        self.clip_pending_range = (clip_low, clip_high)
-        self.clip_last_update_time = time.time()
+        self.app.state_manager.update(
+            StateKey.CLIP_LOW_PERCENT, float(app_data), debounce=0.3,
+        )
+        self._request_histogram_update()
 
     def on_clip_high_slider(self, sender=None, app_data=None) -> None:
-        """Handle high clip slider change with debouncing (percentile computation is expensive at high res)."""
+        """Handle high clip slider change (debounced — percentile computation is expensive)."""
         if dpg is None:
             return
 
-        value = float(app_data)
-
-        # IMMEDIATELY update state so other refreshes use the correct value
-        with self.app.state_lock:
-            self.app.state.display_settings.clip_high_percent = value
-            clip_low = self.app.state.display_settings.clip_low_percent
-            clip_high = self.app.state.display_settings.clip_high_percent
-            self.app.state.invalidate_base_rgb()
-
-        # Mark pending to trigger refresh after debounce delay
-        self.clip_pending_range = (clip_low, clip_high)
-        self.clip_last_update_time = time.time()
+        self.app.state_manager.update(
+            StateKey.CLIP_HIGH_PERCENT, float(app_data), debounce=0.3,
+        )
+        self._request_histogram_update()
 
     def on_brightness_slider(self, sender=None, app_data=None) -> None:
         """Handle brightness slider change (real-time with GPU acceleration)."""
@@ -2490,14 +2438,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_brightness(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.brightness = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"brightness": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.BRIGHTNESS, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_contrast_slider(self, sender=None, app_data=None) -> None:
@@ -2508,14 +2456,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_contrast(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.contrast = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"contrast": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.CONTRAST, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_gamma_slider(self, sender=None, app_data=None) -> None:
@@ -2526,14 +2474,14 @@ class PostprocessingPanel:
         value = float(app_data)
         has_override, boundary_id, region_type = self._get_slider_context()
 
-        with self.app.state_lock:
-            if has_override and boundary_id is not None:
-                actions.set_region_gamma(self.app.state, boundary_id, region_type, value)
-            else:
-                self.app.state.display_settings.gamma = value
-                self.app.state.invalidate_base_rgb()
+        if has_override and boundary_id is not None:
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE, {"gamma": value},
+                context=(boundary_id, region_type),
+            )
+        else:
+            self.app.state_manager.update(StateKey.GAMMA, value)
 
-        self.app.display_pipeline.refresh_display()
         self._request_histogram_update()
 
     def on_saturation_change(self, sender=None, app_data=None) -> None:
@@ -2541,89 +2489,33 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        value = float(app_data)
-        with self.app.state_lock:
-            self.app.state.display_settings.saturation = value
-
-        self.app.display_pipeline.refresh_display()
+        self.app.state_manager.update(StateKey.SATURATION, float(app_data))
 
     # ------------------------------------------------------------------
     # Lightness expression callbacks (palette mode)
     # ------------------------------------------------------------------
 
     def on_lightness_expr_toggle(self, sender=None, app_data=None) -> None:
-        """Handle lightness expression checkbox toggle."""
+        """Handle lightness expression checkbox toggle (immediate, no debounce)."""
         if dpg is None:
             return
 
         is_enabled = bool(app_data)
-
-        # Show/hide the input field
         dpg.configure_item("lightness_expr_group", show=is_enabled)
 
         if is_enabled:
-            # Enable - use cached global expr or default (NOT the input field, which may show region expr)
             expr = self._cached_global_lightness_expr or "clipnorm(mag, 1, 99)"
-            with self.app.state_lock:
-                self.app.state.display_settings.lightness_expr = expr
-            # Update input to show the global expression
             dpg.set_value("lightness_expr_input", expr)
+            self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr)
         else:
-            # Disable - cache current global expr first
             with self.app.state_lock:
-                if self.app.state.display_settings.lightness_expr:
-                    self._cached_global_lightness_expr = self.app.state.display_settings.lightness_expr
-                self.app.state.display_settings.lightness_expr = None
-
-        self.app.display_pipeline.refresh_display()
+                current = self.app.state.display_settings.lightness_expr
+            if current:
+                self._cached_global_lightness_expr = current
+            self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, None)
 
     def on_lightness_expr_change(self, sender=None, app_data=None) -> None:
-        """Handle lightness expression text change (debounced)."""
-        if dpg is None:
-            return
-
-        # Capture the target NOW based on UI state (radio button), not region_style state
-        # The radio button reflects the user's intent directly
-        if self._is_boundary_selected():
-            mode = dpg.get_value("lightness_expr_mode_radio")
-            if mode == "Custom":
-                with self.app.state_lock:
-                    selected = self.app.state.get_selected()
-                    region_type = self.app.state.selected_region_type
-                    if selected and selected.id is not None:
-                        self.lightness_expr_pending_target = (selected.id, region_type)
-                    else:
-                        self.lightness_expr_pending_target = "global"
-            else:
-                self.lightness_expr_pending_target = "global"
-        else:
-            self.lightness_expr_pending_target = "global"
-
-        # Mark pending update and record time
-        self.lightness_expr_pending_update = True
-        self.lightness_expr_last_update_time = time.time()
-
-    def check_lightness_expr_debounce(self) -> None:
-        """Check if lightness expression update should be applied (called every frame)."""
-        if not self.lightness_expr_pending_update:
-            return
-
-        current_time = time.time()
-        if current_time - self.lightness_expr_last_update_time >= self.expr_debounce_delay:
-            # Use the target captured at input time (not current state)
-            target = self.lightness_expr_pending_target
-            if isinstance(target, tuple):
-                # Per-region update
-                boundary_id, region_type = target
-                self._apply_region_lightness_expr_update(boundary_id, region_type)
-            else:
-                # Global update
-                self._apply_lightness_expr_update()
-            self.lightness_expr_pending_update = False
-            self.lightness_expr_pending_target = None
-
-    def _apply_lightness_expr_update(self) -> None:
-        """Apply the current lightness expression from the input field."""
+        """Handle lightness expression text change (debounced via StateManager)."""
         if dpg is None:
             return
 
@@ -2631,12 +2523,27 @@ class PostprocessingPanel:
         if not expr:
             return
 
-        with self.app.state_lock:
-            self.app.state.display_settings.lightness_expr = expr
-        # Also update cache so toggling off/on preserves the latest edit
-        self._cached_global_lightness_expr = expr
+        # Route based on UI state captured NOW (radio button reflects user intent)
+        if self._is_boundary_selected():
+            mode = dpg.get_value("lightness_expr_mode_radio")
+            if mode == "Custom":
+                with self.app.state_lock:
+                    selected = self.app.state.get_selected()
+                    region_type = self.app.state.selected_region_type
+                if selected and selected.id is not None:
+                    cache_key = (selected.id, region_type)
+                    self._cached_custom_lightness_exprs[cache_key] = expr
+                    self.app.state_manager.update(
+                        StateKey.REGION_STYLE,
+                        {"lightness_expr": expr},
+                        context=(selected.id, region_type),
+                        debounce=0.3,
+                    )
+                    return
 
-        self.app.display_pipeline.refresh_display()
+        # Global update (no boundary, or Global mode, or fallback)
+        self._cached_global_lightness_expr = expr
+        self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr, debounce=0.3)
 
     # ------------------------------------------------------------------
     # Lightness expression mode (Global/Custom) callback
@@ -2647,9 +2554,8 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        # Cancel any pending debounced updates - mode is changing
-        self.lightness_expr_pending_update = False
-        self.lightness_expr_pending_target = None
+        # Flush any pending debounced lightness expr updates before mode change
+        self.app.state_manager.flush_pending()
 
         is_custom = (app_data == "Custom")
 
@@ -2657,64 +2563,37 @@ class PostprocessingPanel:
             selected = self.app.state.get_selected()
             if selected is None or selected.id is None:
                 return
-
-            # Ensure BoundaryColorSettings exists for this boundary
-            from elliptica.app.core import BoundaryColorSettings
-            if selected.id not in self.app.state.boundary_color_settings:
-                self.app.state.boundary_color_settings[selected.id] = BoundaryColorSettings()
-
-            settings = self.app.state.boundary_color_settings[selected.id]
             region_type = self.app.state.selected_region_type
-            region_style = settings.surface if region_type == "surface" else settings.interior
-            cache_key = (selected.id, region_type)
 
-            if is_custom:
-                # Switch to custom - check cache first, then global, then default
-                cached_expr = self._cached_custom_lightness_exprs.get(cache_key)
-                if cached_expr is not None:
-                    region_style.lightness_expr = cached_expr
-                else:
-                    global_expr = self.app.state.display_settings.lightness_expr
-                    region_style.lightness_expr = global_expr or "clipnorm(mag, 1, 99)"
-            else:
-                # Switch to global - cache current expr before clearing
-                if region_style.lightness_expr is not None:
-                    self._cached_custom_lightness_exprs[cache_key] = region_style.lightness_expr
-                region_style.lightness_expr = None
+        cache_key = (selected.id, region_type)
+
+        if is_custom:
+            # Switch to custom - check cache first, then global, then default
+            cached_expr = self._cached_custom_lightness_exprs.get(cache_key)
+            if cached_expr is None:
+                with self.app.state_lock:
+                    cached_expr = self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)"
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE,
+                {"lightness_expr": cached_expr},
+                context=(selected.id, region_type),
+            )
+        else:
+            # Switch to global - cache current custom expr before clearing
+            with self.app.state_lock:
+                from elliptica.app.core import BoundaryColorSettings
+                bcs = self.app.state.boundary_color_settings.get(selected.id)
+                if bcs is not None:
+                    rs = bcs.surface if region_type == "surface" else bcs.interior
+                    if rs.lightness_expr is not None:
+                        self._cached_custom_lightness_exprs[cache_key] = rs.lightness_expr
+            self.app.state_manager.update(
+                StateKey.REGION_STYLE,
+                {"lightness_expr": None},
+                context=(selected.id, region_type),
+            )
 
         self.update_context_ui()
-        self.app.display_pipeline.refresh_display()
-
-    def _apply_region_lightness_expr_update(self, boundary_id: int, region_type: str) -> None:
-        """Apply the current per-region lightness expression.
-
-        Args:
-            boundary_id: The boundary ID to update
-            region_type: "surface" or "interior"
-        """
-        if dpg is None:
-            return
-
-        expr = dpg.get_value("lightness_expr_input").strip()
-        if not expr:
-            return
-
-        with self.app.state_lock:
-            # Ensure settings exist
-            from elliptica.app.core import BoundaryColorSettings
-            if boundary_id not in self.app.state.boundary_color_settings:
-                self.app.state.boundary_color_settings[boundary_id] = BoundaryColorSettings()
-
-            settings = self.app.state.boundary_color_settings[boundary_id]
-            region_style = settings.surface if region_type == "surface" else settings.interior
-
-            # Set the expression (we're targeting this region, so apply it)
-            region_style.lightness_expr = expr
-            # Also update cache so switching Global->Custom restores latest edit
-            cache_key = (boundary_id, region_type)
-            self._cached_custom_lightness_exprs[cache_key] = expr
-
-        self.app.display_pipeline.refresh_display()
 
     # ------------------------------------------------------------------
     # Color and palette callbacks
@@ -2781,21 +2660,26 @@ class PostprocessingPanel:
         self.app.display_pipeline.texture_manager.rebuild_colormaps()
         self._rebuild_palette_popup()
 
-        with self.app.state_lock:
-            if for_region:
+        if for_region:
+            with self.app.state_lock:
                 selected = self.app.state.get_selected()
                 region_type = self.app.state.selected_region_type
-                if selected and selected.id is not None:
-                    actions.set_region_palette(self.app.state, selected.id, region_type, new_name)
-                    global_b = self.app.state.display_settings.brightness
-                    global_c = self.app.state.display_settings.contrast
-                    global_g = self.app.state.display_settings.gamma
-                    actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
-                    actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
-                    actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
-            else:
-                actions.set_color_enabled(self.app.state, True)
-                actions.set_palette(self.app.state, new_name)
+                boundary_id = selected.id if selected else None
+                global_b = self.app.state.display_settings.brightness
+                global_c = self.app.state.display_settings.contrast
+                global_g = self.app.state.display_settings.gamma
+            if boundary_id is not None:
+                self.app.state_manager.update(StateKey.REGION_STYLE, {
+                    "enabled": True,
+                    "use_palette": True,
+                    "palette": new_name,
+                    "brightness": global_b,
+                    "contrast": global_c,
+                    "gamma": global_g,
+                }, context=(boundary_id, region_type))
+        else:
+            self.app.state_manager.update(StateKey.COLOR_ENABLED, True)
+            self.app.state_manager.update(StateKey.PALETTE, new_name)
 
         self.update_context_ui()
         self._update_palette_preview_buttons()
@@ -2806,7 +2690,6 @@ class PostprocessingPanel:
 
         self._set_palette_editor_state(True, new_name, for_region)
         self._palette_editor_load_palette(new_name)
-        self.app.display_pipeline.refresh_display()
 
     def on_global_grayscale(self, sender=None, app_data=None) -> None:
         """Handle global 'Grayscale (No Color)' button."""
@@ -2815,13 +2698,10 @@ class PostprocessingPanel:
         if self.palette_editor_active:
             return
 
-        with self.app.state_lock:
-            actions.set_color_enabled(self.app.state, False)
+        self.app.state_manager.update(StateKey.COLOR_ENABLED, False)
 
         self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
 
     def on_global_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle global colormap button click."""
@@ -2831,15 +2711,11 @@ class PostprocessingPanel:
             return
 
         palette_name = user_data
-        with self.app.state_lock:
-            # Auto-enable color when a palette is selected
-            actions.set_color_enabled(self.app.state, True)
-            actions.set_palette(self.app.state, palette_name)
+        self.app.state_manager.update(StateKey.COLOR_ENABLED, True)
+        self.app.state_manager.update(StateKey.PALETTE, palette_name)
 
         self._update_palette_preview_buttons()
         dpg.configure_item("global_palette_popup", show=False)
-
-        self.app.display_pipeline.refresh_display()
 
     def on_region_use_global(self, sender=None, app_data=None) -> None:
         """Handle region 'Use Global' button - disables override."""
@@ -2851,18 +2727,19 @@ class PostprocessingPanel:
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             region_type = self.app.state.selected_region_type
-            if selected and selected.id is not None:
-                # Disable palette override
-                actions.set_region_style_enabled(self.app.state, selected.id, region_type, False)
-                # Also clear B/C/G (disables slider override)
-                actions.set_region_brightness(self.app.state, selected.id, region_type, None)
-                actions.set_region_contrast(self.app.state, selected.id, region_type, None)
-                actions.set_region_gamma(self.app.state, selected.id, region_type, None)
+            boundary_id = selected.id if selected else None
+
+        if boundary_id is not None:
+            self.app.state_manager.update(StateKey.REGION_STYLE, {
+                "enabled": False,
+                "brightness": None,
+                "contrast": None,
+                "gamma": None,
+            }, context=(boundary_id, region_type))
 
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
-        self.app.display_pipeline.refresh_display()
 
     def on_region_palette_button(self, sender=None, app_data=None, user_data=None) -> None:
         """Handle region colormap button click - also enables override."""
@@ -2875,21 +2752,24 @@ class PostprocessingPanel:
         with self.app.state_lock:
             selected = self.app.state.get_selected()
             region_type = self.app.state.selected_region_type
-            if selected and selected.id is not None:
-                # Set palette (this also sets enabled=True)
-                actions.set_region_palette(self.app.state, selected.id, region_type, palette_name)
-                # Also initialize B/C/G with global values (enables slider override)
-                global_b = self.app.state.display_settings.brightness
-                global_c = self.app.state.display_settings.contrast
-                global_g = self.app.state.display_settings.gamma
-                actions.set_region_brightness(self.app.state, selected.id, region_type, global_b)
-                actions.set_region_contrast(self.app.state, selected.id, region_type, global_c)
-                actions.set_region_gamma(self.app.state, selected.id, region_type, global_g)
+            boundary_id = selected.id if selected else None
+            global_b = self.app.state.display_settings.brightness
+            global_c = self.app.state.display_settings.contrast
+            global_g = self.app.state.display_settings.gamma
+
+        if boundary_id is not None:
+            self.app.state_manager.update(StateKey.REGION_STYLE, {
+                "enabled": True,
+                "use_palette": True,
+                "palette": palette_name,
+                "brightness": global_b,
+                "contrast": global_c,
+                "gamma": global_g,
+            }, context=(boundary_id, region_type))
 
         dpg.configure_item("region_palette_popup", show=False)
 
         self.update_context_ui()  # Update slider states
-        self.app.display_pipeline.refresh_display()
 
     def _ensure_delete_confirmation_modal(self) -> None:
         """Create the delete confirmation modal if it doesn't exist."""
@@ -3042,63 +2922,32 @@ class PostprocessingPanel:
         if dpg is None:
             return
 
-        with self.app.state_lock:
-            region_style = self._get_current_region_style_unlocked()
-            if region_style is not None:
-                region_style.smear_enabled = bool(app_data)
-
+        selected = self.app.state.get_selected()
+        if selected is None or selected.id is None:
+            return
+        context = (selected.id, self.app.state.selected_region_type)
+        self.app.state_manager.update(
+            StateKey.REGION_STYLE,
+            {"smear_enabled": bool(app_data)},
+            context=context,
+        )
         self.update_context_ui()
-        self.app.display_pipeline.refresh_display()
 
     def on_smear_sigma(self, sender=None, app_data=None) -> None:
-        """Adjust smear blur sigma for selected region (debounced for performance)."""
+        """Adjust smear blur sigma for selected region (debounced)."""
         if dpg is None:
             return
 
-        # Always update the value immediately (for UI responsiveness)
-        with self.app.state_lock:
-            region_style = self._get_current_region_style_unlocked()
-            if region_style is not None:
-                region_style.smear_sigma = float(app_data)
-
-        # Mark that we have a pending update (defers expensive render refresh)
-        self.smear_pending_value = float(app_data)
-
-        # Record the time of THIS slider change (not the last render)
-        self.smear_last_update_time = time.time()
-
-    def _apply_clip_update(self) -> None:
-        """Apply clip refresh (state already updated in slider callbacks)."""
-        self.app.display_pipeline.refresh_display()
-        self._request_histogram_update(force=True)
-
-    def _apply_smear_update(self) -> None:
-        """Apply smear refresh (state already updated in on_smear_sigma)."""
-        self.app.display_pipeline.refresh_display()
-
-    def check_clip_debounce(self) -> None:
-        """Check if clip update should be applied (called every frame)."""
-        if self.clip_pending_range is None:
+        selected = self.app.state.get_selected()
+        if selected is None or selected.id is None:
             return
-
-        current_time = time.time()
-        # Only apply if enough time has passed since the last slider movement
-        if current_time - self.clip_last_update_time >= self.clip_debounce_delay:
-            self._apply_clip_update()
-            self.clip_last_update_time = current_time
-            self.clip_pending_range = None
-
-    def check_smear_debounce(self) -> None:
-        """Check if smear update should be applied (called every frame)."""
-        if self.smear_pending_value is None:
-            return
-
-        current_time = time.time()
-        # Only apply if enough time has passed since the last slider movement
-        if current_time - self.smear_last_update_time >= self.smear_debounce_delay:
-            self._apply_smear_update()
-            self.smear_last_update_time = current_time
-            self.smear_pending_value = None
+        context = (selected.id, self.app.state.selected_region_type)
+        self.app.state_manager.update(
+            StateKey.REGION_STYLE,
+            {"smear_sigma": float(app_data)},
+            debounce=0.3,
+            context=context,
+        )
 
     # ------------------------------------------------------------------
     # Expression editor callbacks
@@ -3124,15 +2973,10 @@ class PostprocessingPanel:
             self.palette_editor_refresh_pending = False
 
         # Update color_config based on mode
-        with self.app.state_lock:
-            if self.color_mode == "palette":
-                # Clear color_config to use legacy palette mode
-                self.app.state.color_config = None
-            else:
-                # Build ColorConfig from current expressions
-                self._update_color_config_from_expressions()
-
-        self.app.display_pipeline.refresh_display()
+        if self.color_mode == "palette":
+            self.app.state_manager.update(StateKey.COLOR_CONFIG, None)
+        else:
+            self._update_color_config_from_expressions()
 
     def on_expression_preset_change(self, sender=None, app_data=None) -> None:
         """Handle preset selection change."""
@@ -3145,23 +2989,15 @@ class PostprocessingPanel:
         """Handle expression text change (debounced)."""
         if dpg is None:
             return
+        self._update_color_config_from_expressions(debounce=0.3)
 
-        # Mark pending update and record time
-        self.expr_pending_update = True
-        self.expr_last_update_time = time.time()
+    def _update_color_config_from_expressions(self, *, debounce: float = 0.0) -> None:
+        """Build ColorConfig from current expression inputs and update via StateManager.
 
-    def check_expression_debounce(self) -> None:
-        """Check if expression update should be applied (called every frame)."""
-        if not self.expr_pending_update:
-            return
-
-        current_time = time.time()
-        if current_time - self.expr_last_update_time >= self.expr_debounce_delay:
-            self._update_color_config_from_expressions()
-            self.expr_pending_update = False
-
-    def _update_color_config_from_expressions(self) -> None:
-        """Build ColorConfig from current expression inputs and update state."""
+        Validation runs immediately (instant error feedback). Only valid configs
+        enter the StateManager update path. The refresh signal is deferred when
+        ``debounce > 0``.
+        """
         if dpg is None:
             return
 
@@ -3176,20 +3012,13 @@ class PostprocessingPanel:
         C_expr = dpg.get_value("expr_C_input").strip()
         H_expr = dpg.get_value("expr_H_input").strip()
 
-        # Try to build ColorConfig
         try:
             config = ColorConfig(
                 global_mapping=ColorMapping(L=L_expr, C=C_expr, H=H_expr),
             )
-
-            # Success - clear error and update state
-            dpg.set_value("expr_error_text", "")
-
-            with self.app.state_lock:
-                self.app.state.color_config = config
-
-            self.app.display_pipeline.refresh_display()
-
         except ExprError as e:
-            # Show error but don't update config
             dpg.set_value("expr_error_text", f"Error: {e}")
+            return
+
+        dpg.set_value("expr_error_text", "")
+        self.app.state_manager.update(StateKey.COLOR_CONFIG, config, debounce=debounce)

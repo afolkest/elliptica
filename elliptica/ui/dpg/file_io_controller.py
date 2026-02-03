@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
 from elliptica.app import actions
+from elliptica.app.state_manager import StateKey
 from elliptica.mask_utils import load_boundary_masks
 from elliptica.pde import PDERegistry
 from elliptica.serialization import load_project, save_project, load_render_cache, save_render_cache
@@ -155,21 +156,17 @@ class FileIOController:
             pos = ((canvas_w - mask_w) / 2.0 + offset, (canvas_h - mask_h) / 2.0 + offset)
             boundary = BoundaryObject(mask=mask, params={"voltage": 0.5}, position=pos, interior_mask=interior)
             actions.add_boundary(self.app.state, boundary)
-            self.app.state.view_mode = "edit"
 
-        self.app.canvas_renderer.mark_dirty()
+        self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
+        # Subscriber handles: _update_control_visibility, mark_dirty
 
-        # Resize drawlist widget if canvas was expanded
-        if self.app.canvas_id is not None:
-            with self.app.state_lock:
-                canvas_w, canvas_h = self.app.state.project.canvas_resolution
-            dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
+        # Note: drawlist stays window-sized, not canvas-sized.
+        # The transform system handles mapping canvas coords to screen pixels.
 
         self.app._update_canvas_inputs()  # Update canvas size display text
-        self.app._update_canvas_scale()  # Recalculate scale for potentially new canvas size
-        self.app._update_control_visibility()
+        self.app._resize_canvas_window()  # Ensure drawlist matches window
+        self.app._update_canvas_transform()  # Recalculate scale for potentially new canvas size
         self.app.boundary_controls.rebuild_controls()
-        self.app.boundary_controls.update_slider_labels()
         dpg.set_value("status_text", f"Loaded boundary '{Path(path_str).name}'")
 
     # ------------------------------------------------------------------
@@ -194,11 +191,15 @@ class FileIOController:
             self.app.state.render_settings = new_state.render_settings
             self.app.state.display_settings = new_state.display_settings
             self.app.state.boundary_color_settings = new_state.boundary_color_settings
-            self.app.state.clear_selection()
+            self.app.state.selected_indices = set()
             self.app.state.view_mode = "edit"
             self.app.state.field_dirty = True
             self.app.state.render_dirty = True
             self.app.state.render_cache = None
+
+        # Notify StateManager subscribers for interaction state
+        self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
+        self.app.state_manager.update(StateKey.SELECTED_INDICES, set())
 
         # Clear current project path
         self.current_project_path = None
@@ -206,19 +207,17 @@ class FileIOController:
         # Add demo boundary
         self.app._add_demo_boundary()
 
+        # Reset zoom/pan to defaults for new project
+        self.app.canvas_controller.reset_zoom_pan()
+
         # Update UI to reflect new state
-        self.app.canvas_renderer.mark_dirty()
+        # Subscribers handle: _update_control_visibility, mark_dirty, update_context_ui
         self.app._update_canvas_inputs()
 
-        # Resize drawlist widget to match new canvas resolution
-        if self.app.canvas_id is not None:
-            canvas_w, canvas_h = self.app.state.project.canvas_resolution
-            dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
-
-        self.app._update_canvas_scale()
-        self.app._update_control_visibility()
+        # Note: drawlist stays window-sized, not canvas-sized.
+        self.app._resize_canvas_window()  # Ensure drawlist matches window
+        self.app._update_canvas_transform()
         self.app.boundary_controls.rebuild_controls()
-        self.app.boundary_controls.update_slider_labels()
         self.sync_ui_from_state()
         self.app.cache_panel.update_cache_status_display()
 
@@ -437,11 +436,15 @@ class FileIOController:
                 self.app.state.render_settings = new_state.render_settings
                 self.app.state.display_settings = new_state.display_settings
                 self.app.state.boundary_color_settings = new_state.boundary_color_settings
-                self.app.state.clear_selection()
+                self.app.state.selected_indices = set()
                 self.app.state.view_mode = "edit"
                 self.app.state.field_dirty = True
                 self.app.state.render_dirty = True
                 self.app.state.render_cache = loaded_cache
+
+            # Notify StateManager subscribers for interaction state
+            self.app.state_manager.update(StateKey.VIEW_MODE, "edit")
+            self.app.state_manager.update(StateKey.SELECTED_INDICES, set())
 
             # Track current project path
             self.current_project_path = path_str
@@ -450,19 +453,17 @@ class FileIOController:
             if loaded_cache is not None:
                 self.app.cache_panel.rebuild_cache_display_fields()
 
+            # Reset zoom/pan to defaults when loading project
+            self.app.canvas_controller.reset_zoom_pan()
+
             # Update UI to reflect loaded state
-            self.app.canvas_renderer.mark_dirty()
+            # Subscribers handle: _update_control_visibility, mark_dirty, update_context_ui
             self.app._update_canvas_inputs()  # Update canvas size input fields
 
-            # Resize drawlist widget to match loaded canvas resolution
-            if self.app.canvas_id is not None:
-                canvas_w, canvas_h = self.app.state.project.canvas_resolution
-                dpg.configure_item(self.app.canvas_id, width=canvas_w, height=canvas_h)
-
-            self.app._update_canvas_scale()  # Recalculate scale for new canvas resolution
-            self.app._update_control_visibility()
+            # Note: drawlist stays window-sized, not canvas-sized.
+            self.app._resize_canvas_window()  # Ensure drawlist matches window
+            self.app._update_canvas_transform()  # Recalculate scale for new canvas resolution
             self.app.boundary_controls.rebuild_controls()
-            self.app.boundary_controls.update_slider_labels()
             self.sync_ui_from_state()
             self.app.cache_panel.update_cache_status_display()
 
@@ -537,18 +538,7 @@ class FileIOController:
             if self.app.canvas_height_input_id is not None:
                 dpg.set_value(self.app.canvas_height_input_id, self.app.state.project.canvas_resolution[1])
 
-            # Display settings
-            panel = self.app.postprocess_panel
-            if panel.postprocess_clip_low_slider_id is not None:
-                dpg.set_value(panel.postprocess_clip_low_slider_id, self.app.state.display_settings.clip_low_percent)
-            if panel.postprocess_clip_high_slider_id is not None:
-                dpg.set_value(panel.postprocess_clip_high_slider_id, self.app.state.display_settings.clip_high_percent)
-            if panel.postprocess_brightness_slider_id is not None:
-                dpg.set_value(panel.postprocess_brightness_slider_id, self.app.state.display_settings.brightness)
-            if panel.postprocess_contrast_slider_id is not None:
-                dpg.set_value(panel.postprocess_contrast_slider_id, self.app.state.display_settings.contrast)
-            if panel.postprocess_gamma_slider_id is not None:
-                dpg.set_value(panel.postprocess_gamma_slider_id, self.app.state.display_settings.gamma)
+            # Saturation (not handled by update_context_ui)
             if dpg.does_item_exist("saturation_slider"):
                 dpg.set_value("saturation_slider", self.app.state.display_settings.saturation)
 
@@ -559,6 +549,7 @@ class FileIOController:
                     dpg.set_value(self.app.pde_combo_id, label)
 
             # Color mode radio - restore expressions mode if color_config was set
+            panel = self.app.postprocess_panel
             has_color_config = self.app.state.color_config is not None
             if dpg.does_item_exist("color_mode_radio"):
                 mode_value = "Expressions" if has_color_config else "Palette"
@@ -567,15 +558,6 @@ class FileIOController:
                 # Update visibility of mode groups
                 dpg.configure_item("palette_mode_group", show=(panel.color_mode == "palette"))
                 dpg.configure_item("expressions_mode_group", show=(panel.color_mode == "expressions"))
-
-            # Lightness expression checkbox and input (global mode)
-            lightness_expr = self.app.state.display_settings.lightness_expr
-            if dpg.does_item_exist("lightness_expr_checkbox"):
-                dpg.set_value("lightness_expr_checkbox", lightness_expr is not None)
-            if dpg.does_item_exist("lightness_expr_group"):
-                dpg.configure_item("lightness_expr_group", show=(lightness_expr is not None))
-            if dpg.does_item_exist("lightness_expr_input") and lightness_expr is not None:
-                dpg.set_value("lightness_expr_input", lightness_expr)
 
         # Sync global palette UI text (outside lock - no state modification)
         self.sync_palette_ui()

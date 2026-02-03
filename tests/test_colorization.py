@@ -3,7 +3,7 @@
 import numpy as np
 from elliptica.types import BoundaryObject, Project
 from elliptica.app.core import AppState, DisplaySettings
-from elliptica.app.actions import add_boundary, set_color_enabled, set_palette, remove_boundary
+from elliptica.app.actions import add_boundary, remove_boundary
 
 def test_boundary_ids():
     """Test boundary ID assignment and style dict sync."""
@@ -65,12 +65,12 @@ def test_colorization_settings():
     add_boundary(state, c)
 
     # Start in grayscale mode
-    set_color_enabled(state, False)
+    state.display_settings.color_enabled = False
     assert state.display_settings.color_enabled is False, "Color should be disabled"
 
     # Test color/palette settings work
-    set_color_enabled(state, True)
-    set_palette(state, "Deep Ocean")
+    state.display_settings.color_enabled = True
+    state.display_settings.palette = "Deep Ocean"
 
     # Verify settings were applied
     assert state.display_settings.color_enabled is True, "Color not enabled"

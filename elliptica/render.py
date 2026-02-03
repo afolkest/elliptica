@@ -3,9 +3,7 @@ import numpy as np
 from collections import OrderedDict
 from PIL import Image
 from pathlib import Path
-from datetime import datetime
 from scipy.ndimage import gaussian_filter, zoom
-from elliptica.types import Project
 from elliptica.lic import convolve, get_cosine_kernel
 from elliptica import defaults
 from elliptica.colorspace.oklch_palette import build_oklch_lut
@@ -400,7 +398,8 @@ def _write_palette_backup() -> None:
 
 
 # User palette persistence
-USER_PALETTES_PATH = Path(__file__).parent / "palettes_user.json"
+USER_DATA_DIR = Path.home() / ".elliptica"
+USER_PALETTES_PATH = USER_DATA_DIR / "palettes.json"
 
 
 def _load_user_palette_specs() -> dict[str, dict]:
@@ -444,6 +443,7 @@ def _load_user_palette_specs() -> dict[str, dict]:
 def _save_user_palette_specs(palettes: dict[str, dict]):
     """Save user palette specs to JSON."""
     import json
+    USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
     data = {
         "version": PALETTE_SCHEMA_VERSION,
         "palettes": palettes,
@@ -565,13 +565,6 @@ def delete_palette(name: str):
     set_palette_spec(name, {"deleted": True})
 
 
-def add_palette(name: str, colors: list[tuple[float, float, float]] | np.ndarray):
-    """Add or update a palette in user library."""
-    if not isinstance(colors, np.ndarray):
-        colors = np.array(colors, dtype=np.float32)
-    spec = _rgb_palette_spec_from_colors(colors)
-    set_palette_spec(name, spec)
-
 
 def generate_noise(
     shape: tuple[int, int],
@@ -619,6 +612,8 @@ def compute_lic(
     mask: np.ndarray | None = None,
     edge_gain_strength: float = 0.0,
     edge_gain_power: float = 2.0,
+    domain_edge_gain_strength: float = 0.0,
+    domain_edge_gain_power: float = 2.0,
 ) -> np.ndarray:
     """Compute LIC visualization. Returns array normalized to [-1, 1].
 
@@ -633,8 +628,10 @@ def compute_lic(
         noise_oversample: Oversample factor for noise generation
         noise_sigma: Low-pass filter sigma for noise
         mask: Optional boolean mask to block streamlines (True = blocked)
-        edge_gain_strength: Brightness boost near boundary edges (0.0 = none)
-        edge_gain_power: Falloff curve sharpness for edge gain
+        edge_gain_strength: Brightness boost near mask edges (0.0 = none)
+        edge_gain_power: Falloff curve sharpness for mask edge gain
+        domain_edge_gain_strength: Brightness boost near domain edges (0.0 = none)
+        domain_edge_gain_power: Falloff curve sharpness for domain edge gain
     """
     field_h, field_w = ex.shape
 
@@ -670,6 +667,8 @@ def compute_lic(
         mask=mask,
         edge_gain_strength=edge_gain_strength,
         edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
     )
 
     max_abs = np.max(np.abs(lic_result))

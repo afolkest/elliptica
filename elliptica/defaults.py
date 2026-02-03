@@ -3,16 +3,17 @@
 # Canvas / resolution
 DEFAULT_CANVAS_RESOLUTION: tuple[int, int] = (1024, 1024)
 RENDER_RESOLUTION_CHOICES: tuple[float, ...] = (0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0)
+DEFAULT_RENDER_MULTIPLIER: float = 1.0
 SUPERSAMPLE_CHOICES: tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
 
 # LIC render settings
 DEFAULT_RENDER_PASSES: int = 2
 DEFAULT_STREAMLENGTH_FACTOR: float = 60.0 / 1024.0
-DEFAULT_PADDING_MARGIN: float = 0.10
+DEFAULT_PADDING_MARGIN: float = 0.0
 DEFAULT_NOISE_SEED: int = 0
 DEFAULT_NOISE_SIGMA: float =0.5
 DEFAULT_USE_MASK: bool = True  # Block streamlines at boundaries
-DEFAULT_SOLVE_SCALE: float = 1.0  # PDE solve resolution relative to render grid
+DEFAULT_SOLVE_SCALE: float = 0.8  # PDE solve resolution relative to render grid
 MIN_SOLVE_SCALE: float = 0.1
 MAX_SOLVE_SCALE: float = 1.0
 SOLVE_RELAX_BAND: int = 3  # Relaxation band width when solve_scale < 1
@@ -22,19 +23,23 @@ SOLVE_RELAX_OMEGA: float = 0.8
 # bryLIC tiling defaults (for performance)
 DEFAULT_TILE_SHAPE: tuple[int, int] | None = (512, 512)  # None disables tiling
 DEFAULT_NUM_THREADS: int | None = None  # None = auto-detect from CPU count
-DEFAULT_EDGE_GAIN_STRENGTH: float = 0.5  # Disabled for now, creates halos around boundaries
+DEFAULT_EDGE_GAIN_STRENGTH: float = 0.5  # Creates halos around mask boundaries
 DEFAULT_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for edge gain effect
 MIN_EDGE_GAIN_STRENGTH: float = -3.0
 MAX_EDGE_GAIN_STRENGTH: float = 3.0
 MIN_EDGE_GAIN_POWER: float = 0.1
 MAX_EDGE_GAIN_POWER: float = 3.0
 
-# Post-processing defaults
-DEFAULT_HIGHPASS_SIGMA_FACTOR: float = 3.0 / 1024.0
+# Domain edge gain (for closed boundaries at image edges)
+DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH: float = 0.0  # Creates halos at domain boundaries (0 = disabled)
+DEFAULT_DOMAIN_EDGE_GAIN_POWER: float = 2.0  # Falloff curve for domain edge gain
+MIN_DOMAIN_EDGE_GAIN_STRENGTH: float = -3.0
+MAX_DOMAIN_EDGE_GAIN_STRENGTH: float = 3.0
+MIN_DOMAIN_EDGE_GAIN_POWER: float = 0.1
+MAX_DOMAIN_EDGE_GAIN_POWER: float = 3.0
 
 # Downsampling defaults
 DEFAULT_DOWNSAMPLE_SIGMA: float = 0.6
-MAX_DOWNSAMPLE_SIGMA: float = 2.0
 
 # Display postprocessing defaults
 DEFAULT_CLIP_LOW_PERCENT: float = 0.5

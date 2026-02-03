@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 from typing import Optional
-from torchvision.transforms.functional import gaussian_blur
+from elliptica.gpu.ops import gaussian_blur_gpu
 
 
 class GPUContext:
@@ -63,8 +63,8 @@ class GPUContext:
             # Warmup with realistic operation sizes
             dummy = torch.randn(1024, 1024, device=device, dtype=torch.float32)
 
-            # Gaussian blur warmup (torchvision will compile kernels)
-            _ = gaussian_blur(dummy.unsqueeze(0).unsqueeze(0), kernel_size=5, sigma=2.0)
+            # Gaussian blur warmup (compile kernels)
+            _ = gaussian_blur_gpu(dummy, sigma=2.0)
 
             # Percentile/quantile warmup
             _ = torch.quantile(dummy, torch.tensor([0.01, 0.99], device=device))

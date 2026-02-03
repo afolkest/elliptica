@@ -11,7 +11,6 @@ import torch
 from elliptica import defaults
 from elliptica.gpu import GPUContext
 from elliptica.pipeline import RenderResult
-from elliptica.postprocess.color import ColorParams
 from elliptica.types import Project, BoundaryObject
 
 from typing import TYPE_CHECKING
@@ -70,7 +69,7 @@ class BoundaryColorSettings:
 class RenderSettings:
     """User-configurable render parameters."""
 
-    multiplier: float = defaults.RENDER_RESOLUTION_CHOICES[0]
+    multiplier: float = defaults.DEFAULT_RENDER_MULTIPLIER
     supersample: float = defaults.SUPERSAMPLE_CHOICES[0]
     num_passes: int = defaults.DEFAULT_RENDER_PASSES
     margin: float = defaults.DEFAULT_PADDING_MARGIN
@@ -79,6 +78,8 @@ class RenderSettings:
     use_mask: bool = defaults.DEFAULT_USE_MASK
     edge_gain_strength: float = defaults.DEFAULT_EDGE_GAIN_STRENGTH
     edge_gain_power: float = defaults.DEFAULT_EDGE_GAIN_POWER
+    domain_edge_gain_strength: float = defaults.DEFAULT_DOMAIN_EDGE_GAIN_STRENGTH
+    domain_edge_gain_power: float = defaults.DEFAULT_DOMAIN_EDGE_GAIN_POWER
     solve_scale: float = defaults.DEFAULT_SOLVE_SCALE
 
 
@@ -97,17 +98,6 @@ class DisplaySettings:
     lightness_expr: str | None = None
     saturation: float = 1.0  # Post-colorization chroma multiplier (1.0 = no change)
 
-    def to_color_params(self):
-        """Convert to pure ColorParams for backend functions."""
-        return ColorParams(
-            clip_low_percent=self.clip_low_percent,
-            clip_high_percent=self.clip_high_percent,
-            brightness=self.brightness,
-            contrast=self.contrast,
-            gamma=self.gamma,
-            color_enabled=self.color_enabled,
-            palette=self.palette,
-        )
 
 
 class RenderCache:
@@ -245,3 +235,14 @@ class AppState:
             self.render_cache.base_rgb = None
             # Note: We keep display_array_gpu and CPU cache since they're still valid for recomputing base_rgb
             # Only the derived RGB needs recomputation when colorization params change
+
+    def invalidate_gpu_mask_cache(self) -> None:
+        """Clear cached GPU mask tensors when boundaries change.
+
+        Must be called while holding state_lock. Call this when boundaries are
+        added, removed, moved, or scaled to prevent stale GPU tensors from
+        being used in postprocessing.
+        """
+        if self.render_cache is not None:
+            self.render_cache.boundary_masks_gpu = None
+            self.render_cache.interior_masks_gpu = None
