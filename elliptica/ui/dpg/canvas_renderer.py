@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Optional
 import numpy as np
 from scipy import ndimage
 
+from elliptica.app.state_manager import StateKey
+
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
@@ -41,6 +43,16 @@ class CanvasRenderer:
         # Cache for boundary contours in edit mode: boundary_idx -> (mask_id, contours_at_origin)
         self._boundary_contour_cache: dict[int, tuple[int, list[np.ndarray]]] = {}
 
+        # Subscribe to interaction state changes that require canvas redraw
+        for key in (StateKey.VIEW_MODE, StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            app.state_manager.subscribe(key, self._on_interaction_changed)
+
+    def _on_interaction_changed(self, key, value, context) -> None:
+        """Mark canvas dirty when interaction state changes."""
+        self.mark_dirty()
+        if key in (StateKey.SELECTED_INDICES, StateKey.SELECTED_REGION_TYPE):
+            self.invalidate_selection_contour()
+
     def mark_dirty(self) -> None:
         """Mark canvas as needing redraw."""
         self.canvas_dirty = True
@@ -65,48 +77,37 @@ class CanvasRenderer:
     def _extract_contours(self, mask: np.ndarray) -> list[np.ndarray]:
         """Extract ordered contour points from a mask.
 
-        Uses skimage if available, otherwise falls back to scipy-based method.
+        Uses skimage marching squares if available, otherwise a scipy-based
+        boundary extraction with angle-sorted ordering.
         Returns list of Nx2 arrays of (x, y) points.
         """
         try:
             from skimage import measure
             contours = measure.find_contours(mask, 0.5)
-            # Convert (row, col) to (x, y)
             return [np.column_stack([c[:, 1], c[:, 0]]) for c in contours]
         except ImportError:
-            return self._extract_contours_fallback(mask)
+            pass
 
-    def _extract_contours_fallback(self, mask: np.ndarray) -> list[np.ndarray]:
-        """Extract contours using scipy (fallback when skimage unavailable)."""
+        # Fallback: boundary detection with angle-sorted ordering
         binary = (mask > 0.5).astype(np.uint8)
         eroded = ndimage.binary_erosion(binary)
         boundary = binary & ~eroded
 
-        # Label connected components of boundary
-        labeled, num_features = ndimage.label(boundary)
+        # Use 8-connectivity so diagonal boundary pixels stay connected
+        struct = ndimage.generate_binary_structure(2, 2)
+        labeled, num_features = ndimage.label(boundary, structure=struct)
 
         contours = []
         for i in range(1, num_features + 1):
             rows, cols = np.where(labeled == i)
-            if len(rows) < 20:
+            if len(rows) < 10:
                 continue
 
-            # Order points using nearest neighbor heuristic
-            points = list(zip(cols.astype(float), rows.astype(float)))
-            ordered = [points.pop(0)]
-
-            while points:
-                last = ordered[-1]
-                min_dist = float('inf')
-                min_idx = 0
-                for j, p in enumerate(points):
-                    dist = (p[0] - last[0])**2 + (p[1] - last[1])**2
-                    if dist < min_dist:
-                        min_dist = dist
-                        min_idx = j
-                ordered.append(points.pop(min_idx))
-
-            contours.append(np.array(ordered))
+            # Order points by angle from centroid (works for simple loops)
+            cx, cy = cols.mean(), rows.mean()
+            angles = np.arctan2(rows - cy, cols - cx)
+            order = np.argsort(angles)
+            contours.append(np.column_stack([cols[order].astype(float), rows[order].astype(float)]))
 
         return contours
 

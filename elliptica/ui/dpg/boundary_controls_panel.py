@@ -2,6 +2,7 @@
 
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from elliptica.app import actions
+from elliptica.app.state_manager import StateKey
 from elliptica.pde import PDERegistry
 
 if TYPE_CHECKING:
@@ -32,6 +33,14 @@ class BoundaryControlsPanel:
         self.enum_choices: Dict[str, list] = {}
         # Cache for field definitions by name
         self.field_defs: Dict[str, Any] = {}
+
+    def wire_subscribers(self) -> None:
+        """Register StateManager subscribers (call after UI widgets exist)."""
+        self.app.state_manager.subscribe(StateKey.SELECTED_INDICES, self._on_selection_changed)
+
+    def _on_selection_changed(self, key, value, context) -> None:
+        """Subscriber callback: update header labels when selection changes."""
+        self.update_header_labels()
 
     def build_container(self, parent) -> None:
         """Build controls container in edit controls panel."""

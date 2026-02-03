@@ -38,15 +38,10 @@ def _get_display_scale() -> float:
 
 
 def _find_dejavu_font() -> Path | None:
-    """Locate DejaVu Sans TTF file from matplotlib's bundled fonts."""
-    try:
-        import matplotlib
-        mpl_data = Path(matplotlib.get_data_path())
-        font_path = mpl_data / "fonts" / "ttf" / "DejaVuSans.ttf"
-        if font_path.exists():
-            return font_path
-    except ImportError:
-        pass
+    """Locate bundled DejaVu Sans TTF file."""
+    font_path = Path(__file__).resolve().parent.parent.parent / "fonts" / "DejaVuSans.ttf"
+    if font_path.exists():
+        return font_path
     return None
 
 

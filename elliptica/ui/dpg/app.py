@@ -60,7 +60,7 @@ from elliptica.pde.register import register_all_pdes
 from elliptica.pde import PDERegistry
 from elliptica.pde.boundary_utils import resolve_bc_map, bc_map_to_legacy
 from elliptica.app.core import AppState
-from elliptica.app.state_manager import StateManager
+from elliptica.app.state_manager import StateKey, StateManager
 from elliptica.app import actions
 from elliptica.ui.dpg.render_modal import RenderModalController
 from elliptica.ui.dpg.render_orchestrator import RenderOrchestrator
@@ -78,14 +78,6 @@ from elliptica.ui.dpg.theme import apply_theme
 from elliptica.types import BoundaryObject, Project, clone_boundary_object
 from elliptica import defaults
 
-
-SUPERSAMPLE_CHOICES = defaults.SUPERSAMPLE_CHOICES
-SUPERSAMPLE_LABELS = tuple(f"{value:.1f}\u00d7" for value in SUPERSAMPLE_CHOICES)
-SUPERSAMPLE_LOOKUP = {label: value for label, value in zip(SUPERSAMPLE_LABELS, SUPERSAMPLE_CHOICES)}
-
-RESOLUTION_CHOICES = defaults.RENDER_RESOLUTION_CHOICES
-RESOLUTION_LABELS = tuple(f"{value:g}\u00d7" for value in RESOLUTION_CHOICES)
-RESOLUTION_LOOKUP = {label: value for label, value in zip(RESOLUTION_LABELS, RESOLUTION_CHOICES)}
 
 BACKSPACE_KEY = None
 CTRL_KEY = None
@@ -120,7 +112,6 @@ def _snapshot_project(project: Project) -> Project:
         boundary_objects=[clone_boundary_object(b, preserve_id=True) for b in project.boundary_objects],
         canvas_resolution=project.canvas_resolution,
         streamlength_factor=project.streamlength_factor,
-        renders=list(project.renders),
         boundary_top=project.boundary_top,
         boundary_bottom=project.boundary_bottom,
         boundary_left=project.boundary_left,
@@ -151,10 +142,6 @@ class EllipticaApp:
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
 
-    # Debouncing for expensive slider operations
-    downsample_debounce_timer: Optional[threading.Timer] = None
-    postprocess_debounce_timer: Optional[threading.Timer] = None
-    mouse_handler_registry_id: Optional[int] = None
     pde_label_map: Dict[str, str] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -173,6 +160,9 @@ class EllipticaApp:
         device_name = backend.upper() if backend else "CPU"
         print(f"GPU acceleration: {device_name}")
 
+        # StateManager must be created before controllers that subscribe to it.
+        self.state_manager = StateManager(self.state, self.state_lock)
+
         # Initialize controllers
         self.canvas_renderer = CanvasRenderer(self)
         self.display_pipeline = DisplayPipelineController(self)
@@ -185,7 +175,6 @@ class EllipticaApp:
         self.cache_panel = CacheManagementPanel(self)
         self.postprocess_panel = PostprocessingPanel(self)
         self.boundary_controls = BoundaryControlsPanel(self)
-        self.state_manager = StateManager(self.state, self.state_lock)
 
         # Seed a demo boundary if project is empty so the canvas has content for manual testing.
         if not self.state.project.boundary_objects:
@@ -290,7 +279,6 @@ class EllipticaApp:
                                  tag="export_menu_item")
 
         with dpg.handler_registry() as handler_reg:
-            self.mouse_handler_registry_id = handler_reg
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
 
         # Set viewport resize callback
@@ -379,6 +367,11 @@ class EllipticaApp:
         self.render_orchestrator._ensure_loading_modal()
         self._update_canvas_inputs()
         self.boundary_controls.rebuild_controls()
+
+        # Wire subscribers that manipulate DPG widgets (must be after widget creation)
+        self.state_manager.subscribe(StateKey.VIEW_MODE, self._on_view_mode_changed)
+        self.boundary_controls.wire_subscribers()
+        self.postprocess_panel.wire_subscribers()
 
     # ------------------------------------------------------------------
     # Canvas window layout
@@ -591,14 +584,6 @@ class EllipticaApp:
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
 
-    def _fit_canvas_to_window(self, sender=None, app_data=None) -> None:
-        """Recalculate display scale to fit canvas in window (useful after moving to another screen)."""
-        if dpg is None:
-            return
-        self._resize_canvas_window()
-        self._update_canvas_transform()
-        dpg.set_value("status_text", f"Display scale adjusted to {self.display_scale:.2f}×")
-
     def _reset_zoom(self, sender=None, app_data=None) -> None:
         """Reset zoom and pan to default (same as Home key)."""
         if self.canvas_controller is not None:
@@ -607,11 +592,10 @@ class EllipticaApp:
 
     def _on_back_to_edit_clicked(self, sender, app_data):
         with self.state_lock:
-            if self.state.view_mode != "edit":
-                self.state.view_mode = "edit"
-                self.canvas_controller.drag_active = False
-                self.canvas_renderer.mark_dirty()
-        self._update_control_visibility()
+            should_switch = self.state.view_mode != "edit"
+        if should_switch:
+            self.state_manager.update(StateKey.VIEW_MODE, "edit")
+            self.canvas_controller.drag_active = False
         dpg.set_value("status_text", "Edit mode.")
 
     # ------------------------------------------------------------------
@@ -652,6 +636,10 @@ class EllipticaApp:
             self.image_export.shutdown()
             dpg.destroy_context()
 
+
+    def _on_view_mode_changed(self, key, value, context) -> None:
+        """Subscriber callback: update control visibility when view mode changes."""
+        self._update_control_visibility()
 
     def _update_control_visibility(self) -> None:
         if dpg is None:

@@ -11,7 +11,6 @@ import torch
 from elliptica import defaults
 from elliptica.gpu import GPUContext
 from elliptica.pipeline import RenderResult
-from elliptica.postprocess.color import ColorParams
 from elliptica.types import Project, BoundaryObject
 
 from typing import TYPE_CHECKING
@@ -99,17 +98,6 @@ class DisplaySettings:
     lightness_expr: str | None = None
     saturation: float = 1.0  # Post-colorization chroma multiplier (1.0 = no change)
 
-    def to_color_params(self):
-        """Convert to pure ColorParams for backend functions."""
-        return ColorParams(
-            clip_low_percent=self.clip_low_percent,
-            clip_high_percent=self.clip_high_percent,
-            brightness=self.brightness,
-            contrast=self.contrast,
-            gamma=self.gamma,
-            color_enabled=self.color_enabled,
-            palette=self.palette,
-        )
 
 
 class RenderCache:

@@ -8,6 +8,7 @@ import time
 
 from elliptica import defaults
 from elliptica.app import actions
+from elliptica.app.state_manager import StateKey
 from elliptica.types import BoundaryObject, clone_boundary_object
 
 if TYPE_CHECKING:
@@ -248,7 +249,8 @@ class CanvasController:
 
         self.app.canvas_renderer.mark_dirty()
         self.app.boundary_controls.update_slider_labels()
-        self.app.postprocess_panel.update_region_properties_panel()
+        self.app.state_manager.flush_pending()
+        self.app.postprocess_panel.update_context_ui()
         count = len(indices)
         if count == 1:
             dpg.set_value("status_text", f"Scaled B{indices[0] + 1} by {factor:.2f}×")
@@ -518,15 +520,11 @@ class CanvasController:
             over_canvas = self.is_mouse_over_canvas()
             if pressed and over_canvas:
                 x, y = self.get_canvas_mouse_pos()
-                with self.app.state_lock:
-                    hit_idx, hit_region = self.detect_region_at_point(x, y)
-                    self.app.state.set_selected(hit_idx)
-                    if hit_region is not None:
-                        self.app.state.selected_region_type = hit_region
-                self.app.canvas_renderer.invalidate_selection_contour()
-                self.app.boundary_controls.update_header_labels()
-                self.app.postprocess_panel.update_region_properties_panel()
-                self.app.canvas_renderer.mark_dirty()
+                hit_idx, hit_region = self.detect_region_at_point(x, y)
+                self.app.state_manager.set_selected(hit_idx)
+                if hit_region is not None:
+                    self.app.state_manager.update(StateKey.SELECTED_REGION_TYPE, hit_region)
+                # Subscribers handle: invalidate_selection_contour, update_header_labels, update_context_ui
             self.mouse_down_last = mouse_down
             return
 
@@ -536,38 +534,33 @@ class CanvasController:
             x, y = self.get_canvas_mouse_pos()
             hit_idx = self.find_hit_boundary(x, y)
 
-            with self.app.state_lock:
-                if hit_idx >= 0:
-                    # Clicked on a boundary
-                    if self.shift_down:
-                        # Shift-click: toggle selection
-                        self.app.state.toggle_selected(hit_idx)
-                    else:
-                        # Normal click: if clicking on already-selected, keep selection for drag
-                        # Otherwise, replace selection with clicked boundary
-                        if hit_idx not in self.app.state.selected_indices:
-                            self.app.state.set_selected(hit_idx)
-                    self.app.state.selected_region_type = "surface"
-                    self.drag_active = True
-                    self.drag_last_pos = (x, y)
-                    # Reset drag accumulators to prevent stale values from previous drags
-                    self._drag_accumulated_dx = 0.0
-                    self._drag_accumulated_dy = 0.0
-                    self._drag_last_commit_time = time.monotonic()
+            if hit_idx >= 0:
+                # Clicked on a boundary
+                with self.app.state_lock:
+                    was_selected = hit_idx in self.app.state.selected_indices
+                if self.shift_down:
+                    self.app.state_manager.toggle_selected(hit_idx)
                 else:
-                    # Clicked on empty space
-                    if not self.shift_down:
-                        # Clear selection and start box select
-                        self.app.state.clear_selection()
-                    # Start box selection
-                    self.box_select_active = True
-                    self.box_select_start = (x, y)
-                    self.box_select_end = (x, y)
-                    self.drag_active = False
+                    if not was_selected:
+                        self.app.state_manager.set_selected(hit_idx)
+                self.app.state_manager.update(StateKey.SELECTED_REGION_TYPE, "surface")
+                self.drag_active = True
+                self.drag_last_pos = (x, y)
+                # Reset drag accumulators to prevent stale values from previous drags
+                self._drag_accumulated_dx = 0.0
+                self._drag_accumulated_dy = 0.0
+                self._drag_last_commit_time = time.monotonic()
+            else:
+                # Clicked on empty space
+                if not self.shift_down:
+                    self.app.state_manager.clear_selection()
+                # Start box selection
+                self.box_select_active = True
+                self.box_select_start = (x, y)
+                self.box_select_end = (x, y)
+                self.drag_active = False
 
-            self.app.boundary_controls.update_header_labels()
-            self.app.postprocess_panel.update_region_properties_panel()
-            self.app.canvas_renderer.mark_dirty()
+            # Subscribers handle: update_header_labels, update_context_ui
 
         # Update box selection or drag
         if mouse_down and over_canvas:
@@ -622,17 +615,14 @@ class CanvasController:
                     self.box_select_start[0], self.box_select_start[1],
                     self.box_select_end[0], self.box_select_end[1]
                 )
-                with self.app.state_lock:
-                    if self.shift_down:
-                        # Add to existing selection
-                        self.app.state.selected_indices.update(hits)
-                    else:
-                        # Replace selection
-                        self.app.state.selected_indices = hits
+                if self.shift_down:
+                    with self.app.state_lock:
+                        new_set = set(self.app.state.selected_indices) | hits
+                    self.app.state_manager.update(StateKey.SELECTED_INDICES, new_set)
+                else:
+                    self.app.state_manager.update(StateKey.SELECTED_INDICES, hits)
                 self.box_select_active = False
-                self.app.boundary_controls.update_header_labels()
-                self.app.postprocess_panel.update_region_properties_panel()
-                self.app.canvas_renderer.mark_dirty()
+                # Subscribers handle: update_header_labels, update_context_ui
 
             elif self.drag_active:
                 # Flush any remaining accumulated drag movement
@@ -691,7 +681,7 @@ class CanvasController:
                     self.app.display_pipeline.texture_manager.clear_all_boundary_textures()
                 # Invalidate contour cache (indices shift after deletion)
                 self.app.canvas_renderer.invalidate_boundary_contour_cache()
-                self.app.canvas_renderer.mark_dirty()
+                self.app.state_manager.clear_selection()  # fires subscribers: mark_dirty, header labels, context_ui
                 self.app.boundary_controls.rebuild_controls()
                 count = len(indices_to_delete)
                 msg = "Boundary deleted" if count == 1 else f"{count} boundaries deleted"
@@ -738,11 +728,9 @@ class CanvasController:
                             pasted.position = (px + 30.0, py + 30.0)
                             actions.add_boundary(self.app.state, pasted)
                             new_indices.add(len(self.app.state.project.boundary_objects) - 1)
-                        # Select all pasted boundaries
-                        self.app.state.selected_indices = new_indices
-                    self.app.canvas_renderer.mark_dirty()
+                    self.app.state_manager.update(StateKey.SELECTED_INDICES, new_indices)
+                    # Subscriber handles: mark_dirty, header labels, context_ui
                     self.app.boundary_controls.rebuild_controls()
-                    self.app.boundary_controls.update_slider_labels()
                     count = len(new_indices)
                     msg = f"Pasted {count} object{'s' if count > 1 else ''}"
                     dpg.set_value("status_text", msg)

@@ -2,10 +2,12 @@
 
 import threading
 
+import numpy as np
 import pytest
 
 from elliptica.app.core import AppState, BoundaryColorSettings, RegionStyle
 from elliptica.app.state_manager import StateKey, StateManager
+from elliptica.types import BoundaryObject
 
 
 # ---------------------------------------------------------------------------
@@ -692,3 +694,137 @@ class TestDebounceBoundaryConditions:
         # Second consume should return False (flags already cleared).
         assert manager.consume_refresh() is False
         assert manager.needs_refresh() is False
+
+
+# ---------------------------------------------------------------------------
+# TestInteractionState
+# ---------------------------------------------------------------------------
+
+class TestInteractionState:
+    """Interaction state keys (VIEW_MODE, SELECTED_INDICES, SELECTED_REGION_TYPE)."""
+
+    def test_view_mode_update(self, state, manager):
+        assert state.view_mode == "edit"
+        manager.update(StateKey.VIEW_MODE, "render")
+        assert state.view_mode == "render"
+
+    def test_selected_indices_update(self, state, manager):
+        manager.update(StateKey.SELECTED_INDICES, {0, 2})
+        assert state.selected_indices == {0, 2}
+
+    def test_selected_region_type_update(self, state, manager):
+        assert state.selected_region_type == "surface"
+        manager.update(StateKey.SELECTED_REGION_TYPE, "interior")
+        assert state.selected_region_type == "interior"
+
+    def test_view_mode_no_refresh(self, manager):
+        manager.update(StateKey.VIEW_MODE, "render")
+        assert manager.needs_refresh() is False
+
+    def test_selected_indices_no_refresh(self, manager):
+        manager.update(StateKey.SELECTED_INDICES, {1})
+        assert manager.needs_refresh() is False
+
+    def test_selected_region_type_no_refresh(self, manager):
+        manager.update(StateKey.SELECTED_REGION_TYPE, "interior")
+        assert manager.needs_refresh() is False
+
+    def test_view_mode_subscriber_fires(self, manager):
+        calls = []
+        manager.subscribe(StateKey.VIEW_MODE, lambda k, v, c: calls.append(v))
+        manager.update(StateKey.VIEW_MODE, "render")
+        assert calls == ["render"]
+
+    def test_selected_indices_subscriber_fires(self, manager):
+        calls = []
+        manager.subscribe(StateKey.SELECTED_INDICES, lambda k, v, c: calls.append(v))
+        manager.update(StateKey.SELECTED_INDICES, {3, 5})
+        assert calls == [{3, 5}]
+
+    def test_selected_region_type_subscriber_fires(self, manager):
+        calls = []
+        manager.subscribe(StateKey.SELECTED_REGION_TYPE, lambda k, v, c: calls.append(v))
+        manager.update(StateKey.SELECTED_REGION_TYPE, "interior")
+        assert calls == ["interior"]
+
+
+# ---------------------------------------------------------------------------
+# TestConvenienceMethods
+# ---------------------------------------------------------------------------
+
+def _make_boundary(idx: int = 0) -> BoundaryObject:
+    """Create a minimal BoundaryObject for testing."""
+    mask = np.ones((5, 5), dtype=np.float32)
+    return BoundaryObject(mask=mask, params={"voltage": 1.0}, id=idx)
+
+
+class TestConvenienceMethods:
+    """set_selected, toggle_selected, clear_selection convenience methods."""
+
+    def test_set_selected_valid(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0), _make_boundary(1)]
+        manager.set_selected(1)
+        assert state.selected_indices == {1}
+
+    def test_set_selected_clears_previous(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0), _make_boundary(1)]
+        state.selected_indices = {0}
+        manager.set_selected(1)
+        assert state.selected_indices == {1}
+
+    def test_set_selected_invalid_clears(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0)]
+        state.selected_indices = {0}
+        manager.set_selected(5)
+        assert state.selected_indices == set()
+
+    def test_set_selected_negative_clears(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0)]
+        state.selected_indices = {0}
+        manager.set_selected(-1)
+        assert state.selected_indices == set()
+
+    def test_toggle_selected_add(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0), _make_boundary(1)]
+        state.selected_indices = {0}
+        manager.toggle_selected(1)
+        assert state.selected_indices == {0, 1}
+
+    def test_toggle_selected_remove(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0), _make_boundary(1)]
+        state.selected_indices = {0, 1}
+        manager.toggle_selected(0)
+        assert state.selected_indices == {1}
+
+    def test_toggle_selected_invalid_noop(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0)]
+        state.selected_indices = {0}
+        manager.toggle_selected(5)
+        assert state.selected_indices == {0}
+
+    def test_clear_selection(self, state, manager):
+        state.selected_indices = {0, 1, 2}
+        manager.clear_selection()
+        assert state.selected_indices == set()
+
+    def test_set_selected_fires_subscriber(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0)]
+        calls = []
+        manager.subscribe(StateKey.SELECTED_INDICES, lambda k, v, c: calls.append(v))
+        manager.set_selected(0)
+        assert len(calls) == 1
+        assert calls[0] == {0}
+
+    def test_toggle_selected_fires_subscriber(self, state, manager):
+        state.project.boundary_objects = [_make_boundary(0)]
+        calls = []
+        manager.subscribe(StateKey.SELECTED_INDICES, lambda k, v, c: calls.append(v))
+        manager.toggle_selected(0)
+        assert len(calls) == 1
+
+    def test_clear_selection_fires_subscriber(self, state, manager):
+        calls = []
+        manager.subscribe(StateKey.SELECTED_INDICES, lambda k, v, c: calls.append(v))
+        manager.clear_selection()
+        assert len(calls) == 1
+        assert calls[0] == set()
