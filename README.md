@@ -19,11 +19,24 @@ The above image is created in Elliptica. So is this one:
 <img src="examples/Folkestad_portrait_of_you_and_me_elliptica.jpg" width="600" alt="Portrait of You and Me">
 
 ## This is an alpha version
-This is an alpha version, and I am actively working on this software. Expect bugs, and frequent non-backwards compatible changes. I have so far only tested the software on my own M1 Silicon Mac, although I'm aiming to make this run on other systems.
+This is an alpha version, and I am actively working on this software. Expect bugs, and frequent non-backwards compatible changes. I have so far only tested the software on my own M1 Silicon Mac, although I'm aiming to make this run on other systems. Please reach out if you experience bugs.
 
 The UI is janky right now. I will improve it. 
 
 Note: this project is heavily LLM coded (thanks Claude).  
+
+## Roadmap
+
+Near term
+-- Faster Poisson solve
+-- Bug fixes
+-- UI improvements
+-- More physics models
+
+Medium term
+-- Integration of GPU-based LIC 
+-- Complete rewrite in a different framework that doesn't require unecessary CPU<->GPU roundtrips that hamper performance
+-- Time-dependence and living images
 
 ## Quick Start
 
