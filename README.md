@@ -50,9 +50,7 @@ python -m elliptica.ui.dpg
 ## System Requirements
 
 - **Python 3.11+**
-- **OS**: macOS, Linux (X11/Wayland), Windows 10/11
-- **GPU** (optional): Apple Silicon (MPS) or NVIDIA (CUDA) - falls back to CPU (not recommended)
-- **Display**: GUI app, no headless support
+- **GPU** (optional): Apple Silicon (MPS) or NVIDIA (CUDA) - falls back to CPU (probably quite slow)
 
 ## Installation
 
