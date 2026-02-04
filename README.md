@@ -28,15 +28,17 @@ Note: this project is heavily LLM coded (thanks Claude).
 ## Roadmap
 
 Near term
--- Faster Poisson solve
--- Bug fixes
--- UI improvements
--- More physics models
+
+- Faster Poisson solve
+- Bug fixes
+- UI improvements
+- More physics models
 
 Medium term
--- Integration of GPU-based LIC 
--- Complete rewrite in a different framework that doesn't require unecessary CPU<->GPU roundtrips that hamper performance
--- Time-dependence and living images
+
+- Integration of GPU-based LIC 
+- Complete rewrite in a different framework that doesn't require unecessary CPU<->GPU roundtrips that hamper performance
+- Time-dependence and living images
 
 ## Quick Start
 
