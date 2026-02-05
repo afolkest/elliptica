@@ -138,7 +138,7 @@ def _apply_edge_dirichlet(mask: np.ndarray, values: np.ndarray, edge_bc: Dict[st
     return mask_out, values_out
 
 
-def _solve_poisson_with_interior_neumann(
+def _solve_poisson_extended(
     dirichlet_mask: np.ndarray,
     dirichlet_values: np.ndarray,
     neumann_mask: np.ndarray,
@@ -147,23 +147,33 @@ def _solve_poisson_with_interior_neumann(
     hx: float,
     hy: float,
     rhs_source: np.ndarray,
+    tol: float = 1e-10,
+    max_coarse: int = 30,
 ) -> np.ndarray:
-    """Solve Δφ = rhs_source with Dirichlet + interior Neumann boundaries.
+    """Extended Poisson solver with variable edge slopes and interior Neumann BCs.
 
-    This extends _solve_poisson_with_flux to handle interior objects with
-    Neumann BCs (∂ₙφ = g) using ghost cell approach.
+    This is the most general Poisson solver in the codebase, supporting:
+    - Variable (per-pixel) edge slopes for domain boundaries
+    - Interior Neumann boundaries (∂ₙφ = g) via ghost cell approach
+    - Arbitrary RHS source terms
+
+    For performance-critical cases without edge slopes or interior Neumann BCs,
+    use solve_poisson_system() from elliptica.poisson instead, which is
+    Numba-optimized.
 
     Args:
         dirichlet_mask: Boolean mask for Dirichlet pixels (φ = V)
         dirichlet_values: Values at Dirichlet pixels
         neumann_mask: Boolean mask for interior Neumann pixels
         neumann_values: Flux values (∂ₙφ) at Neumann pixels
-        edge_bc: Domain edge boundary conditions
-        hx, hy: Grid spacing
-        rhs_source: Source term (w field from first biharmonic solve)
+        edge_bc: Domain edge boundary conditions with optional per-edge slopes
+        hx, hy: Grid spacing in x and y directions
+        rhs_source: Source term (e.g., w field from first biharmonic solve)
+        tol: Solver tolerance (default 1e-10 for biharmonic accuracy)
+        max_coarse: Maximum coarse grid size for AMG solver
 
     Returns:
-        Solution φ field
+        Solution φ field as 2D array
     """
     h, w = dirichlet_mask.shape
     N = h * w
@@ -310,135 +320,8 @@ def _solve_poisson_with_interior_neumann(
             data.append(diag)
 
     A = coo_matrix((data, (row_idx, col_idx)), shape=(N, N), dtype=np.float64).tocsr()
-    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=30)
-    phi_flat = ml.solve(rhs, tol=1e-10, maxiter=500)
-    return phi_flat.reshape((h, w))
-
-
-def _solve_poisson_with_flux(
-    dirichlet_mask: np.ndarray,
-    dirichlet_values: np.ndarray,
-    edge_bc: Dict[str, Dict[str, Any]],
-    hx: float,
-    hy: float,
-    rhs_source: np.ndarray,
-) -> np.ndarray:
-    """Solve Δφ = rhs_source with Dirichlet mask/values and optional Neumann slopes."""
-    h, w = dirichlet_mask.shape
-    N = h * w
-    row_idx: list[int] = []
-    col_idx: list[int] = []
-    data: list[float] = []
-    rhs = -rhs_source.astype(np.float64).ravel()
-
-    def idx(i: int, j: int) -> int:
-        return j + i * w
-
-    top_vals = _edge_array(edge_bc["top"]["value"], w)
-    bottom_vals = _edge_array(edge_bc["bottom"]["value"], w)
-    left_vals = _edge_array(edge_bc["left"]["value"], h)
-    right_vals = _edge_array(edge_bc["right"]["value"], h)
-
-    top_slope = _edge_array(edge_bc["top"].get("slope", 0.0), w)
-    bottom_slope = _edge_array(edge_bc["bottom"].get("slope", 0.0), w)
-    left_slope = _edge_array(edge_bc["left"].get("slope", 0.0), h)
-    right_slope = _edge_array(edge_bc["right"].get("slope", 0.0), h)
-
-    for i in range(h):
-        for j in range(w):
-            k = idx(i, j)
-            if dirichlet_mask[i, j]:
-                row_idx.append(k)
-                col_idx.append(k)
-                data.append(1.0)
-                rhs[k] = dirichlet_values[i, j]
-                continue
-
-            diag = -4.0
-
-            # Up
-            if i - 1 >= 0:
-                if dirichlet_mask[i - 1, j]:
-                    rhs[k] -= dirichlet_values[i - 1, j]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i - 1, j))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["top"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= top_vals[j]
-                else:
-                    if h >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(1, j))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hy * top_slope[j])
-
-            # Down
-            if i + 1 < h:
-                if dirichlet_mask[i + 1, j]:
-                    rhs[k] -= dirichlet_values[i + 1, j]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i + 1, j))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["bottom"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= bottom_vals[j]
-                else:
-                    if h >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(h - 2, j))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hy * bottom_slope[j])
-
-            # Left
-            if j - 1 >= 0:
-                if dirichlet_mask[i, j - 1]:
-                    rhs[k] -= dirichlet_values[i, j - 1]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i, j - 1))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["left"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= left_vals[i]
-                else:
-                    if w >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(i, 1))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hx * left_slope[i])
-
-            # Right
-            if j + 1 < w:
-                if dirichlet_mask[i, j + 1]:
-                    rhs[k] -= dirichlet_values[i, j + 1]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i, j + 1))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["right"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= right_vals[i]
-                else:
-                    if w >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(i, w - 2))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hx * right_slope[i])
-
-            row_idx.append(k)
-            col_idx.append(k)
-            data.append(diag)
-
-    A = coo_matrix((data, (row_idx, col_idx)), shape=(N, N), dtype=np.float64).tocsr()
-    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=30)
-    phi_flat = ml.solve(rhs, tol=1e-10, maxiter=500)
+    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=max_coarse)
+    phi_flat = ml.solve(rhs, tol=tol, maxiter=500)
     return phi_flat.reshape((h, w))
 
 
@@ -645,31 +528,17 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
     )
 
     # Second solve: Δφ = w with Dirichlet φ on objects and edges
-    # For Flux objects, use Neumann handling
-    has_neumann = neumann_mask.any()
-
-    if has_neumann:
-        # Use the Neumann-aware solver
-        phi_field = _solve_poisson_with_interior_neumann(
-            phi_mask_final,
-            phi_values_final,
-            neumann_mask,
-            neumann_values,
-            edge_bc,
-            hx,
-            hy,
-            rhs_source=w_field.astype(float),
-        )
-    else:
-        # Original solver (no interior Neumann)
-        phi_field = _solve_poisson_with_flux(
-            phi_mask_final,
-            phi_values_final,
-            edge_bc,
-            hx,
-            hy,
-            rhs_source=w_field.astype(float),
-        )
+    # Always use the unified solver, passing empty Neumann masks if not needed
+    phi_field = _solve_poisson_extended(
+        phi_mask_final,
+        phi_values_final,
+        neumann_mask if neumann_mask.any() else np.zeros((grid_h, grid_w), dtype=bool),
+        neumann_values if neumann_mask.any() else np.zeros((grid_h, grid_w), dtype=float),
+        edge_bc,
+        hx,
+        hy,
+        rhs_source=w_field.astype(float),
+    )
 
     phi = phi_field.astype(np.float32)
 

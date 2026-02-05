@@ -1,3 +1,17 @@
+"""
+Numba-optimized Poisson solver for electrostatics visualization.
+
+This module provides a high-performance Poisson solver using Numba JIT
+compilation. It is designed for the electrostatics/Poisson PDE use case
+where edge slopes are not needed.
+
+Design Notes:
+- Uses Numba JIT for fast matrix assembly (incompatible with per-pixel edge slopes)
+- Tolerance of 1e-5 is adequate for visualization purposes
+- For variable edge slopes or interior Neumann BCs, use _solve_poisson_extended()
+  in elliptica.pde.biharmonic_pde instead (which uses tol=1e-10 for biharmonic
+  accuracy where errors compound across two solves)
+"""
 from dataclasses import dataclass
 from typing import Any, Optional
 import numba
@@ -9,7 +23,7 @@ from pyamg import smoothed_aggregation_solver
 DIRICHLET = 0
 NEUMANN = 1
 
-PRECISION = np.float64 
+PRECISION = np.float64
 SOLVER_TOL = 1e-5  
 
 @numba.jit(nopython=True, cache=True)
