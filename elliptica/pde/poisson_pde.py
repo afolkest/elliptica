@@ -4,10 +4,9 @@ Poisson equation PDE implementation (electrostatics).
 
 import numpy as np
 from typing import Any
-from scipy.ndimage import zoom
 from ..poisson import solve_poisson_system, DIRICHLET
-from ..mask_utils import blur_mask
-from .base import PDEDefinition, BoundaryParameter, BCField
+from ..mask_utils import place_mask_in_grid
+from .base import PDEDefinition, BCField
 
 
 # Constants for inner boundary BC types
@@ -54,35 +53,14 @@ def solve_poisson(project: Any) -> dict[str, np.ndarray]:
     margin_x, margin_y = project.margin if hasattr(project, 'margin') else (0, 0)
 
     for obj in boundary_objects:
-        # Get position with margin adjustment
-        if hasattr(obj, 'position'):
-            x = (obj.position[0] + margin_x) * grid_scale_x
-            y = (obj.position[1] + margin_y) * grid_scale_y
-        else:
-            x = margin_x * grid_scale_x
-            y = margin_y * grid_scale_y
-
-        # Scale mask if needed
-        obj_mask = obj.mask
-        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
-            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
-
-        # Apply edge smoothing if specified
-        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
-            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
-            scaled_sigma = obj.edge_smooth_sigma * scale_factor
-            obj_mask = blur_mask(obj_mask, scaled_sigma)
-
-        # Place mask in grid
-        mask_h, mask_w = obj_mask.shape
-        ix, iy = int(round(x)), int(round(y))
-        x0, y0 = max(0, ix), max(0, iy)
-        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
-
-        mx0, my0 = max(0, -ix), max(0, -iy)
-        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-        mask_slice = obj_mask[my0:my1, mx0:mx1]
+        result = place_mask_in_grid(
+            obj.mask, obj.position, (grid_h, grid_w),
+            margin=(margin_x, margin_y), scale=(grid_scale_x, grid_scale_y),
+            edge_smooth_sigma=obj.edge_smooth_sigma,
+        )
+        if result is None:
+            continue
+        mask_slice, (y0, y1, x0, x1) = result
         mask_bool = mask_slice > 0.5
 
         # Check boundary type for this object

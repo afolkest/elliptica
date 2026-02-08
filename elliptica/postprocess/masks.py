@@ -1,10 +1,10 @@
 """Mask rasterization and interior detection for boundary colorization."""
 
 import numpy as np
-from scipy.ndimage import binary_fill_holes, zoom
+from scipy.ndimage import binary_fill_holes
 from typing import Optional
 
-from elliptica.mask_utils import blur_mask
+from elliptica.mask_utils import place_mask_in_grid
 
 
 def derive_interior(mask: np.ndarray, thickness: float = 0.1) -> Optional[np.ndarray]:
@@ -154,51 +154,15 @@ def _rasterize_single_mask(
     Returns:
         Rasterized mask at target_shape resolution
     """
-    target_h, target_w = target_shape
-    pos_x, pos_y = position
-
-    # Apply margin offset and scaling, then subtract crop offset to align with cropped result
-    # This matches the field solver: x = (pos + margin) * scale
-    grid_x = (pos_x + margin) * scale_x - offset_x
-    grid_y = (pos_y + margin) * scale_y - offset_y
-
-    # Scale mask using zoom - use the same (scale_y, scale_x) as field solver
-    scaled_mask = zoom(mask, (scale_y, scale_x), order=0)
-    scaled_mask = np.clip(scaled_mask, 0.0, 1.0).astype(np.float32)
-
-    # Apply edge smoothing (same as field solver and LIC mask)
-    # Field solver uses: scale_factor = (scale_x + scale_y) / 2.0
-    if edge_smooth_sigma > 0:
-        scale_factor = (scale_x + scale_y) / 2.0
-        scaled_sigma = edge_smooth_sigma * scale_factor
-        scaled_mask = blur_mask(scaled_mask, scaled_sigma)
-
-    # Compute integer placement on target grid
-    # Use actual scaled mask dimensions (after zoom)
-    new_h, new_w = scaled_mask.shape
-    x0 = int(round(grid_x))
-    y0 = int(round(grid_y))
-    x1 = x0 + new_w
-    y1 = y0 + new_h
-
-    # Compute valid paste region (intersection with target)
-    paste_x0 = max(0, x0)
-    paste_y0 = max(0, y0)
-    paste_x1 = min(target_w, x1)
-    paste_y1 = min(target_h, y1)
-
-    # Check if completely outside
-    if paste_x0 >= paste_x1 or paste_y0 >= paste_y1:
+    result = place_mask_in_grid(
+        mask, position, target_shape,
+        margin=(margin, margin), scale=(scale_x, scale_y),
+        edge_smooth_sigma=edge_smooth_sigma,
+        offset=(offset_x, offset_y),
+    )
+    if result is None:
         return np.zeros(target_shape, dtype=np.float32)
-
-    # Compute source region to copy (handle partial overlap)
-    src_x0 = paste_x0 - x0
-    src_y0 = paste_y0 - y0
-    src_x1 = src_x0 + (paste_x1 - paste_x0)
-    src_y1 = src_y0 + (paste_y1 - paste_y0)
-
-    # Create output and paste
+    placed, (y0, y1, x0, x1) = result
     output = np.zeros(target_shape, dtype=np.float32)
-    output[paste_y0:paste_y1, paste_x0:paste_x1] = scaled_mask[src_y0:src_y1, src_x0:src_x1]
-
+    output[y0:y1, x0:x1] = placed
     return output
