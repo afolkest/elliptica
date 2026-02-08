@@ -19,7 +19,21 @@ except ImportError:
 
 
 class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMixin):
-    """Controller for postprocessing sliders, color controls, and region properties."""
+    """Controller for postprocessing sliders, color controls, and region properties.
+
+    This class composes functionality from three mixins:
+        - HistogramMixin: Histogram computation and rendering
+        - PaletteEditorMixin: Gradient palette editing UI
+        - ExpressionEditorMixin: OKLCH expression-based color mapping
+
+    Mixin ordering matters: PaletteEditorMixin must precede ExpressionEditorMixin
+    because ExpressionEditorMixin.on_color_mode_change() calls PaletteEditorMixin
+    methods to finalize palette state when switching modes.
+
+    Shared state initialized here before mixin inits:
+        - palette_preview_width, palette_preview_height: Used by histogram and palette editor
+        - color_mode: Shared between palette and expression editors
+    """
 
     def __init__(self, app: "EllipticaApp"):
         """Initialize controller with reference to main app.
