@@ -21,7 +21,7 @@ from elliptica.colorspace import (
     max_chroma_fast,
     srgb_to_oklch,
 )
-from elliptica.render import (
+from elliptica.palettes import (
     delete_palette,
     get_palette_spec,
     list_color_palettes,

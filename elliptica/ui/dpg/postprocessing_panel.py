@@ -4,7 +4,7 @@ from typing import Optional, TYPE_CHECKING
 
 from elliptica import defaults
 from elliptica.app.state_manager import StateKey
-from elliptica.render import list_color_palettes
+from elliptica.palettes import list_color_palettes
 from elliptica.ui.dpg.expression_editor_mixin import ExpressionEditorMixin
 from elliptica.ui.dpg.histogram_mixin import HistogramMixin
 from elliptica.ui.dpg.palette_editor_mixin import PaletteEditorMixin

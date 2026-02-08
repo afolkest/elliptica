@@ -6,7 +6,7 @@ from typing import Tuple, Optional
 
 from elliptica.gpu import GPUContext
 from elliptica.gpu.ops import gaussian_blur_gpu, quantile_safe, apply_palette_lut_gpu, grayscale_to_rgb_gpu, apply_contrast_gamma_gpu
-from elliptica.render import _get_palette_lut
+from elliptica.palettes import _get_palette_lut
 
 
 def compute_mask_bbox_cpu(mask: np.ndarray, pad: int, max_h: int, max_w: int) -> Optional[Tuple[int, int, int, int]]:

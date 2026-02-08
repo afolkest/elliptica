@@ -9,9 +9,7 @@ import os
 from elliptica.types import Project
 from elliptica.field_pde import compute_field_pde
 from elliptica.postprocess.masks import rasterize_boundary_masks
-from elliptica.render import (
-    compute_lic,
-)
+from elliptica.lic import compute_lic
 
 
 MAX_RENDER_DIM = 32768

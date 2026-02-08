@@ -1,5 +1,6 @@
 import numpy as np
 import brylic
+from scipy.ndimage import gaussian_filter, zoom
 from elliptica import defaults
 
 
@@ -66,3 +67,115 @@ def get_cosine_kernel(streamlength=30):
     """Gives a cosine kernel for a given streamlength in pixel units."""
     positions = np.arange(1 - streamlength, streamlength, dtype=np.float32)
     return 0.5 * (1.0 + np.cos(np.pi * positions / streamlength))
+
+
+def generate_noise(
+    shape: tuple[int, int],
+    seed: int | None,
+    oversample: float = 1.0,
+    lowpass_sigma: float = defaults.DEFAULT_NOISE_SIGMA,
+) -> np.ndarray:
+    height, width = shape
+    rng = np.random.default_rng(seed)
+    if oversample > 1.0:
+        high_h = max(1, int(round(height * oversample)))
+        high_w = max(1, int(round(width * oversample)))
+        base = rng.random((high_h, high_w)).astype(np.float32)
+    else:
+        base = rng.random((height, width)).astype(np.float32)
+
+    if lowpass_sigma > 0.0:
+        base = gaussian_filter(base, sigma=lowpass_sigma)
+
+    if oversample > 1.0:
+        scale_y = height / base.shape[0]
+        scale_x = width / base.shape[1]
+        base = zoom(base, (scale_y, scale_x), order=1)
+
+    base_min = float(base.min())
+    base_max = float(base.max())
+    if base_max > base_min:
+        base = (base - base_min) / (base_max - base_min)
+    else:
+        base = np.zeros_like(base)
+    return base.astype(np.float32)
+
+
+def compute_lic(
+    ex: np.ndarray,
+    ey: np.ndarray,
+    streamlength: int,
+    num_passes: int = 1,
+    *,
+    texture: np.ndarray | None = None,
+    seed: int | None = 0,
+    boundaries: str = "closed",
+    noise_oversample: float = 1.5,
+    noise_sigma: float = defaults.DEFAULT_NOISE_SIGMA,
+    mask: np.ndarray | None = None,
+    edge_gain_strength: float = 0.0,
+    edge_gain_power: float = 2.0,
+    domain_edge_gain_strength: float = 0.0,
+    domain_edge_gain_power: float = 2.0,
+) -> np.ndarray:
+    """Compute LIC visualization. Returns array normalized to [-1, 1].
+
+    Args:
+        ex: X component of electric field
+        ey: Y component of electric field
+        streamlength: Streamline length in pixels
+        num_passes: Number of LIC iterations
+        texture: Optional input texture (generates white noise if None)
+        seed: Random seed for noise generation
+        boundaries: Boundary conditions ("closed" or "periodic")
+        noise_oversample: Oversample factor for noise generation
+        noise_sigma: Low-pass filter sigma for noise
+        mask: Optional boolean mask to block streamlines (True = blocked)
+        edge_gain_strength: Brightness boost near mask edges (0.0 = none)
+        edge_gain_power: Falloff curve sharpness for mask edge gain
+        domain_edge_gain_strength: Brightness boost near domain edges (0.0 = none)
+        domain_edge_gain_power: Falloff curve sharpness for domain edge gain
+    """
+    field_h, field_w = ex.shape
+
+    streamlength = max(int(streamlength), 1)
+
+    # Scale noise_sigma with resolution (reference: 1024px on shorter side)
+    scale_factor = min(field_h, field_w) / 1024.0
+    scaled_sigma = noise_sigma * scale_factor
+
+    if texture is None:
+        texture = generate_noise(
+            (field_h, field_w),
+            seed,
+            oversample=noise_oversample,
+            lowpass_sigma=scaled_sigma,
+        )
+    else:
+        texture = texture.astype(np.float32, copy=False)
+
+    vx = ex.astype(np.float32, copy=False)
+    vy = ey.astype(np.float32, copy=False)
+    if not np.any(vx) and not np.any(vy):
+        return np.zeros_like(ex, dtype=np.float32)
+
+    kernel = get_cosine_kernel(streamlength).astype(np.float32)
+    lic_result = convolve(
+        texture,
+        vx,
+        vy,
+        kernel,
+        iterations=num_passes,
+        boundaries=boundaries,
+        mask=mask,
+        edge_gain_strength=edge_gain_strength,
+        edge_gain_power=edge_gain_power,
+        domain_edge_gain_strength=domain_edge_gain_strength,
+        domain_edge_gain_power=domain_edge_gain_power,
+    )
+
+    max_abs = np.max(np.abs(lic_result))
+    if max_abs > 1e-12:
+        lic_result = lic_result / max_abs
+
+    return lic_result
