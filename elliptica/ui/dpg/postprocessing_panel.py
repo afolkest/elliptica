@@ -340,7 +340,11 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
                 with dpg.group(horizontal=True):
                     lightness_expr_lbl = dpg.add_text("Lightness expr", color=(150, 150, 150), tag="lightness_expr_label")
                     with dpg.tooltip(lightness_expr_lbl):
-                        dpg.add_text("Custom expression for lightness mapping.\nUse 'mag', 'lic', 'angle', etc.\nExample: clipnorm(mag, 1, 99)")
+                        dpg.add_text(
+                            "Custom expression for lightness mapping.\n"
+                            "Use variables like lic, mag, ex, ey, phi.\n"
+                            "Example: clipnorm(mag, 1, 99)"
+                        )
                     dpg.add_spacer(width=10)
                     # Enable checkbox (for global mode)
                     dpg.add_checkbox(
@@ -363,12 +367,13 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
                 with dpg.group(tag="lightness_expr_group", show=self.app.state.display_settings.lightness_expr is not None):
                     dpg.add_input_text(
                         default_value=self.app.state.display_settings.lightness_expr or "clipnorm(mag, 1, 99)",
-                        width=200,
+                        width=-1,
                         callback=self.on_lightness_expr_change,
                         on_enter=False,
                         tag="lightness_expr_input",
                         hint="e.g. clipnorm(mag, 1, 99)",
                     )
+                    self._build_lightness_expression_help_ui("lightness_expr_group")
 
                 # Saturation slider (post-colorization chroma multiplier)
                 dpg.add_slider_float(
@@ -729,6 +734,7 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
             dpg.configure_item("effects_header", show=False)
 
         self._update_palette_preview_buttons()
+        self._update_pde_specific_vars_display()
         self._request_histogram_update()
 
     # ------------------------------------------------------------------
@@ -853,6 +859,7 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
             if current:
                 self._cached_global_lightness_expr = current
             self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, None)
+        self._update_pde_specific_vars_display()
 
     def on_lightness_expr_change(self, sender=None, app_data=None) -> None:
         """Handle lightness expression text change (debounced via StateManager)."""
@@ -884,6 +891,7 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
         # Global update (no boundary, or Global mode, or fallback)
         self._cached_global_lightness_expr = expr
         self.app.state_manager.update(StateKey.LIGHTNESS_EXPR, expr, debounce=0.3)
+        self._update_pde_specific_vars_display()
 
     # ------------------------------------------------------------------
     # Lightness expression mode (Global/Custom) callback
@@ -970,4 +978,3 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
             debounce=0.3,
             context=context,
         )
-
