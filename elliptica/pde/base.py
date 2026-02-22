@@ -1,6 +1,7 @@
 """
 Base classes for PDE definitions.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable, Any
@@ -52,10 +53,10 @@ class PDEDefinition:
     description: str
 
     # Core computation functions
-    solve: Callable[[Any], dict[str, np.ndarray]]
+    solve: Callable[[SolveContext], dict[str, np.ndarray]]
     """Solve the PDE, returning dict of solution arrays."""
 
-    extract_lic_field: Callable[[dict[str, np.ndarray], Any], tuple[np.ndarray, np.ndarray]]
+    extract_lic_field: Callable[[dict[str, np.ndarray], SolveContext], tuple[np.ndarray, np.ndarray]]
     """Extract (ex, ey) vector field for LIC from solution dict."""
 
     # UI Metadata
@@ -72,3 +73,27 @@ class PDEDefinition:
     # Rich fields for interior boundary objects
     boundary_fields: list[BCField] = field(default_factory=list)
     """Fields for interior boundary objects (enums, floats, etc.). Supplements boundary_params."""
+
+    # Solution variable metadata for expression editor UI
+    solution_variables: list[tuple[str, str]] = field(default_factory=list)
+    """Variables exposed by this PDE's solver, as (name, description) pairs."""
+
+    # Primary solution field name (used for relaxation in field_pde.py)
+    primary_field: str = "phi"
+
+
+@dataclass
+class SolveContext:
+    """Context passed to PDE solvers.
+
+    May differ from the Project (e.g. reduced resolution for preview solves).
+    """
+    boundary_objects: list
+    shape: tuple[int, int]
+    margin: tuple[int, int]
+    domain_size: tuple[float, float]
+    bc: dict
+    boundary_conditions: dict
+    solve_scale: float
+    pde_params: dict
+    canvas_resolution: tuple[int, int]

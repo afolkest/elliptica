@@ -83,16 +83,6 @@ AVAILABLE_VARIABLES = [
     ("ey", "Field Y component"),
 ]
 
-# PDE-specific variables (availability depends on active PDE)
-PDE_SPECIFIC_VARIABLES = {
-    "poisson": [
-        ("phi", "Electric potential"),
-    ],
-    "biharmonic": [
-        ("phi", "Stream function"),
-    ],
-}
-
 # Functions are grouped by type:
 # - Global: uses statistics from entire image (percentiles, min/max)
 # - Per-pixel: operates on each pixel independently
