@@ -365,7 +365,7 @@ class RenderModalController:
                 if field_def is None or not dpg.does_item_exist(group_id):
                     continue
 
-                visible_when = getattr(field_def, "visible_when", None)
+                visible_when = field_def.visible_when
                 if visible_when is None:
                     # No rule means always visible
                     dpg.configure_item(group_id, show=True)

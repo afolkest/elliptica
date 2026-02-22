@@ -46,14 +46,11 @@ def compute_field_pde(
         - solution_dict: Dictionary of solution arrays from PDE solver
         - (ex, ey): Extracted vector field for LIC visualization
     """
-    # Get active PDE definition
-    pde = PDERegistry.get_active()
-    if getattr(pde, "bc_fields", None):
+    # Get PDE definition from the project snapshot (not the global singleton)
+    pde = PDERegistry.get(project.pde_type)
+    if pde.bc_fields:
         bc_map = resolve_bc_map(project, pde)
         legacy_bc = bc_map_to_legacy(bc_map, DIRICHLET)
-        # Persist resolved BCs for this PDE on the project (for UI/state roundtrips)
-        if hasattr(project, "pde_bc"):
-            project.pde_bc[pde.name] = bc_map
     else:
         bc_map = {}
         legacy_bc = {
@@ -118,6 +115,9 @@ def compute_field_pde(
                 # For non-2D arrays, just copy
                 solution[key] = array
 
+        # Full-resolution context for relaxation and LIC extraction
+        full_res_context = _make_solve_context(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
+
         # Apply relaxation if enabled
         if pde.primary_field in solution:
 
@@ -126,22 +126,15 @@ def compute_field_pde(
                 and defaults.SOLVE_RELAX_BAND > 0
             ):
 
-                
-                # We need to rebuild the Dirichlet mask at full resolution to know where to relax
-                # This is a bit expensive but necessary for good previews
-                # Create a temporary project for full-res mask generation
-                full_res_project = _make_solve_context(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
-                
-                # TODO: This assumes Poisson PDE internals (dirichlet_mask). 
+                # TODO: This assumes Poisson PDE internals (dirichlet_mask).
                 # Ideally the PDE solver would expose a "get_boundary_mask" method.
-                # For now, we'll use a helper to generate it.
-                dirichlet_mask = _build_dirichlet_mask(full_res_project)
-                
+                dirichlet_mask = _build_dirichlet_mask(full_res_context)
+
                 relax_mask = build_relaxation_mask(
                     dirichlet_mask,
                     defaults.SOLVE_RELAX_BAND,
                 )
-                
+
                 if np.any(relax_mask):
                     phi = solution[pde.primary_field]
                     # Ensure contiguous array for Numba
@@ -156,11 +149,12 @@ def compute_field_pde(
                     )
 
                     # Re-enforce boundary conditions after relaxation
-                    # (We need values for this, which is another expense.
-                    #  Optimization: maybe skip this if relaxation is gentle enough?)
-                    dirichlet_values = _build_dirichlet_values(full_res_project)
+                    dirichlet_values = _build_dirichlet_values(full_res_context)
                     phi[dirichlet_mask] = dirichlet_values[dirichlet_mask]
                     solution[pde.primary_field] = phi
+
+        # Use full-res context so extractors see shapes matching the solution arrays
+        solve_project = full_res_context
 
     else:
         # Solve at full resolution
@@ -168,7 +162,13 @@ def compute_field_pde(
         solution = pde.solve(solve_project)
 
     # Extract LIC field from solution
-    ex, ey = pde.extract_lic_field(solution, solve_project)
+    extractors = pde.lic_field_extractors
+    if extractors:
+        field_name = project.lic_field_name or next(iter(extractors))
+        extract_fn = extractors.get(field_name, pde.extract_lic_field)
+    else:
+        extract_fn = pde.extract_lic_field
+    ex, ey = extract_fn(solution, solve_project)
 
     return solution, (ex, ey)
 

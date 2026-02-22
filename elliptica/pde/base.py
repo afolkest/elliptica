@@ -10,7 +10,7 @@ import numpy as np
 
 @dataclass
 class BCField:
-    """Metadata for a boundary condition field (per edge).
+    """Metadata for a UI-controlled field (boundary edge, boundary object, or global parameter).
 
     Attributes:
         visible_when: Optional dict mapping field_name -> required_value.
@@ -78,8 +78,17 @@ class PDEDefinition:
     solution_variables: list[tuple[str, str]] = field(default_factory=list)
     """Variables exposed by this PDE's solver, as (name, description) pairs."""
 
+    # Global PDE parameters (e.g. viscosity). Values stored in Project.pde_params.
+    # Note: BCField.visible_when is not yet supported for global_fields.
+    global_fields: list[BCField] = field(default_factory=list)
+    """Global PDE parameters shown as controls in the main UI panel."""
+
     # Primary solution field name (used for relaxation in field_pde.py)
     primary_field: str = "phi"
+
+    # Named vector field extractors for LIC visualization
+    lic_field_extractors: dict[str, Callable[[dict[str, np.ndarray], SolveContext], tuple[np.ndarray, np.ndarray]]] = field(default_factory=dict)
+    """Named vector field extractors. If populated, UI shows dropdown. If empty, uses extract_lic_field."""
 
 
 @dataclass
@@ -90,7 +99,7 @@ class SolveContext:
     """
     boundary_objects: list
     shape: tuple[int, int]
-    margin: tuple[int, int]
+    margin: tuple[float, float]
     domain_size: tuple[float, float]
     bc: dict
     boundary_conditions: dict
