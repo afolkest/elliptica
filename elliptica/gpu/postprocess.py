@@ -213,6 +213,10 @@ def apply_full_postprocess_gpu(
     scalar_tensor._lic_cached_clip_range = (float(clip_low_percent), float(clip_high_percent))
     scalar_tensor._lic_cached_percentiles = used_percentiles
 
+    # Clear percentile cache to avoid stale values from id(tensor) reuse
+    from elliptica.expr.functions import clear_percentile_cache
+    clear_percentile_cache()
+
     # === ColorConfig path: expression-based OKLCH coloring ===
     if color_config is not None:
         from elliptica.colorspace.pipeline import render_with_color_config_gpu

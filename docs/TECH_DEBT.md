@@ -2,32 +2,12 @@
 
 ## P0 — High Priority
 
-### Split `render.py` into focused modules
-`render.py` (862 lines) mixes four unrelated responsibilities:
-- ~220 lines of hardcoded palette RGB arrays (should be data files)
-- Palette CRUD + user file I/O (`~/.elliptica/palettes.json`)
-- LIC computation (brylic wrapper)
-- Image processing utilities (normalize, colorize, contrast, gamma)
-
-Should become at least `palettes.py`, `lic_engine.py`, and `image_utils.py`. Palette functions are currently imported by UI controllers that have nothing to do with rendering.
-
-### Unify boundary mask placement
-The "place mask in grid" coordinate math appears in three places with subtly different logic:
-- `pde/poisson_pde.py:56-86`
-- `pipeline.py:112-139`
-- `postprocess/masks.py`
-
-Should be a single utility function. The current duplication is a bug risk — any fix in one location can be missed in the others.
-
 ### Add locking around palette module state
 `set_palette_spec()` in `render.py:532` mutates three module-level dicts (`_RUNTIME_PALETTE_SPECS`, `_RUNTIME_PALETTES`, `PALETTE_LUTS`) without locking. Callers hold `state_lock`, but that protects `AppState`, not the palette module state. Other code paths can read palette data concurrently. Either add a dedicated lock or move palette state into `AppState`.
 
 ---
 
 ## P1 — Important
-
-### Replace `SolveProject` shim with a Protocol
-`field_pde.py:76-93` contains a duck-typed inner class that bridges old and new PDE APIs. Any new attribute expected by a solver must be manually added. The code comment acknowledges this: "This is a bit of a hack." Replace with a proper `typing.Protocol` or adapter class.
 
 ### Add tests for PDE solvers and render pipeline
 The most numerically sensitive code has zero test coverage. Bugs can produce plausible-looking but incorrect output. Priority targets:

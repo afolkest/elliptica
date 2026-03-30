@@ -10,7 +10,7 @@ from typing import Any, Dict
 from scipy.sparse import coo_matrix
 from pyamg import smoothed_aggregation_solver
 from ..poisson import DIRICHLET, NEUMANN, solve_poisson_system
-from .base import PDEDefinition, BCField
+from .base import PDEDefinition, BCField, SolveContext
 from .poisson_pde import extract_electric_field
 from scipy.ndimage import convolve
 from ..mask_utils import place_mask_in_grid
@@ -324,7 +324,7 @@ def _solve_poisson_extended(
 
 
 def _build_object_masks(
-    project: Any,
+    project: SolveContext,
     grid_h: int,
     grid_w: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -412,7 +412,7 @@ def _build_object_masks(
     return phi_mask, phi_values, w_mask, w_values, neumann_mask, neumann_values
 
 
-def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
+def solve_biharmonic(project: SolveContext) -> dict[str, np.ndarray]:
     """
     Solve Δ²φ = 0 using a mixed formulation with two Poisson solves.
 
@@ -528,6 +528,7 @@ BIHARMONIC_PDE = PDEDefinition(
     description="Solve biharmonic equation (clamped plate / Stokes flow)",
     solve=solve_biharmonic,
     extract_lic_field=extract_electric_field,  # Same E = -grad(phi)
+    solution_variables=[("phi", "Stream function")],
     boundary_params=[],  # Using boundary_fields instead
     boundary_fields=[
         BCField(

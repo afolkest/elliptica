@@ -332,11 +332,16 @@ class ExpressionEditorMixin:
         self,
     ) -> tuple[str, bool, list[tuple[str, str]], list[tuple[str, str]], list[str]]:
         """Collect currently available variables for quick/reference views."""
-        from elliptica.colorspace import AVAILABLE_VARIABLES, PDE_SPECIFIC_VARIABLES
+        from elliptica.colorspace import AVAILABLE_VARIABLES
+        from elliptica.pde import PDERegistry
 
         pde_type = self._get_active_pde_type()
         base_desc = dict(AVAILABLE_VARIABLES)
-        pde_desc = dict(PDE_SPECIFIC_VARIABLES.get(pde_type, []))
+        try:
+            pde_def = PDERegistry.get(pde_type)
+            pde_desc = dict(pde_def.solution_variables)
+        except ValueError:
+            pde_desc = {}
 
         with self.app.state_lock:
             cache = self.app.state.render_cache

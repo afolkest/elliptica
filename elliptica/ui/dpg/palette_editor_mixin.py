@@ -1525,6 +1525,7 @@ class PaletteEditorMixin:
                 "brightness": None,
                 "contrast": None,
                 "gamma": None,
+                "lightness_expr": None,
             }, context=(boundary_id, region_type))
 
         dpg.configure_item("region_palette_popup", show=False)

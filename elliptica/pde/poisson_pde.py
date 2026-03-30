@@ -3,10 +3,9 @@ Poisson equation PDE implementation (electrostatics).
 """
 
 import numpy as np
-from typing import Any
 from ..poisson import solve_poisson_system, DIRICHLET
 from ..mask_utils import place_mask_in_grid
-from .base import PDEDefinition, BCField
+from .base import PDEDefinition, BCField, SolveContext
 
 
 # Constants for inner boundary BC types
@@ -14,7 +13,7 @@ INNER_DIRICHLET = 0  # Fixed potential (default boundary behavior)
 INNER_NEUMANN = 1    # Specified normal flux (∂φ/∂n = g)
 
 
-def solve_poisson(project: Any) -> dict[str, np.ndarray]:
+def solve_poisson(project: SolveContext) -> dict[str, np.ndarray]:
     """
     Solve the Poisson equation for electrostatic potential.
 
@@ -110,7 +109,7 @@ def solve_poisson(project: Any) -> dict[str, np.ndarray]:
     return result
 
 
-def extract_electric_field(solution: dict[str, np.ndarray], project: Any) -> tuple[np.ndarray, np.ndarray]:
+def extract_electric_field(solution: dict[str, np.ndarray], project: SolveContext) -> tuple[np.ndarray, np.ndarray]:
     """
     Extract electric field from potential.
 
@@ -139,6 +138,7 @@ POISSON_PDE = PDEDefinition(
     description="Solve Laplace equation for electric potential and field",
     solve=solve_poisson,
     extract_lic_field=extract_electric_field,
+    solution_variables=[("phi", "Electric potential")],
     boundary_params=[],  # Using boundary_fields instead for richer controls
     boundary_fields=[
         BCField(

@@ -103,6 +103,7 @@ class Project:
     pde_type: str = "poisson"  # Active PDE type
     pde_params: dict = field(default_factory=dict)  # PDE-specific parameters
     pde_bc: dict = field(default_factory=dict)  # Per-PDE boundary condition values
+    lic_field_name: str = ""  # Selected extractor name (empty = default)
 
     @property
     def shape(self) -> tuple[int, int]:

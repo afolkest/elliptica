@@ -189,6 +189,7 @@ def _project_to_dict(project: Project) -> dict[str, Any]:
         'pde_type': project.pde_type,
         'pde_params': project.pde_params,
         'pde_bc': project.pde_bc,
+        'lic_field_name': project.lic_field_name,
     }
 
 
@@ -209,6 +210,7 @@ def _dict_to_project(data: dict[str, Any]) -> Project:
         pde_type=data.get('pde_type', 'poisson'),
         pde_params=data.get('pde_params', {}),
         pde_bc=data.get('pde_bc', {}),
+        lic_field_name=data.get('lic_field_name', ''),
     )
 
 
@@ -453,14 +455,16 @@ def compute_project_fingerprint(project: Project) -> str:
         f"canvas:{project.canvas_resolution[0]}x{project.canvas_resolution[1]}",
         f"streamlen:{project.streamlength_factor}",
         f"bounds:{project.boundary_top},{project.boundary_bottom},{project.boundary_left},{project.boundary_right}",
-        f"pde_type:{getattr(project, 'pde_type', 'poisson')}",
-        f"pde_bc:{getattr(project, 'pde_bc', {})}",
+        f"pde_type:{project.pde_type}",
+        f"pde_bc:{json.dumps(project.pde_bc, sort_keys=True)}",
+        f"pde_params:{json.dumps(project.pde_params, sort_keys=True)}",
+        f"lic_field:{project.lic_field_name}",
     ]
 
     # Per-boundary state (order matters!)
     for i, b in enumerate(project.boundary_objects):
         # Scalar properties
-        parts.append(f"b{i}:v={b.params.get('voltage', 0.0)}")
+        parts.append(f"b{i}:params={sorted(b.params.items(), key=lambda kv: kv[0])}")
         parts.append(f"b{i}:pos={b.position[0]:.2f},{b.position[1]:.2f}")
         parts.append(f"b{i}:scale={b.scale_factor}")
         parts.append(f"b{i}:edge_smooth={b.edge_smooth_sigma}")
