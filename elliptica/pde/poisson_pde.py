@@ -41,15 +41,11 @@ def solve_poisson(project: SolveContext) -> dict[str, np.ndarray]:
     neumann_values = np.zeros((grid_h, grid_w), dtype=float)
 
     # Get domain dimensions and margin from project
-    if hasattr(project, 'domain_size'):
-        domain_w, domain_h = project.domain_size
-        grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
-        grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
-    else:
-        grid_scale_x = 1.0
-        grid_scale_y = 1.0
+    domain_w, domain_h = project.domain_size
+    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
+    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
 
-    margin_x, margin_y = project.margin if hasattr(project, 'margin') else (0, 0)
+    margin_x, margin_y = project.margin
 
     for obj in boundary_objects:
         result = place_mask_in_grid(

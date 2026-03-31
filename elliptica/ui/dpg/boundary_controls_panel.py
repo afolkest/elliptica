@@ -1,7 +1,6 @@
 """Boundary controls panel for Elliptica UI - generic parameter sliders."""
 
 from typing import Optional, Dict, Any, TYPE_CHECKING
-from elliptica.app import actions
 from elliptica.app.state_manager import StateKey
 from elliptica.pde import PDERegistry
 
@@ -236,7 +235,7 @@ class BoundaryControlsPanel:
                     current_short = lbl.split(" (")[0] if " (" in lbl else lbl
                     break
 
-            combo_id = dpg.add_combo(
+            dpg.add_combo(
                 label="",
                 items=short_labels,
                 default_value=current_short,

@@ -8,14 +8,9 @@ Review conducted 2026-03-30 across 7 parallel agents. 32 files changed, ~3500 in
 
 ### Medium
 
-- [ ] **Stale `TECH_DEBT.md` references to `render.py`** — Five paths still point at the deleted file. Update to `palettes.py`, `lic.py`, or `image_utils.py` as appropriate. Lines 6, 17, 23, 38, 44.
+- [x] **Stale `TECH_DEBT.md` references to `render.py`** — Updated to `palettes.py`, `lic.py`, `image_utils.py`.
 
-- [ ] **Dead symbols flagged by ruff** — 8 unused imports/locals across touched files:
-  - `postprocess/masks.py` (dead local ~line 80)
-  - `postprocessing_panel.py` (unused import ~line 932)
-  - `app.py` (~line 79)
-  - `boundary_controls_panel.py` (~line 4)
-  - `texture_manager.py` (~line 208)
+- [x] **Dead symbols flagged by ruff** — Removed 8 unused imports/locals across 5 files.
 
 - [ ] **Global enum params don't normalize stale saved values** — When a serialized enum value is no longer in `gf.choices`, the combo shows the first label but `pde_params` keeps the old value. Fix: sync the backing dict on rebuild, same as the LIC selector already does. `app.py` ~line 413-429.
 
@@ -45,9 +40,9 @@ Review conducted 2026-03-30 across 7 parallel agents. 32 files changed, ~3500 in
 
 ### Cleanup
 
-- [ ] **Residual `hasattr`/`getattr` checks in PDE code** — Commit `629ce4b` claims cleanup but checks remain in `poisson_pde.py:44` and `biharmonic_pde.py:352`.
+- [x] **Residual `hasattr`/`getattr` checks in PDE code** — Removed from `poisson_pde.py` and `biharmonic_pde.py`; callers now always pass `SolveContext`.
 
-- [ ] **Mixin dependency docs slightly inaccurate** — `postprocessing_panel.py:29` claims MRO ordering matters, but mixins don't use cooperative `super()`. `postprocessing_panel.py:33` says `color_mode` is initialized before mixin init but actual assignment is at line 60. `palette_editor_mixin.py:47` lists `palette_hist_height` as a dependency but doesn't read it.
+- [x] **Mixin dependency docs slightly inaccurate** — Fixed `postprocessing_panel.py` docstring to describe actual init order. Removed phantom `palette_hist_height` dependency from `palette_editor_mixin.py`.
 
 ---
 

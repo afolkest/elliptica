@@ -3,7 +3,7 @@
 ## P0 — High Priority
 
 ### Add locking around palette module state
-`set_palette_spec()` in `render.py:532` mutates three module-level dicts (`_RUNTIME_PALETTE_SPECS`, `_RUNTIME_PALETTES`, `PALETTE_LUTS`) without locking. Callers hold `state_lock`, but that protects `AppState`, not the palette module state. Other code paths can read palette data concurrently. Either add a dedicated lock or move palette state into `AppState`.
+`set_palette_spec()` in `palettes.py:528` mutates three module-level dicts (`_RUNTIME_PALETTE_SPECS`, `_RUNTIME_PALETTES`, `PALETTE_LUTS`) without locking. Callers hold `state_lock`, but that protects `AppState`, not the palette module state. Other code paths can read palette data concurrently. Either add a dedicated lock or move palette state into `AppState`.
 
 ---
 
@@ -14,13 +14,13 @@ The most numerically sensitive code has zero test coverage. Bugs can produce pla
 - `poisson.py` (Poisson solver)
 - `pde/biharmonic_pde.py` (Biharmonic solver)
 - `pipeline.py` (render orchestration)
-- `render.py` LIC computation path
+- `lic.py` LIC computation path
 
 ### Extract remaining `PostprocessingPanel` responsibilities
 Still 973 lines post-mixin-extraction. Contains slider callbacks, region toggle logic, lightness expression management, smear callbacks, and a 140-line `update_context_ui()` method. Candidates for further extraction into mixins or helper classes.
 
 ### DRY up duplicated code
-- `_normalize_unit` is copy-pasted between `render.py:681` and `histogram_mixin.py:54`
+- `_normalize_unit` is copy-pasted between `image_utils.py:7` and `histogram_mixin.py:54`
 - `_apply_display_transforms` and `colorize_array` share nearly identical percentile-clip/contrast/brightness/gamma logic
 - Palette popup building is duplicated across `postprocessing_panel.py` (lines 415, 509) and `palette_editor_mixin.py:1653`
 
@@ -35,13 +35,13 @@ Noted as a TODO in `boundary_controls_panel.py:424`. The `StateManager` architec
 `ExpressionEditorMixin` expects ~6 attributes/methods from `PaletteEditorMixin` (`palette_editor_active`, `palette_editor_dirty`, `palette_editor_persist_dirty`, `_apply_palette_editor_refresh()`, `_finalize_palette_editor_colormaps()`, `_set_palette_editor_state()`). These are documented only in docstrings, not enforced by any Protocol or ABC. Adding protocols would catch integration errors at type-check time.
 
 ### Move hardcoded palette data to data files
-`render.py:11-236` contains ~220 lines of numpy arrays defining color palettes. This data should live in JSON or TOML files loaded at startup, not in Python source.
+`palettes.py:11-236` contains ~220 lines of numpy arrays defining color palettes. This data should live in JSON or TOML files loaded at startup, not in Python source.
 
 ### Convert `BoundaryObject` to a dataclass
 `BoundaryObject` (`types.py:9`) uses a manual `__init__` while every other data type (`Project`, `RenderSettings`, `DisplaySettings`, `RegionStyle`, etc.) uses `@dataclass`. No apparent reason for the inconsistency.
 
 ### Fix palette soft-delete growth
-`delete_palette` (`render.py:559`) stores `{"deleted": True}` rather than removing the entry. The palettes JSON grows monotonically. Deleted palettes are filtered at load time. Should either hard-delete or compact periodically.
+`delete_palette` (`palettes.py:555`) stores `{"deleted": True}` rather than removing the entry. The palettes JSON grows monotonically. Deleted palettes are filtered at load time. Should either hard-delete or compact periodically.
 
 ---
 

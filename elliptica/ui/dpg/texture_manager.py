@@ -205,7 +205,6 @@ class TextureManager:
 
     def refresh_render_texture(self) -> None:
         """Update render texture with postprocessed image from cache."""
-        from PIL import Image
         from elliptica.expr import ExprError
 
         if dpg is None or self.texture_registry_id is None:

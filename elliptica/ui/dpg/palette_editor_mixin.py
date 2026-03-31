@@ -44,7 +44,6 @@ class PaletteEditorMixin:
         - app: EllipticaApp instance
         - palette_preview_width: int
         - palette_preview_height: int
-        - palette_hist_height: int (from HistogramMixin)
         - update_context_ui(): method to refresh UI state
         - _get_current_region_style_unlocked(): method returning RegionStyle
     """
@@ -53,7 +52,6 @@ class PaletteEditorMixin:
     app: "EllipticaApp"
     palette_preview_width: int
     palette_preview_height: int
-    palette_hist_height: int
 
     def _init_palette_editor_state(self) -> None:
         """Initialize palette editor-related instance variables.

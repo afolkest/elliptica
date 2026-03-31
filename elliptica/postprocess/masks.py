@@ -76,10 +76,6 @@ def rasterize_boundary_masks(
     # This ensures masks align pixel-perfectly with where the field is actually blocked
     if domain_size is not None:
         domain_w, domain_h = domain_size
-        # Reconstruct compute dimensions (full domain before cropping)
-        compute_w = width + offset_x + int(round(margin * scale))  # Approximate
-        compute_h = height + offset_y + int(round(margin * scale))
-        # Actually, we need the original compute dimensions. Use domain_size directly.
         compute_w_full = int(round(domain_w * scale))
         compute_h_full = int(round(domain_h * scale))
         scale_x = compute_w_full / domain_w if domain_w > 0 else scale

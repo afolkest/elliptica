@@ -26,13 +26,16 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
         - PaletteEditorMixin: Gradient palette editing UI
         - ExpressionEditorMixin: OKLCH expression-based color mapping
 
-    Mixin ordering matters: PaletteEditorMixin must precede ExpressionEditorMixin
-    because ExpressionEditorMixin.on_color_mode_change() calls PaletteEditorMixin
+    Mixins are composed via namespace sharing (self), not cooperative super().
+    ExpressionEditorMixin.on_color_mode_change() calls PaletteEditorMixin
     methods to finalize palette state when switching modes.
 
-    Shared state initialized here before mixin inits:
-        - palette_preview_width, palette_preview_height: Used by histogram and palette editor
-        - color_mode: Shared between palette and expression editors
+    Init order in __init__:
+        1. palette_preview_width/height (used by histogram and palette editor)
+        2. _init_histogram_state()
+        3. _init_palette_editor_state()
+        4. _init_expression_editor_state()
+        5. color_mode (shared between palette and expression editors)
     """
 
     def __init__(self, app: "EllipticaApp"):
@@ -929,7 +932,6 @@ class PostprocessingPanel(HistogramMixin, PaletteEditorMixin, ExpressionEditorMi
         else:
             # Switch to global - cache current custom expr before clearing
             with self.app.state_lock:
-                from elliptica.app.core import BoundaryColorSettings
                 bcs = self.app.state.boundary_color_settings.get(selected.id)
                 if bcs is not None:
                     rs = bcs.surface if region_type == "surface" else bcs.interior

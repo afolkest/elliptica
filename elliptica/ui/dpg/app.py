@@ -76,7 +76,6 @@ from elliptica.ui.dpg.shape_dialog import ShapeDialogController
 from elliptica.ui.dpg.fonts import setup_fonts
 from elliptica.ui.dpg.theme import apply_theme
 from elliptica.types import BoundaryObject, Project, clone_boundary_object
-from elliptica import defaults
 
 
 BACKSPACE_KEY = None
@@ -286,7 +285,7 @@ class EllipticaApp:
                 dpg.add_menu_item(label="Export Image...", callback=self.image_export.open_export_dialog,
                                  tag="export_menu_item")
 
-        with dpg.handler_registry() as handler_reg:
+        with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
 
         # Set viewport resize callback
