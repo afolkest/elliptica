@@ -1,0 +1,68 @@
+# Develop -> Main Merge Review
+
+Review conducted 2026-03-30 across 7 parallel agents. 32 files changed, ~3500 insertions, ~3400 deletions, 14 commits.
+
+---
+
+## Pre-Merge Fixes
+
+### Medium
+
+- [ ] **Stale `TECH_DEBT.md` references to `render.py`** — Five paths still point at the deleted file. Update to `palettes.py`, `lic.py`, or `image_utils.py` as appropriate. Lines 6, 17, 23, 38, 44.
+
+- [ ] **Dead symbols flagged by ruff** — 8 unused imports/locals across touched files:
+  - `postprocess/masks.py` (dead local ~line 80)
+  - `postprocessing_panel.py` (unused import ~line 932)
+  - `app.py` (~line 79)
+  - `boundary_controls_panel.py` (~line 4)
+  - `texture_manager.py` (~line 208)
+
+- [ ] **Global enum params don't normalize stale saved values** — When a serialized enum value is no longer in `gf.choices`, the combo shows the first label but `pde_params` keeps the old value. Fix: sync the backing dict on rebuild, same as the LIC selector already does. `app.py` ~line 413-429.
+
+### Low
+
+- [ ] **Expression editor lost multiline inputs** — `expression_editor_mixin.py:174/189/204` uses single-line `add_input_text`; `main` used `multiline=True`. Restore if long expressions are expected.
+
+- [ ] **Cache status UI not refreshed after new controls invalidate state** — New PDE param/LIC field handlers clear the cache (`app.py:502`, `app.py:541`) but don't refresh cache status indicators. Stale "View Postprocessing" affordances can linger in edit mode.
+
+---
+
+## Post-Merge Follow-Ups
+
+### Architecture
+
+- [ ] **Namespace `pde_params` per PDE** — Currently a single shared dict on `Project`. When multiple PDEs define `global_fields`, values leak across PDE switches and inactive keys pollute cache fingerprints. Match the pattern already used by `pde_bc`.
+
+- [ ] **`field_pde.py` abstraction leak** — Relaxation still assumes Poisson-style boundary semantics (`_build_dirichlet_mask`/`_build_dirichlet_values`). The TODO at line 129 acknowledges this. New PDEs with different boundary semantics will need orchestration changes.
+
+- [ ] **LIC extractor fallback logic** — When `lic_field_name` is stale/invalid, `field_pde.py:165` falls back to `pde.extract_lic_field` instead of the first named extractor. Latent until a PDE populates `lic_field_extractors`.
+
+### Testing
+
+- [ ] **Add unit tests for `place_mask_in_grid()`** — Shared by 5 call sites (`postprocess/masks.py`, `biharmonic_pde.py`, `boundary_utils.py`, `poisson_pde.py`, `pipeline.py`), no dedicated test coverage. Parameterize around: clipping, offsets, zero-size masks, smoothing, boundary positions.
+
+- [ ] **Add regression tests for lightness expression bug fixes** — Commit `94b6ec2` fixed two stateful bugs (stale percentile cache, orphaned region `lightness_expr`) that depend on hidden state and are easy to reintroduce.
+
+### Cleanup
+
+- [ ] **Residual `hasattr`/`getattr` checks in PDE code** — Commit `629ce4b` claims cleanup but checks remain in `poisson_pde.py:44` and `biharmonic_pde.py:352`.
+
+- [ ] **Mixin dependency docs slightly inaccurate** — `postprocessing_panel.py:29` claims MRO ordering matters, but mixins don't use cooperative `super()`. `postprocessing_panel.py:33` says `color_mode` is initialized before mixin init but actual assignment is at line 60. `palette_editor_mixin.py:47` lists `palette_hist_height` as a dependency but doesn't read it.
+
+---
+
+## Verified Clean
+
+These areas were reviewed and found correct:
+
+- Solver consolidation (`_solve_poisson_extended`) — numerically equivalent to ~1e-14
+- `SolveContext` complete relative to old `SolveProject`
+- All `from elliptica.render` imports eliminated
+- All mask placement callers migrated to shared utility
+- No circular import risks introduced
+- Expression parser safety (AST-restricted, no injection vectors)
+- GPU import rewires (purely Python, no kernel changes)
+- Serialization backward compatible (`lic_field_name` defaults gracefully)
+- `import elliptica` passes
+- Mixin state sharing via `self` is coherent
+- `TYPE_CHECKING`-guarded imports avoid circular deps in mixins
