@@ -393,6 +393,11 @@ class CanvasController:
             if dpg.is_item_shown(export._overwrite_confirm_id):
                 return True
 
+        # Help modal
+        if self.app.help_modal_id is not None and dpg.does_item_exist(self.app.help_modal_id):
+            if dpg.is_item_shown(self.app.help_modal_id):
+                return True
+
         return False
 
     def is_menu_open(self) -> bool:
@@ -401,7 +406,7 @@ class CanvasController:
             return False
 
         # Menus: check active/hovered state
-        menu_tags = ["file_menu", "export_menu"]
+        menu_tags = ["file_menu", "export_menu", "help_menu"]
         for tag in menu_tags:
             if dpg.does_item_exist(tag):
                 active = dpg.is_item_active(tag)

@@ -10,12 +10,10 @@ from typing import Any, Dict
 from scipy.sparse import coo_matrix
 from pyamg import smoothed_aggregation_solver
 from ..poisson import DIRICHLET, NEUMANN, solve_poisson_system
-from .base import PDEDefinition, BoundaryParameter, BCField
+from .base import PDEDefinition, BCField, SolveContext
 from .poisson_pde import extract_electric_field
-from .boundary_utils import build_dirichlet_from_objects
-from scipy.ndimage import convolve, zoom
-from scipy.sparse.linalg import cg
-from ..mask_utils import blur_mask
+from scipy.ndimage import convolve
+from ..mask_utils import place_mask_in_grid
 
 # Interior boundary condition types for biharmonic
 BIHARMONIC_CLAMPED = 0          # φ = V, ∂ₙφ ≈ 0 (default, uses band extension)
@@ -138,7 +136,7 @@ def _apply_edge_dirichlet(mask: np.ndarray, values: np.ndarray, edge_bc: Dict[st
     return mask_out, values_out
 
 
-def _solve_poisson_with_interior_neumann(
+def _solve_poisson_extended(
     dirichlet_mask: np.ndarray,
     dirichlet_values: np.ndarray,
     neumann_mask: np.ndarray,
@@ -147,23 +145,33 @@ def _solve_poisson_with_interior_neumann(
     hx: float,
     hy: float,
     rhs_source: np.ndarray,
+    tol: float = 1e-10,
+    max_coarse: int = 30,
 ) -> np.ndarray:
-    """Solve Δφ = rhs_source with Dirichlet + interior Neumann boundaries.
+    """Extended Poisson solver with variable edge slopes and interior Neumann BCs.
 
-    This extends _solve_poisson_with_flux to handle interior objects with
-    Neumann BCs (∂ₙφ = g) using ghost cell approach.
+    This is the most general Poisson solver in the codebase, supporting:
+    - Variable (per-pixel) edge slopes for domain boundaries
+    - Interior Neumann boundaries (∂ₙφ = g) via ghost cell approach
+    - Arbitrary RHS source terms
+
+    For performance-critical cases without edge slopes or interior Neumann BCs,
+    use solve_poisson_system() from elliptica.poisson instead, which is
+    Numba-optimized.
 
     Args:
         dirichlet_mask: Boolean mask for Dirichlet pixels (φ = V)
         dirichlet_values: Values at Dirichlet pixels
         neumann_mask: Boolean mask for interior Neumann pixels
         neumann_values: Flux values (∂ₙφ) at Neumann pixels
-        edge_bc: Domain edge boundary conditions
-        hx, hy: Grid spacing
-        rhs_source: Source term (w field from first biharmonic solve)
+        edge_bc: Domain edge boundary conditions with optional per-edge slopes
+        hx, hy: Grid spacing in x and y directions
+        rhs_source: Source term (e.g., w field from first biharmonic solve)
+        tol: Solver tolerance (default 1e-10 for biharmonic accuracy)
+        max_coarse: Maximum coarse grid size for AMG solver
 
     Returns:
-        Solution φ field
+        Solution φ field as 2D array
     """
     h, w = dirichlet_mask.shape
     N = h * w
@@ -310,140 +318,13 @@ def _solve_poisson_with_interior_neumann(
             data.append(diag)
 
     A = coo_matrix((data, (row_idx, col_idx)), shape=(N, N), dtype=np.float64).tocsr()
-    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=30)
-    phi_flat = ml.solve(rhs, tol=1e-10, maxiter=500)
-    return phi_flat.reshape((h, w))
-
-
-def _solve_poisson_with_flux(
-    dirichlet_mask: np.ndarray,
-    dirichlet_values: np.ndarray,
-    edge_bc: Dict[str, Dict[str, Any]],
-    hx: float,
-    hy: float,
-    rhs_source: np.ndarray,
-) -> np.ndarray:
-    """Solve Δφ = rhs_source with Dirichlet mask/values and optional Neumann slopes."""
-    h, w = dirichlet_mask.shape
-    N = h * w
-    row_idx: list[int] = []
-    col_idx: list[int] = []
-    data: list[float] = []
-    rhs = -rhs_source.astype(np.float64).ravel()
-
-    def idx(i: int, j: int) -> int:
-        return j + i * w
-
-    top_vals = _edge_array(edge_bc["top"]["value"], w)
-    bottom_vals = _edge_array(edge_bc["bottom"]["value"], w)
-    left_vals = _edge_array(edge_bc["left"]["value"], h)
-    right_vals = _edge_array(edge_bc["right"]["value"], h)
-
-    top_slope = _edge_array(edge_bc["top"].get("slope", 0.0), w)
-    bottom_slope = _edge_array(edge_bc["bottom"].get("slope", 0.0), w)
-    left_slope = _edge_array(edge_bc["left"].get("slope", 0.0), h)
-    right_slope = _edge_array(edge_bc["right"].get("slope", 0.0), h)
-
-    for i in range(h):
-        for j in range(w):
-            k = idx(i, j)
-            if dirichlet_mask[i, j]:
-                row_idx.append(k)
-                col_idx.append(k)
-                data.append(1.0)
-                rhs[k] = dirichlet_values[i, j]
-                continue
-
-            diag = -4.0
-
-            # Up
-            if i - 1 >= 0:
-                if dirichlet_mask[i - 1, j]:
-                    rhs[k] -= dirichlet_values[i - 1, j]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i - 1, j))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["top"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= top_vals[j]
-                else:
-                    if h >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(1, j))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hy * top_slope[j])
-
-            # Down
-            if i + 1 < h:
-                if dirichlet_mask[i + 1, j]:
-                    rhs[k] -= dirichlet_values[i + 1, j]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i + 1, j))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["bottom"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= bottom_vals[j]
-                else:
-                    if h >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(h - 2, j))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hy * bottom_slope[j])
-
-            # Left
-            if j - 1 >= 0:
-                if dirichlet_mask[i, j - 1]:
-                    rhs[k] -= dirichlet_values[i, j - 1]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i, j - 1))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["left"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= left_vals[i]
-                else:
-                    if w >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(i, 1))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hx * left_slope[i])
-
-            # Right
-            if j + 1 < w:
-                if dirichlet_mask[i, j + 1]:
-                    rhs[k] -= dirichlet_values[i, j + 1]
-                else:
-                    row_idx.append(k)
-                    col_idx.append(idx(i, j + 1))
-                    data.append(1.0)
-            else:
-                bc = edge_bc["right"]
-                if bc["type"] == DIRICHLET:
-                    rhs[k] -= right_vals[i]
-                else:
-                    if w >= 2:
-                        row_idx.append(k)
-                        col_idx.append(idx(i, w - 2))
-                        data.append(1.0)
-                    rhs[k] -= (2.0 * hx * right_slope[i])
-
-            row_idx.append(k)
-            col_idx.append(k)
-            data.append(diag)
-
-    A = coo_matrix((data, (row_idx, col_idx)), shape=(N, N), dtype=np.float64).tocsr()
-    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=30)
-    phi_flat = ml.solve(rhs, tol=1e-10, maxiter=500)
+    ml = smoothed_aggregation_solver(A, symmetry="symmetric", max_coarse=max_coarse)
+    phi_flat = ml.solve(rhs, tol=tol, maxiter=500)
     return phi_flat.reshape((h, w))
 
 
 def _build_object_masks(
-    project: Any,
+    project: SolveContext,
     grid_h: int,
     grid_w: int,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
@@ -468,46 +349,21 @@ def _build_object_masks(
         return phi_mask, phi_values, w_mask, w_values, neumann_mask, neumann_values
 
     # Get domain dimensions and margin from project
-    if hasattr(project, 'domain_size'):
-        domain_w, domain_h = project.domain_size
-        grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
-        grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
-    else:
-        grid_scale_x = 1.0
-        grid_scale_y = 1.0
+    domain_w, domain_h = project.domain_size
+    grid_scale_x = grid_w / domain_w if domain_w > 0 else 1.0
+    grid_scale_y = grid_h / domain_h if domain_h > 0 else 1.0
 
-    margin_x, margin_y = project.margin if hasattr(project, 'margin') else (0, 0)
+    margin_x, margin_y = project.margin
 
     for obj in boundary_objects:
-        # Get position with margin adjustment
-        if hasattr(obj, 'position'):
-            x = (obj.position[0] + margin_x) * grid_scale_x
-            y = (obj.position[1] + margin_y) * grid_scale_y
-        else:
-            x = margin_x * grid_scale_x
-            y = margin_y * grid_scale_y
-
-        # Scale mask if needed
-        obj_mask = obj.mask
-        if not np.isclose(grid_scale_x, 1.0) or not np.isclose(grid_scale_y, 1.0):
-            obj_mask = zoom(obj_mask, (grid_scale_y, grid_scale_x), order=0)
-
-        # Apply edge smoothing if specified
-        if hasattr(obj, 'edge_smooth_sigma') and obj.edge_smooth_sigma > 0:
-            scale_factor = (grid_scale_x + grid_scale_y) / 2.0
-            scaled_sigma = obj.edge_smooth_sigma * scale_factor
-            obj_mask = blur_mask(obj_mask, scaled_sigma)
-
-        # Place mask in grid
-        mask_h, mask_w = obj_mask.shape
-        ix, iy = int(round(x)), int(round(y))
-        x0, y0 = max(0, ix), max(0, iy)
-        x1, y1 = min(ix + mask_w, grid_w), min(iy + mask_h, grid_h)
-
-        mx0, my0 = max(0, -ix), max(0, -iy)
-        mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-        mask_slice = obj_mask[my0:my1, mx0:mx1]
+        result = place_mask_in_grid(
+            obj.mask, obj.position, (grid_h, grid_w),
+            margin=(margin_x, margin_y), scale=(grid_scale_x, grid_scale_y),
+            edge_smooth_sigma=obj.edge_smooth_sigma,
+        )
+        if result is None:
+            continue
+        mask_slice, (y0, y1, x0, x1) = result
         mask_bool = mask_slice > 0.5
 
         # Get BC type and parameters
@@ -552,7 +408,7 @@ def _build_object_masks(
     return phi_mask, phi_values, w_mask, w_values, neumann_mask, neumann_values
 
 
-def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
+def solve_biharmonic(project: SolveContext) -> dict[str, np.ndarray]:
     """
     Solve Δ²φ = 0 using a mixed formulation with two Poisson solves.
 
@@ -645,31 +501,17 @@ def solve_biharmonic(project: Any) -> dict[str, np.ndarray]:
     )
 
     # Second solve: Δφ = w with Dirichlet φ on objects and edges
-    # For Flux objects, use Neumann handling
-    has_neumann = neumann_mask.any()
-
-    if has_neumann:
-        # Use the Neumann-aware solver
-        phi_field = _solve_poisson_with_interior_neumann(
-            phi_mask_final,
-            phi_values_final,
-            neumann_mask,
-            neumann_values,
-            edge_bc,
-            hx,
-            hy,
-            rhs_source=w_field.astype(float),
-        )
-    else:
-        # Original solver (no interior Neumann)
-        phi_field = _solve_poisson_with_flux(
-            phi_mask_final,
-            phi_values_final,
-            edge_bc,
-            hx,
-            hy,
-            rhs_source=w_field.astype(float),
-        )
+    # Always use the unified solver, passing empty Neumann masks if not needed
+    phi_field = _solve_poisson_extended(
+        phi_mask_final,
+        phi_values_final,
+        neumann_mask if neumann_mask.any() else np.zeros((grid_h, grid_w), dtype=bool),
+        neumann_values if neumann_mask.any() else np.zeros((grid_h, grid_w), dtype=float),
+        edge_bc,
+        hx,
+        hy,
+        rhs_source=w_field.astype(float),
+    )
 
     phi = phi_field.astype(np.float32)
 
@@ -682,6 +524,7 @@ BIHARMONIC_PDE = PDEDefinition(
     description="Solve biharmonic equation (clamped plate / Stokes flow)",
     solve=solve_biharmonic,
     extract_lic_field=extract_electric_field,  # Same E = -grad(phi)
+    solution_variables=[("phi", "Stream function")],
     boundary_params=[],  # Using boundary_fields instead
     boundary_fields=[
         BCField(

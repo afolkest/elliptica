@@ -9,9 +9,7 @@ import os
 from elliptica.types import Project
 from elliptica.field_pde import compute_field_pde
 from elliptica.postprocess.masks import rasterize_boundary_masks
-from elliptica.render import (
-    compute_lic,
-)
+from elliptica.lic import compute_lic
 
 
 MAX_RENDER_DIM = 32768
@@ -93,8 +91,8 @@ def perform_render(
     # Generate boundary mask for LIC blocking if enabled
     lic_mask = None
     if use_mask and project.boundary_objects:
-        from elliptica.mask_utils import blur_mask
         from scipy.ndimage import zoom
+        from elliptica.mask_utils import place_mask_in_grid
 
         # Check if PDE provided a dirichlet mask (e.g., biharmonic with extended band)
         # This ensures LIC blocking matches where the field is actually zero
@@ -114,29 +112,15 @@ def perform_render(
             scale_y = compute_h / domain_h if domain_h > 0 else 1.0
 
             for boundary in project.boundary_objects:
-                x = (boundary.position[0] + margin_physical) * scale_x
-                y = (boundary.position[1] + margin_physical) * scale_y
-
-                # Scale and blur mask (same logic as field.py)
-                if not np.isclose(scale_x, 1.0) or not np.isclose(scale_y, 1.0):
-                    scaled_mask = zoom(boundary.mask, (scale_y, scale_x), order=0)
-                else:
-                    scaled_mask = boundary.mask
-
-                scale_factor = (scale_x + scale_y) / 2.0
-                scaled_sigma = boundary.edge_smooth_sigma * scale_factor
-                scaled_mask = blur_mask(scaled_mask, scaled_sigma)
-
-                mask_h, mask_w = scaled_mask.shape
-                ix, iy = int(round(x)), int(round(y))
-                x0, y0 = max(0, ix), max(0, iy)
-                x1, y1 = min(ix + mask_w, compute_w), min(iy + mask_h, compute_h)
-
-                mx0, my0 = max(0, -ix), max(0, -iy)
-                mx1, my1 = mx0 + (x1 - x0), my0 + (y1 - y0)
-
-                mask_slice = scaled_mask[my0:my1, mx0:mx1]
-                lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
+                result = place_mask_in_grid(
+                    boundary.mask, boundary.position, (compute_h, compute_w),
+                    margin=(margin_physical, margin_physical),
+                    scale=(scale_x, scale_y),
+                    edge_smooth_sigma=boundary.edge_smooth_sigma,
+                )
+                if result is not None:
+                    mask_slice, (y0, y1, x0, x1) = result
+                    lic_mask[y0:y1, x0:x1] |= (mask_slice > 0.5)
 
     if lic_mask is not None:
         mask_pixels = int(lic_mask.sum())

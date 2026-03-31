@@ -9,6 +9,7 @@ import numpy as np
 from scipy.ndimage import zoom
 from elliptica.types import Project
 from elliptica.pde import PDERegistry
+from elliptica.pde.base import SolveContext
 from elliptica.poisson import DIRICHLET
 from elliptica import defaults
 from elliptica.pde.relaxation import build_relaxation_mask, relax_potential_band
@@ -45,14 +46,11 @@ def compute_field_pde(
         - solution_dict: Dictionary of solution arrays from PDE solver
         - (ex, ey): Extracted vector field for LIC visualization
     """
-    # Get active PDE definition
-    pde = PDERegistry.get_active()
-    if getattr(pde, "bc_fields", None):
+    # Get PDE definition from the project snapshot (not the global singleton)
+    pde = PDERegistry.get(project.pde_type)
+    if pde.bc_fields:
         bc_map = resolve_bc_map(project, pde)
         legacy_bc = bc_map_to_legacy(bc_map, DIRICHLET)
-        # Persist resolved BCs for this PDE on the project (for UI/state roundtrips)
-        if hasattr(project, "pde_bc"):
-            project.pde_bc[pde.name] = bc_map
     else:
         bc_map = {}
         legacy_bc = {
@@ -71,33 +69,30 @@ def compute_field_pde(
     field_w = max(1, int(round(domain_w * scale)))
     field_h = max(1, int(round(domain_h * scale)))
 
-    # Create a temporary project-like object with the solve dimensions
-    # This is a bit of a hack but maintains compatibility
-    class SolveProject:
-        def __init__(self, original_project, solve_shape, margin, domain_size, bc_map, legacy_bc):
-            self.boundary_objects = original_project.boundary_objects
-            self.shape = solve_shape
-            self.margin = margin  # (margin_x, margin_y) tuple
-            self.domain_size = domain_size  # (domain_w, domain_h) tuple
-            self.bc = bc_map  # Rich BC map
-            self.boundary_conditions = {
+    def _make_solve_context(original_project, solve_shape, margin, domain_size, bc_map, legacy_bc):
+        return SolveContext(
+            boundary_objects=original_project.boundary_objects,
+            shape=solve_shape,
+            margin=margin,
+            domain_size=domain_size,
+            bc=bc_map,
+            boundary_conditions={
                 'top': legacy_bc.get('top', boundary_top),
                 'bottom': legacy_bc.get('bottom', boundary_bottom),
                 'left': legacy_bc.get('left', boundary_left),
                 'right': legacy_bc.get('right', boundary_right),
-            }
-            self.solve_scale = solve_scale
-            self.pde_params = original_project.pde_params
-            # Pass through other attributes
-            self.canvas_resolution = original_project.canvas_resolution
-            self.boundary_objects = original_project.boundary_objects
+            },
+            solve_scale=solve_scale,
+            pde_params=original_project.pde_params,
+            canvas_resolution=original_project.canvas_resolution,
+        )
 
     # Handle resolution scaling
     if solve_scale < 0.999:
         # Solve at lower resolution
         solve_w = max(1, int(round(field_w * solve_scale)))
         solve_h = max(1, int(round(field_h * solve_scale)))
-        solve_project = SolveProject(project, (solve_h, solve_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
+        solve_project = _make_solve_context(project, (solve_h, solve_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
 
         # Solve PDE at lower resolution
         solution_lowres = pde.solve(solve_project)
@@ -120,57 +115,60 @@ def compute_field_pde(
                 # For non-2D arrays, just copy
                 solution[key] = array
 
-        # Apply relaxation if enabled (only for 'phi' field currently)
-        if "phi" in solution:
+        # Full-resolution context for relaxation and LIC extraction
+        full_res_context = _make_solve_context(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
+
+        # Apply relaxation if enabled
+        if pde.primary_field in solution:
 
             if (
                 defaults.SOLVE_RELAX_ITERS > 0
                 and defaults.SOLVE_RELAX_BAND > 0
             ):
 
-                
-                # We need to rebuild the Dirichlet mask at full resolution to know where to relax
-                # This is a bit expensive but necessary for good previews
-                # Create a temporary project for full-res mask generation
-                full_res_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
-                
-                # TODO: This assumes Poisson PDE internals (dirichlet_mask). 
+                # TODO: This assumes Poisson PDE internals (dirichlet_mask).
                 # Ideally the PDE solver would expose a "get_boundary_mask" method.
-                # For now, we'll use a helper to generate it.
-                dirichlet_mask = _build_dirichlet_mask(full_res_project)
-                
+                dirichlet_mask = _build_dirichlet_mask(full_res_context)
+
                 relax_mask = build_relaxation_mask(
                     dirichlet_mask,
                     defaults.SOLVE_RELAX_BAND,
                 )
-                
+
                 if np.any(relax_mask):
-                    phi = solution["phi"]
+                    phi = solution[pde.primary_field]
                     # Ensure contiguous array for Numba
                     if not phi.flags['C_CONTIGUOUS']:
                         phi = np.ascontiguousarray(phi)
-                        
+
                     relax_potential_band(
                         phi,
                         relax_mask,
                         defaults.SOLVE_RELAX_ITERS,
                         float(defaults.SOLVE_RELAX_OMEGA),
                     )
-                    
+
                     # Re-enforce boundary conditions after relaxation
-                    # (We need values for this, which is another expense. 
-                    #  Optimization: maybe skip this if relaxation is gentle enough?)
-                    dirichlet_values = _build_dirichlet_values(full_res_project)
+                    dirichlet_values = _build_dirichlet_values(full_res_context)
                     phi[dirichlet_mask] = dirichlet_values[dirichlet_mask]
-                    solution["phi"] = phi
+                    solution[pde.primary_field] = phi
+
+        # Use full-res context so extractors see shapes matching the solution arrays
+        solve_project = full_res_context
 
     else:
         # Solve at full resolution
-        solve_project = SolveProject(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
+        solve_project = _make_solve_context(project, (field_h, field_w), margin, (domain_w, domain_h), bc_map, legacy_bc)
         solution = pde.solve(solve_project)
 
     # Extract LIC field from solution
-    ex, ey = pde.extract_lic_field(solution, solve_project)
+    extractors = pde.lic_field_extractors
+    if extractors:
+        field_name = project.lic_field_name or next(iter(extractors))
+        extract_fn = extractors.get(field_name, pde.extract_lic_field)
+    else:
+        extract_fn = pde.extract_lic_field
+    ex, ey = extract_fn(solution, solve_project)
 
     return solution, (ex, ey)
 

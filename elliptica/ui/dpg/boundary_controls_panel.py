@@ -1,7 +1,6 @@
 """Boundary controls panel for Elliptica UI - generic parameter sliders."""
 
 from typing import Optional, Dict, Any, TYPE_CHECKING
-from elliptica.app import actions
 from elliptica.app.state_manager import StateKey
 from elliptica.pde import PDERegistry
 
@@ -83,7 +82,7 @@ class BoundaryControlsPanel:
         # Get active PDE definition to know what sliders to build
         pde = PDERegistry.get_active()
         params_meta = pde.boundary_params
-        fields_meta = getattr(pde, 'boundary_fields', [])
+        fields_meta = pde.boundary_fields
 
         # Cache field definitions
         self.field_defs = {f.name: f for f in fields_meta}
@@ -236,7 +235,7 @@ class BoundaryControlsPanel:
                     current_short = lbl.split(" (")[0] if " (" in lbl else lbl
                     break
 
-            combo_id = dpg.add_combo(
+            dpg.add_combo(
                 label="",
                 items=short_labels,
                 default_value=current_short,
@@ -321,6 +320,9 @@ class BoundaryControlsPanel:
         with self.app.state_lock:
             if idx < len(self.app.state.project.boundary_objects):
                 self.app.state.project.boundary_objects[idx].params[field_name] = value
+            self.app.state.field_dirty = True
+            self.app.state.render_dirty = True
+            self.app.state.clear_render_cache()
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {field_name} = {value}")
@@ -378,7 +380,7 @@ class BoundaryControlsPanel:
                 if field_def is None or not dpg.does_item_exist(group_id):
                     continue
 
-                visible_when = getattr(field_def, 'visible_when', None)
+                visible_when = field_def.visible_when
                 if visible_when is None:
                     dpg.configure_item(group_id, show=True)
                 else:
@@ -423,6 +425,9 @@ class BoundaryControlsPanel:
                 # Update params dict directly
                 # TODO: Add an action for this to support undo/redo
                 self.app.state.project.boundary_objects[idx].params[param_name] = value
+            self.app.state.field_dirty = True
+            self.app.state.render_dirty = True
+            self.app.state.clear_render_cache()
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} {param_name} = {value:.3f}")
@@ -439,6 +444,9 @@ class BoundaryControlsPanel:
         with self.app.state_lock:
             if idx < len(self.app.state.project.boundary_objects):
                 self.app.state.project.boundary_objects[idx].edge_smooth_sigma = value
+            self.app.state.field_dirty = True
+            self.app.state.render_dirty = True
+            self.app.state.clear_render_cache()
 
         self.app.canvas_renderer.mark_dirty()
         dpg.set_value("status_text", f"Obj {idx + 1} edge smoothing = {value:.1f} px")

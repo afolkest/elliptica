@@ -8,7 +8,7 @@ from elliptica.gpu import GPUContext
 from elliptica.gpu.pipeline import build_base_rgb_gpu
 from elliptica.gpu.overlay import apply_region_overlays_gpu
 from elliptica.gpu.smear import apply_region_smear_gpu, _has_any_smear_enabled
-from elliptica.render import _get_palette_lut
+from elliptica.palettes import _get_palette_lut
 
 if TYPE_CHECKING:
     from elliptica.colorspace import ColorConfig
@@ -212,6 +212,10 @@ def apply_full_postprocess_gpu(
     # Persist the latest clip range and percentile bounds directly on the tensor for future reuse.
     scalar_tensor._lic_cached_clip_range = (float(clip_low_percent), float(clip_high_percent))
     scalar_tensor._lic_cached_percentiles = used_percentiles
+
+    # Clear percentile cache to avoid stale values from id(tensor) reuse
+    from elliptica.expr.functions import clear_percentile_cache
+    clear_percentile_cache()
 
     # === ColorConfig path: expression-based OKLCH coloring ===
     if color_config is not None:

@@ -76,7 +76,6 @@ from elliptica.ui.dpg.shape_dialog import ShapeDialogController
 from elliptica.ui.dpg.fonts import setup_fonts
 from elliptica.ui.dpg.theme import apply_theme
 from elliptica.types import BoundaryObject, Project, clone_boundary_object
-from elliptica import defaults
 
 
 BACKSPACE_KEY = None
@@ -117,7 +116,10 @@ def _snapshot_project(project: Project) -> Project:
         boundary_left=project.boundary_left,
         boundary_right=project.boundary_right,
         pde_type=project.pde_type,
+        pde_params=copy.deepcopy(project.pde_params),
         pde_bc=copy.deepcopy(project.pde_bc),
+        lic_field_name=project.lic_field_name,
+        next_boundary_id=project.next_boundary_id,
     )
 
 
@@ -141,6 +143,9 @@ class EllipticaApp:
     canvas_size_modal_id: Optional[int] = None
     canvas_width_input_id: Optional[int] = None
     canvas_height_input_id: Optional[int] = None
+    global_param_group_id: Optional[int] = None
+    lic_field_group_id: Optional[int] = None
+    help_modal_id: Optional[int] = None
 
     pde_label_map: Dict[str, str] = field(default_factory=dict)
 
@@ -217,11 +222,12 @@ class EllipticaApp:
         if not name:
             return
 
-        PDERegistry.set_active(name)
         with self.state_lock:
+            PDERegistry.set_active(name)
             self.state.project.pde_type = name
+            self.state.project.lic_field_name = ""
             active_pde = PDERegistry.get_active()
-            if getattr(active_pde, "bc_fields", None):
+            if active_pde.bc_fields:
                 # Ensure BC map exists for this PDE and sync legacy fields
                 bc_map = resolve_bc_map(self.state.project, active_pde)
                 self.state.project.pde_bc[name] = bc_map
@@ -235,6 +241,8 @@ class EllipticaApp:
             self.state.clear_render_cache()
 
         self.boundary_controls.rebuild_controls()
+        self._rebuild_global_param_controls()
+        self._rebuild_lic_field_selector()
         self.postprocess_panel._update_pde_specific_vars_display()
         if self.pde_combo_id is not None:
             dpg.set_value(self.pde_combo_id, label)
@@ -277,8 +285,10 @@ class EllipticaApp:
                                  tag="quick_save_menu_item")
                 dpg.add_menu_item(label="Export Image...", callback=self.image_export.open_export_dialog,
                                  tag="export_menu_item")
+            with dpg.menu(label="Help", tag="help_menu"):
+                dpg.add_menu_item(label="Shortcuts & Help", callback=self._open_help_modal)
 
-        with dpg.handler_registry() as handler_reg:
+        with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
 
         # Set viewport resize callback
@@ -298,6 +308,8 @@ class EllipticaApp:
                         width=250,
                     )
                     dpg.add_spacer(height=6)
+                    self.global_param_group_id = dpg.add_group()
+                    self.lic_field_group_id = dpg.add_group()
                     with dpg.group(horizontal=True):
                         dpg.add_button(label="Load shape", callback=self.file_io.open_boundary_dialog, width=100)
                         dpg.add_button(label="Create shape", callback=self.shape_dialog.show_dialog, width=100)
@@ -367,11 +379,168 @@ class EllipticaApp:
         self.render_orchestrator._ensure_loading_modal()
         self._update_canvas_inputs()
         self.boundary_controls.rebuild_controls()
+        self._rebuild_global_param_controls()
+        self._rebuild_lic_field_selector()
 
         # Wire subscribers that manipulate DPG widgets (must be after widget creation)
         self.state_manager.subscribe(StateKey.VIEW_MODE, self._on_view_mode_changed)
         self.boundary_controls.wire_subscribers()
         self.postprocess_panel.wire_subscribers()
+
+    # ------------------------------------------------------------------
+    # Global PDE parameter controls
+    # ------------------------------------------------------------------
+    def _rebuild_global_param_controls(self) -> None:
+        """Rebuild global PDE parameter widgets from active PDE's global_fields."""
+        if dpg is None or self.global_param_group_id is None:
+            return
+
+        # Clear existing children
+        dpg.delete_item(self.global_param_group_id, children_only=True)
+
+        pde = PDERegistry.get_active()
+        global_fields = pde.global_fields
+        if not global_fields:
+            return
+
+        CONTROL_WIDTH = 180
+
+        with self.state_lock:
+            params = self.state.project.pde_params
+            # Populate defaults for any missing fields while holding the lock
+            for gf in global_fields:
+                if gf.name not in params:
+                    params[gf.name] = gf.default
+            # Snapshot current values for widget creation
+            current_values = {gf.name: params[gf.name] for gf in global_fields}
+
+        for gf in global_fields:
+            current_val = current_values[gf.name]
+
+            group_id = dpg.add_group(horizontal=True, parent=self.global_param_group_id)
+            dpg.add_spacer(width=15, parent=group_id)
+
+            if gf.field_type == "enum":
+                short_labels = []
+                label_to_full = {}
+                for lbl, _ in gf.choices:
+                    short = lbl.split(" (")[0] if " (" in lbl else lbl
+                    short_labels.append(short)
+                    label_to_full[short] = lbl
+
+                current_short = short_labels[0] if short_labels else ""
+                for lbl, val in gf.choices:
+                    if val == current_val:
+                        current_short = lbl.split(" (")[0] if " (" in lbl else lbl
+                        break
+
+                dpg.add_combo(
+                    label="",
+                    items=short_labels,
+                    default_value=current_short,
+                    width=CONTROL_WIDTH,
+                    callback=self._on_global_param_changed,
+                    user_data={"field": gf.name, "label_map": label_to_full, "choices": gf.choices},
+                    parent=group_id,
+                )
+            elif gf.field_type == "bool":
+                dpg.add_checkbox(
+                    label="",
+                    default_value=bool(current_val),
+                    callback=self._on_global_param_changed,
+                    user_data={"field": gf.name},
+                    parent=group_id,
+                )
+            elif gf.field_type == "int":
+                dpg.add_input_int(
+                    label="",
+                    default_value=int(current_val),
+                    width=CONTROL_WIDTH,
+                    min_value=int(gf.min_value) if gf.min_value is not None else 0,
+                    max_value=int(gf.max_value) if gf.max_value is not None else 2147483647,
+                    callback=self._on_global_param_changed,
+                    user_data={"field": gf.name},
+                    parent=group_id,
+                )
+            else:  # float
+                dpg.add_slider_float(
+                    label="",
+                    default_value=float(current_val),
+                    min_value=gf.min_value if gf.min_value is not None else -1e9,
+                    max_value=gf.max_value if gf.max_value is not None else 1e9,
+                    format="%.3f",
+                    width=CONTROL_WIDTH,
+                    callback=self._on_global_param_changed,
+                    user_data={"field": gf.name},
+                    parent=group_id,
+                )
+
+            field_label = dpg.add_text(gf.display_name, parent=group_id)
+            if gf.description:
+                with dpg.tooltip(field_label):
+                    dpg.add_text(gf.description)
+
+    def _on_global_param_changed(self, sender, app_data, user_data) -> None:
+        """Handle change to a global PDE parameter widget."""
+        field_name = user_data["field"]
+
+        # Resolve enum values
+        if "choices" in user_data:
+            label_map = user_data["label_map"]
+            full_label = label_map.get(app_data, app_data)
+            resolved = None
+            for lbl, val in user_data["choices"]:
+                if lbl == full_label or lbl.split(" (")[0] == app_data:
+                    resolved = val
+                    break
+            if resolved is None:
+                return
+            app_data = resolved
+
+        with self.state_lock:
+            self.state.project.pde_params[field_name] = app_data
+            self.state.field_dirty = True
+            self.state.render_dirty = True
+            self.state.clear_render_cache()
+
+    # ------------------------------------------------------------------
+    # LIC vector field selector
+    # ------------------------------------------------------------------
+    def _rebuild_lic_field_selector(self) -> None:
+        """Rebuild the LIC field dropdown from active PDE's lic_field_extractors."""
+        if dpg is None or self.lic_field_group_id is None:
+            return
+
+        dpg.delete_item(self.lic_field_group_id, children_only=True)
+
+        pde = PDERegistry.get_active()
+        extractors = pde.lic_field_extractors
+        if not extractors:
+            return
+
+        names = list(extractors.keys())
+        with self.state_lock:
+            current = self.state.project.lic_field_name
+            if current not in names:
+                current = names[0]
+                self.state.project.lic_field_name = current
+
+        dpg.add_combo(
+            label="Vector field",
+            items=names,
+            default_value=current,
+            width=180,
+            callback=self._on_lic_field_changed,
+            parent=self.lic_field_group_id,
+        )
+
+    def _on_lic_field_changed(self, sender, app_data, user_data=None) -> None:
+        """Handle vector field selector change."""
+        with self.state_lock:
+            self.state.project.lic_field_name = app_data
+            self.state.field_dirty = True
+            self.state.render_dirty = True
+            self.state.clear_render_cache()
 
     # ------------------------------------------------------------------
     # Canvas window layout
@@ -583,6 +752,71 @@ class EllipticaApp:
         self.canvas_controller._clamp_pan()
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
+
+    def _open_help_modal(self, sender=None, app_data=None) -> None:
+        """Open the help/shortcuts modal."""
+        if dpg is None:
+            return
+
+        if self.help_modal_id is None:
+            modal_w, modal_h = 480, 460
+            with dpg.window(
+                label="Shortcuts & Help",
+                modal=True,
+                show=False,
+                tag="help_modal",
+                no_resize=True,
+                width=modal_w,
+                height=modal_h,
+            ) as modal:
+                self.help_modal_id = modal
+
+                dpg.add_text("Canvas Navigation", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Scroll                Zoom in/out")
+                dpg.add_text("Space + Drag          Pan canvas")
+                dpg.add_text("Home / Ctrl+0         Reset zoom to 100%")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Edit Mode", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Click                 Select boundary")
+                dpg.add_text("Shift+Click           Multi-select")
+                dpg.add_text("Drag                  Move selected boundaries")
+                dpg.add_text("Shift+Drag (empty)    Box select (additive)")
+                dpg.add_text("Ctrl+Scroll           Scale selected boundaries")
+                dpg.add_text("Backspace             Delete selected")
+                dpg.add_text("Ctrl+C / Ctrl+V       Copy / Paste")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Render Mode", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Click                 Select region for colorization")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Loading Shapes", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Shapes are loaded from PNG images. The alpha channel")
+                dpg.add_text("is used as the boundary mask (opaque = boundary).")
+                dpg.add_text("")
+                dpg.add_text("To define an interior region, provide a second PNG")
+                dpg.add_text("with '_interior' appended to the filename:")
+                dpg.add_text("  shape.png            Surface mask")
+                dpg.add_text("  shape_interior.png   Interior region", color=(160, 200, 160))
+
+                dpg.add_spacer(height=12)
+                dpg.add_button(label="Close", callback=self._close_help_modal, width=80)
+
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        dpg.configure_item(self.help_modal_id, pos=[(viewport_width - 480) // 2, (viewport_height - 460) // 2])
+        dpg.configure_item(self.help_modal_id, show=True)
+
+    def _close_help_modal(self, sender=None, app_data=None) -> None:
+        """Close help modal."""
+        if dpg is None or self.help_modal_id is None:
+            return
+        dpg.configure_item(self.help_modal_id, show=False)
 
     def _reset_zoom(self, sender=None, app_data=None) -> None:
         """Reset zoom and pan to default (same as Home key)."""

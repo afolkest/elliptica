@@ -9,7 +9,7 @@ from PIL import Image
 if TYPE_CHECKING:
     from elliptica.ui.dpg.app import EllipticaApp
 
-from elliptica.render import list_palette_colormap_colors
+from elliptica.palettes import list_palette_colormap_colors
 
 try:
     import dearpygui.dearpygui as dpg  # type: ignore
@@ -205,7 +205,6 @@ class TextureManager:
 
     def refresh_render_texture(self) -> None:
         """Update render texture with postprocessed image from cache."""
-        from PIL import Image
         from elliptica.expr import ExprError
 
         if dpg is None or self.texture_registry_id is None:
@@ -220,7 +219,7 @@ class TextureManager:
             cache = self.app.state.render_cache
             if cache is None or cache.result is None:
                 # Fallback to grayscale if no render
-                from elliptica.render import array_to_pil
+                from elliptica.image_utils import array_to_pil
                 arr = np.zeros((32, 32), dtype=np.float32)
                 pil_img = array_to_pil(arr, use_color=False)
                 # Convert PIL image to texture data

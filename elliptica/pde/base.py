@@ -1,6 +1,7 @@
 """
 Base classes for PDE definitions.
 """
+from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable, Any
@@ -9,7 +10,7 @@ import numpy as np
 
 @dataclass
 class BCField:
-    """Metadata for a boundary condition field (per edge).
+    """Metadata for a UI-controlled field (boundary edge, boundary object, or global parameter).
 
     Attributes:
         visible_when: Optional dict mapping field_name -> required_value.
@@ -52,10 +53,10 @@ class PDEDefinition:
     description: str
 
     # Core computation functions
-    solve: Callable[[Any], dict[str, np.ndarray]]
+    solve: Callable[[SolveContext], dict[str, np.ndarray]]
     """Solve the PDE, returning dict of solution arrays."""
 
-    extract_lic_field: Callable[[dict[str, np.ndarray], Any], tuple[np.ndarray, np.ndarray]]
+    extract_lic_field: Callable[[dict[str, np.ndarray], SolveContext], tuple[np.ndarray, np.ndarray]]
     """Extract (ex, ey) vector field for LIC from solution dict."""
 
     # UI Metadata
@@ -72,3 +73,36 @@ class PDEDefinition:
     # Rich fields for interior boundary objects
     boundary_fields: list[BCField] = field(default_factory=list)
     """Fields for interior boundary objects (enums, floats, etc.). Supplements boundary_params."""
+
+    # Solution variable metadata for expression editor UI
+    solution_variables: list[tuple[str, str]] = field(default_factory=list)
+    """Variables exposed by this PDE's solver, as (name, description) pairs."""
+
+    # Global PDE parameters (e.g. viscosity). Values stored in Project.pde_params.
+    # Note: BCField.visible_when is not yet supported for global_fields.
+    global_fields: list[BCField] = field(default_factory=list)
+    """Global PDE parameters shown as controls in the main UI panel."""
+
+    # Primary solution field name (used for relaxation in field_pde.py)
+    primary_field: str = "phi"
+
+    # Named vector field extractors for LIC visualization
+    lic_field_extractors: dict[str, Callable[[dict[str, np.ndarray], SolveContext], tuple[np.ndarray, np.ndarray]]] = field(default_factory=dict)
+    """Named vector field extractors. If populated, UI shows dropdown. If empty, uses extract_lic_field."""
+
+
+@dataclass
+class SolveContext:
+    """Context passed to PDE solvers.
+
+    May differ from the Project (e.g. reduced resolution for preview solves).
+    """
+    boundary_objects: list
+    shape: tuple[int, int]
+    margin: tuple[float, float]
+    domain_size: tuple[float, float]
+    bc: dict
+    boundary_conditions: dict
+    solve_scale: float
+    pde_params: dict
+    canvas_resolution: tuple[int, int]

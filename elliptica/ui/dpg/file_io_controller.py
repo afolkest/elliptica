@@ -178,10 +178,9 @@ class FileIOController:
         if dpg is None:
             return
 
-        # Reset PDERegistry to default (poisson)
-        PDERegistry.set_active("poisson")
-
         with self.app.state_lock:
+            # Reset PDERegistry to default (poisson)
+            PDERegistry.set_active("poisson")
             # Reset to default state
             from elliptica.app.core import AppState
             new_state = AppState()
@@ -218,6 +217,8 @@ class FileIOController:
         self.app._resize_canvas_window()  # Ensure drawlist matches window
         self.app._update_canvas_transform()
         self.app.boundary_controls.rebuild_controls()
+        self.app._rebuild_global_param_controls()
+        self.app._rebuild_lic_field_selector()
         self.sync_ui_from_state()
         self.app.cache_panel.update_cache_status_display()
 
@@ -427,10 +428,9 @@ class FileIOController:
             cache_path = project_path.with_suffix('.elliptica.cache')
             loaded_cache = load_render_cache(str(cache_path), new_state.project)
 
-            # Sync PDERegistry to loaded project's PDE type
-            PDERegistry.set_active(new_state.project.pde_type)
-
             with self.app.state_lock:
+                # Sync PDERegistry to loaded project's PDE type
+                PDERegistry.set_active(new_state.project.pde_type)
                 # Replace current state with loaded state
                 self.app.state.project = new_state.project
                 self.app.state.render_settings = new_state.render_settings
@@ -464,6 +464,8 @@ class FileIOController:
             self.app._resize_canvas_window()  # Ensure drawlist matches window
             self.app._update_canvas_transform()  # Recalculate scale for new canvas resolution
             self.app.boundary_controls.rebuild_controls()
+            self.app._rebuild_global_param_controls()
+            self.app._rebuild_lic_field_selector()
             self.sync_ui_from_state()
             self.app.cache_panel.update_cache_status_display()
 

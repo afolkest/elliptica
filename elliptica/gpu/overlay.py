@@ -5,7 +5,7 @@ from typing import Tuple
 
 from elliptica.gpu import GPUContext
 from elliptica.gpu.pipeline import build_base_rgb_gpu
-from elliptica.render import _get_palette_lut
+from elliptica.palettes import _get_palette_lut
 
 
 def _apply_lightness_expr_to_rgb(
