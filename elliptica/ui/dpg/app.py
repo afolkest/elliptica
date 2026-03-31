@@ -145,6 +145,7 @@ class EllipticaApp:
     canvas_height_input_id: Optional[int] = None
     global_param_group_id: Optional[int] = None
     lic_field_group_id: Optional[int] = None
+    help_modal_id: Optional[int] = None
 
     pde_label_map: Dict[str, str] = field(default_factory=dict)
 
@@ -284,6 +285,8 @@ class EllipticaApp:
                                  tag="quick_save_menu_item")
                 dpg.add_menu_item(label="Export Image...", callback=self.image_export.open_export_dialog,
                                  tag="export_menu_item")
+            with dpg.menu(label="Help", tag="help_menu"):
+                dpg.add_menu_item(label="Shortcuts & Help", callback=self._open_help_modal)
 
         with dpg.handler_registry():
             dpg.add_mouse_wheel_handler(callback=self._on_mouse_wheel)
@@ -749,6 +752,71 @@ class EllipticaApp:
         self.canvas_controller._clamp_pan()
         self._close_canvas_size_modal()
         dpg.set_value("status_text", f"Canvas resized to {width}×{height}")
+
+    def _open_help_modal(self, sender=None, app_data=None) -> None:
+        """Open the help/shortcuts modal."""
+        if dpg is None:
+            return
+
+        if self.help_modal_id is None:
+            modal_w, modal_h = 480, 460
+            with dpg.window(
+                label="Shortcuts & Help",
+                modal=True,
+                show=False,
+                tag="help_modal",
+                no_resize=True,
+                width=modal_w,
+                height=modal_h,
+            ) as modal:
+                self.help_modal_id = modal
+
+                dpg.add_text("Canvas Navigation", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Scroll                Zoom in/out")
+                dpg.add_text("Space + Drag          Pan canvas")
+                dpg.add_text("Home / Ctrl+0         Reset zoom to 100%")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Edit Mode", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Click                 Select boundary")
+                dpg.add_text("Shift+Click           Multi-select")
+                dpg.add_text("Drag                  Move selected boundaries")
+                dpg.add_text("Shift+Drag (empty)    Box select (additive)")
+                dpg.add_text("Ctrl+Scroll           Scale selected boundaries")
+                dpg.add_text("Backspace             Delete selected")
+                dpg.add_text("Ctrl+C / Ctrl+V       Copy / Paste")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Render Mode", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Click                 Select region for colorization")
+
+                dpg.add_spacer(height=8)
+                dpg.add_text("Loading Shapes", color=(180, 210, 255))
+                dpg.add_separator()
+                dpg.add_text("Shapes are loaded from PNG images. The alpha channel")
+                dpg.add_text("is used as the boundary mask (opaque = boundary).")
+                dpg.add_text("")
+                dpg.add_text("To define an interior region, provide a second PNG")
+                dpg.add_text("with '_interior' appended to the filename:")
+                dpg.add_text("  shape.png            Surface mask")
+                dpg.add_text("  shape_interior.png   Interior region", color=(160, 200, 160))
+
+                dpg.add_spacer(height=12)
+                dpg.add_button(label="Close", callback=self._close_help_modal, width=80)
+
+        viewport_width = dpg.get_viewport_width()
+        viewport_height = dpg.get_viewport_height()
+        dpg.configure_item(self.help_modal_id, pos=[(viewport_width - 480) // 2, (viewport_height - 460) // 2])
+        dpg.configure_item(self.help_modal_id, show=True)
+
+    def _close_help_modal(self, sender=None, app_data=None) -> None:
+        """Close help modal."""
+        if dpg is None or self.help_modal_id is None:
+            return
+        dpg.configure_item(self.help_modal_id, show=False)
 
     def _reset_zoom(self, sender=None, app_data=None) -> None:
         """Reset zoom and pan to default (same as Home key)."""
