@@ -6,16 +6,16 @@
 
 ## What is this?
 
-Elliptica is a program for making 2d visual arts using electrostatics (the Laplace equation).  You place objects on a canvas, impose voltage boundary conditions on them, and then solve a partial differential equation system, and visualize the resulting vector fields using a technique known as Line Integral Convolution (LIC).
+Elliptica is a program for making 2d visual arts using electrostatics (the Laplace equation).  You place objects on a canvas, impose voltage boundary conditions on them, solve a partial differential equation, and then visualize the resulting vector fields using a technique known as Line Integral Convolution (LIC).
 
 The software contains various useful things that lets you iterate on your pieces without leaving the software, such as OKLCH color palette creation and postprocessing effects.
 
-## Not actively developed, buggy
+## This is a prototype: not actively developed, buggy, but fun
 
-This was my first attempt at a larger project 100% coded by LLMs and it shows.
+This was my first attempt at a larger project 100% coded by LLMs and if you look at the code it shows.
 
-I'm doing a complete low level rewrite of this software in Metal, since the framework choices made here (DearPyGui + PyTorch) are fundamentally incompatible with real time interactivity, given the 
-algorithms we work with here. I will likely not be adding any more features in this prototype, although I will happily fix reported bugs (of which there are many). 
+I've moved on to doing a complete low level rewrite in Metal, since the framework choices made here (DearPyGui + PyTorch) are fundamentally incompatible with real time interactivity (given the 
+algorithms we're working with here). I will not be adding any more features in the prototype, although I'm open to fix reported bugs. 
 
 ## Quick Start
 
