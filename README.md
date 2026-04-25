@@ -41,5 +41,5 @@ python -m elliptica.ui.dpg
 ```
 
 ## License
+MIT.
 
-AGPL-3.0. See [LICENSE](LICENSE).
